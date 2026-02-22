@@ -41,6 +41,7 @@ func (a *GeminiAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
+	var totalInput, totalOutput int64
 	start := time.Now()
 
 	userMsg := genai.Text(prompt)
@@ -51,10 +52,18 @@ func (a *GeminiAdapter) RunAgent(
 		resp, err := chat.SendMessage(ctx, currentMsg...)
 		if err != nil {
 			return ModelResponse{
-				ModelID:   a.modelID,
-				LatencyMS: time.Since(start).Milliseconds(),
-				Error:     err.Error(),
+				ModelID:      a.modelID,
+				LatencyMS:    time.Since(start).Milliseconds(),
+				InputTokens:  totalInput,
+				OutputTokens: totalOutput,
+				CostUSD:      CostUSD(a.modelID, totalInput, totalOutput),
+				Error:        err.Error(),
 			}, err
+		}
+
+		if resp.UsageMetadata != nil {
+			totalInput += int64(resp.UsageMetadata.PromptTokenCount)
+			totalOutput += int64(resp.UsageMetadata.CandidatesTokenCount)
 		}
 
 		candidate := resp.Candidates[0]
@@ -103,6 +112,9 @@ func (a *GeminiAdapter) RunAgent(
 		ModelID:        a.modelID,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
+		InputTokens:    totalInput,
+		OutputTokens:   totalOutput,
+		CostUSD:        CostUSD(a.modelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }

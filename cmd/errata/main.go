@@ -12,6 +12,7 @@ import (
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/ui"
+	"github.com/suarezc/errata/internal/web"
 )
 
 func main() {
@@ -29,10 +30,8 @@ func main() {
 		},
 		&cobra.Command{
 			Use:   "serve",
-			Short: "Start web server (not yet implemented)",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				return fmt.Errorf("web server not yet implemented")
-			},
+			Short: "Start web interface on localhost:8080",
+			RunE:  runServe,
 		},
 	)
 
@@ -50,6 +49,20 @@ func runREPL(cmd *cobra.Command, args []string) error {
 
 	sessionID := newSessionID()
 	return ui.Run(adapters, cfg.PreferencesPath, sessionID, warnings)
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
+	cfg := config.Load()
+	adapters, warnings := models.ListAdapters(cfg)
+	if len(adapters) == 0 {
+		return fmt.Errorf("no models available — set at least one API key in .env")
+	}
+	for _, w := range warnings {
+		fmt.Fprintln(os.Stderr, "warning:", w)
+	}
+	addr := ":8080"
+	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
+	return web.New(adapters, cfg.PreferencesPath).Start(addr)
 }
 
 func runStats(cmd *cobra.Command, args []string) error {

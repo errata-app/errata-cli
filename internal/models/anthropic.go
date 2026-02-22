@@ -39,6 +39,7 @@ func (a *AnthropicAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
+	var totalInput, totalOutput int64
 	start := time.Now()
 
 	for {
@@ -50,11 +51,17 @@ func (a *AnthropicAdapter) RunAgent(
 		})
 		if err != nil {
 			return ModelResponse{
-				ModelID:   a.modelID,
-				LatencyMS: time.Since(start).Milliseconds(),
-				Error:     err.Error(),
+				ModelID:      a.modelID,
+				LatencyMS:    time.Since(start).Milliseconds(),
+				InputTokens:  totalInput,
+				OutputTokens: totalOutput,
+				CostUSD:      CostUSD(a.modelID, totalInput, totalOutput),
+				Error:        err.Error(),
 			}, err
 		}
+
+		totalInput += resp.Usage.InputTokens
+		totalOutput += resp.Usage.OutputTokens
 
 		// Append assistant turn
 		messages = append(messages, resp.ToParam())
@@ -102,6 +109,9 @@ func (a *AnthropicAdapter) RunAgent(
 		ModelID:        a.modelID,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
+		InputTokens:    totalInput,
+		OutputTokens:   totalOutput,
+		CostUSD:        CostUSD(a.modelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }

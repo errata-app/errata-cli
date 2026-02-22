@@ -19,6 +19,9 @@ type ModelResponse struct {
 	ModelID        string
 	Text           string
 	LatencyMS      int64
+	InputTokens    int64
+	OutputTokens   int64
+	CostUSD        float64
 	ProposedWrites []tools.FileWrite
 	Error          string // empty = success
 }

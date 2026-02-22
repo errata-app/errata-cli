@@ -39,6 +39,7 @@ func (a *OpenAIAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
+	var totalInput, totalOutput int64
 	start := time.Now()
 
 	for {
@@ -49,10 +50,18 @@ func (a *OpenAIAdapter) RunAgent(
 		})
 		if err != nil {
 			return ModelResponse{
-				ModelID:   a.modelID,
-				LatencyMS: time.Since(start).Milliseconds(),
-				Error:     err.Error(),
+				ModelID:      a.modelID,
+				LatencyMS:    time.Since(start).Milliseconds(),
+				InputTokens:  totalInput,
+				OutputTokens: totalOutput,
+				CostUSD:      CostUSD(a.modelID, totalInput, totalOutput),
+				Error:        err.Error(),
 			}, err
+		}
+
+		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
+			totalInput += resp.Usage.PromptTokens
+			totalOutput += resp.Usage.CompletionTokens
 		}
 
 		if len(resp.Choices) == 0 {
@@ -100,6 +109,9 @@ func (a *OpenAIAdapter) RunAgent(
 		ModelID:        a.modelID,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
+		InputTokens:    totalInput,
+		OutputTokens:   totalOutput,
+		CostUSD:        CostUSD(a.modelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }

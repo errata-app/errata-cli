@@ -19,11 +19,14 @@ func colorFor(idx int) string {
 
 // panelState holds the live state of one model's panel.
 type panelState struct {
-	modelID  string
-	color    string
-	events   []models.AgentEvent
-	done     bool
-	latencyMS int64
+	modelID      string
+	color        string
+	events       []models.AgentEvent
+	done         bool
+	latencyMS    int64
+	inputTokens  int64
+	outputTokens int64
+	costUSD      float64
 }
 
 func newPanelState(modelID string, idx int) *panelState {
@@ -50,7 +53,12 @@ func renderPanel(p *panelState, width int) string {
 
 	status := "running…"
 	if p.done {
-		status = fmt.Sprintf("done  %dms", p.latencyMS)
+		tok := fmtTokens(p.inputTokens + p.outputTokens)
+		if p.costUSD > 0 {
+			status = fmt.Sprintf("done  %dms  ·  %s tok  ·  $%.4f", p.latencyMS, tok, p.costUSD)
+		} else {
+			status = fmt.Sprintf("done  %dms  ·  %s tok", p.latencyMS, tok)
+		}
 	}
 	title := titleStyle.Render(p.modelID) + "  " +
 		lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"}).Render(status)
@@ -85,6 +93,18 @@ func renderEvent(e models.AgentEvent) string {
 		return dimStyle.Render(line)
 	default:
 		return dimStyle.Render(e.Data)
+	}
+}
+
+// fmtTokens formats a token count compactly: 1.2k, 34.5k, 1.2M.
+func fmtTokens(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
 	}
 }
 

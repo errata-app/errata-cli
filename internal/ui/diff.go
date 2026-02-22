@@ -24,8 +24,15 @@ func RenderDiffs(responses []models.ModelResponse) string {
 			continue
 		}
 		color := colorFor(i)
+		meta := fmt.Sprintf("%dms", resp.LatencyMS)
+		if tot := resp.InputTokens + resp.OutputTokens; tot > 0 {
+			meta += "  ·  " + fmtTokens(tot) + " tok"
+			if resp.CostUSD > 0 {
+				meta += fmt.Sprintf("  ·  $%.4f", resp.CostUSD)
+			}
+		}
 		rule := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).
-			Render(fmt.Sprintf("── %s  %dms ", resp.ModelID, resp.LatencyMS))
+			Render(fmt.Sprintf("── %s  %s ", resp.ModelID, meta))
 		sb.WriteString(rule)
 		sb.WriteByte('\n')
 
@@ -108,8 +115,12 @@ func RenderSelectionMenu(responses []models.ModelResponse) string {
 		if fileStr == "" {
 			fileStr = "(no writes)"
 		}
-		line := fmt.Sprintf("  %d  %-30s (%dms)   →  %s",
-			i+1, resp.ModelID, resp.LatencyMS, fileStr)
+		cost := ""
+		if resp.CostUSD > 0 {
+			cost = fmt.Sprintf("  $%.4f", resp.CostUSD)
+		}
+		line := fmt.Sprintf("  %d  %-30s (%dms%s)   →  %s",
+			i+1, resp.ModelID, resp.LatencyMS, cost, fileStr)
 		sb.WriteString(line)
 		sb.WriteByte('\n')
 	}

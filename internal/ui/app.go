@@ -122,8 +122,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// mark all panels done
 		for _, resp := range msg.responses {
 			if idx, ok := a.panelIdx[resp.ModelID]; ok {
-				a.panels[idx].done = true
-				a.panels[idx].latencyMS = resp.LatencyMS
+				a.panels[idx].done         = true
+				a.panels[idx].latencyMS    = resp.LatencyMS
+				a.panels[idx].inputTokens  = resp.InputTokens
+				a.panels[idx].outputTokens = resp.OutputTokens
+				a.panels[idx].costUSD      = resp.CostUSD
 			}
 		}
 		a.responses = msg.responses
