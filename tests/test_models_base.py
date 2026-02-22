@@ -1,12 +1,10 @@
-"""Tests for ModelResponse and ModelAdapter.complete()."""
+"""Tests for base dataclasses: ModelResponse, FileWrite, AgentEvent."""
 
 from __future__ import annotations
 
 import pytest
-from collections.abc import AsyncIterator
 
-from errata.models.base import ModelAdapter, ModelResponse
-
+from errata.models.base import AgentEvent, FileWrite, ModelAdapter, ModelResponse
 
 # --- ModelResponse ---
 
@@ -22,62 +20,61 @@ def test_ok_false_when_error_set():
 
 
 def test_ok_false_when_error_empty_string():
-    # Empty string is still truthy enough to mark as failed
+    # Empty string error still counts as an error
     r = ModelResponse(model_id="m", text="", latency_ms=100, error="")
     assert r.ok is False
 
 
-# --- Concrete stub adapter ---
+def test_proposed_writes_defaults_to_empty():
+    r = ModelResponse(model_id="m", text="hi", latency_ms=0)
+    assert r.proposed_writes == []
+
+
+def test_proposed_writes_stored():
+    writes = [FileWrite("a.py", "content")]
+    r = ModelResponse(model_id="m", text="hi", latency_ms=0, proposed_writes=writes)
+    assert r.proposed_writes == writes
+
+
+# --- FileWrite ---
+
+
+def test_file_write_fields():
+    fw = FileWrite(path="src/foo.py", content="hello")
+    assert fw.path == "src/foo.py"
+    assert fw.content == "hello"
+
+
+# --- AgentEvent ---
+
+
+def test_agent_event_fields():
+    ev = AgentEvent(type="reading", data="src/foo.py")
+    assert ev.type == "reading"
+    assert ev.data == "src/foo.py"
+
+
+def test_agent_event_types():
+    for t in ("text", "reading", "writing", "error"):
+        ev = AgentEvent(type=t, data="x")
+        assert ev.type == t
+
+
+# --- Concrete stub adapter (verifies ABC contract) ---
 
 
 class _StubAdapter(ModelAdapter):
-    """Yields a fixed list of chunks; raises on demand."""
-
-    def __init__(self, model_id: str, chunks: list[str], *, raise_on: str | None = None):
+    def __init__(self, model_id: str):
         self.model_id = model_id
-        self._chunks = chunks
-        self._raise_on = raise_on
 
-    async def stream(self, prompt: str) -> AsyncIterator[str]:
-        for chunk in self._chunks:
-            if self._raise_on and chunk == self._raise_on:
-                raise RuntimeError(f"forced error at chunk {chunk!r}")
-            yield chunk
-
-
-# --- ModelAdapter.complete() ---
+    async def run_agent(self, prompt, on_event, verbose=False) -> ModelResponse:
+        return ModelResponse(model_id=self.model_id, text="stub", latency_ms=0)
 
 
 @pytest.mark.asyncio
-async def test_complete_joins_chunks():
-    adapter = _StubAdapter("test-model", ["Hello", ", ", "world"])
-    result = await adapter.complete("hi")
-    assert result.text == "Hello, world"
-    assert result.model_id == "test-model"
-    assert result.error is None
+async def test_stub_adapter_run_agent():
+    adapter = _StubAdapter("stub-model")
+    result = await adapter.run_agent("hi", lambda e: None)
+    assert result.model_id == "stub-model"
+    assert result.text == "stub"
     assert result.ok is True
-
-
-@pytest.mark.asyncio
-async def test_complete_empty_stream():
-    adapter = _StubAdapter("test-model", [])
-    result = await adapter.complete("hi")
-    assert result.text == ""
-    assert result.ok is True
-
-
-@pytest.mark.asyncio
-async def test_complete_records_latency():
-    adapter = _StubAdapter("test-model", ["a", "b"])
-    result = await adapter.complete("hi")
-    assert result.latency_ms >= 0
-
-
-@pytest.mark.asyncio
-async def test_complete_captures_exception():
-    adapter = _StubAdapter("test-model", ["a", "ERR", "b"], raise_on="ERR")
-    result = await adapter.complete("hi")
-    assert result.ok is False
-    assert "forced error" in result.error
-    assert result.text == ""
-    assert result.latency_ms >= 0

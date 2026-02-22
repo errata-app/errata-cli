@@ -1,8 +1,6 @@
 """Tests for the preference log."""
 
 import hashlib
-import json
-from pathlib import Path
 
 import pytest
 

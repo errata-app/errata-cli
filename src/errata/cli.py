@@ -7,7 +7,6 @@ import asyncio
 import sys
 import uuid
 import warnings
-from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -17,7 +16,8 @@ import errata.display as display
 import errata.preferences as preferences
 from errata.models.base import ModelResponse
 from errata.models.registry import list_adapters
-from errata.runner import stream_all
+from errata.runner import run_all
+from errata.tools import apply_writes
 
 _HISTORY_FILE = ".errata_history"
 
@@ -33,27 +33,7 @@ def _collect_adapters():
     return adapters
 
 
-def _apply(response: ModelResponse, target_file: Path | None) -> None:
-    """Write the selected response — to file if specified, else clipboard."""
-    if target_file is not None:
-        target_file.write_text(response.text, encoding="utf-8")
-        display.console.print(
-            f"[green]Written to[/] [bold]{target_file}[/]\n"
-        )
-        return
-
-    try:
-        import pyperclip
-        pyperclip.copy(response.text)
-        display.console.print(
-            f"[green]Copied {response.model_id}'s response to clipboard.[/]\n"
-        )
-    except Exception:
-        # Last resort: print to stdout
-        display.console.print(response.text)
-
-
-async def _repl(session_id: str, target_file: Path | None) -> None:
+async def _repl(session_id: str) -> None:
     session = PromptSession(
         history=FileHistory(_HISTORY_FILE),
         style=_STYLE,
@@ -61,14 +41,19 @@ async def _repl(session_id: str, target_file: Path | None) -> None:
     adapters = _collect_adapters()
 
     if not adapters:
-        display.error("No models available. Check your API keys in .env and try again.")
+        display.error(
+            "No models available. Set at least one API key in your .env:\n"
+            "  ANTHROPIC_API_KEY=sk-ant-...\n"
+            "  OPENAI_API_KEY=sk-...\n"
+            "  GOOGLE_API_KEY=AIza..."
+        )
         sys.exit(1)
 
     model_ids = [a.model_id for a in adapters]
+    verbose = False
+
     display.console.print(f"[dim]Models: {', '.join(model_ids)}[/]")
-    if target_file:
-        display.console.print(f"[dim]Output file: {target_file}[/]")
-    display.console.print("[dim]Ctrl-D or /exit to quit  •  /stats  •  /models[/]\n")
+    display.console.print("[dim]Ctrl-D or /exit to quit  •  /help for commands[/]\n")
 
     while True:
         try:
@@ -83,19 +68,27 @@ async def _repl(session_id: str, target_file: Path | None) -> None:
         if prompt_text in ("/exit", "/quit", "exit", "quit"):
             display.console.print("[dim]Goodbye.[/]")
             break
+        if prompt_text == "/help":
+            display.print_help()
+            continue
         if prompt_text == "/stats":
             display.print_stats(preferences.summarize())
             continue
         if prompt_text == "/models":
             display.console.print(f"[dim]{', '.join(model_ids)}[/]")
             continue
+        if prompt_text == "/verbose":
+            verbose = not verbose
+            state = "on" if verbose else "off"
+            display.console.print(f"[dim]Verbose mode {state}.[/]")
+            continue
 
-        # --- stream all models live ---
+        # --- run all models as agents ---
         responses: list[ModelResponse] = []
-        with display.live_stream(model_ids) as (on_chunk, on_done):
+        with display.live_agent(model_ids) as (on_event, on_done):
             async def _run() -> None:
                 nonlocal responses
-                responses = await stream_all(adapters, prompt_text, on_chunk)
+                responses = await run_all(adapters, prompt_text, on_event, verbose=verbose)
                 for r in responses:
                     on_done(r.model_id, r.latency_ms)
 
@@ -106,6 +99,7 @@ async def _repl(session_id: str, target_file: Path | None) -> None:
             display.warn("All models returned errors.")
             continue
 
+        display.print_response_diffs(ok_responses)
         display.print_selection_prompt(ok_responses)
 
         try:
@@ -128,7 +122,12 @@ async def _repl(session_id: str, target_file: Path | None) -> None:
             continue
 
         selected = ok_responses[idx]
-        _apply(selected, target_file)
+
+        if not selected.proposed_writes:
+            display.warn("Model proposed no file writes.")
+        else:
+            apply_writes(selected.proposed_writes)
+            display.print_apply_summary(selected.proposed_writes)
 
         preferences.record(
             prompt=prompt_text,
@@ -149,11 +148,6 @@ def main() -> None:
         description="A/B testing tool for agentic AI models",
     )
     parser.add_argument(
-        "--file", "-f",
-        metavar="PATH",
-        help="Write the selected response to this file (default: copy to clipboard)",
-    )
-    parser.add_argument(
         "command",
         nargs="?",
         choices=["stats"],
@@ -165,10 +159,8 @@ def main() -> None:
         stats_command()
         return
 
-    target_file = Path(args.file) if args.file else None
-
     display.print_banner()
-    asyncio.run(_repl(session_id=str(uuid.uuid4()), target_file=target_file))
+    asyncio.run(_repl(session_id=str(uuid.uuid4())))
 
 
 if __name__ == "__main__":

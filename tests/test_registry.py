@@ -6,8 +6,8 @@ import pytest
 
 import errata.models.registry as registry_module
 from errata.models.anthropic import AnthropicAdapter
-from errata.models.openai import OpenAIAdapter
 from errata.models.gemini import GeminiAdapter
+from errata.models.openai import OpenAIAdapter
 
 
 @pytest.fixture(autouse=True)

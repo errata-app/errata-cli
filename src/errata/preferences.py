@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,16 +39,27 @@ def record(
 
 
 def load_all() -> list[dict]:
-    """Return all recorded preferences as a list of dicts."""
+    """Return all recorded preferences as a list of dicts.
+
+    Skips lines that cannot be parsed as JSON rather than crashing.
+    """
     path = _prefs_path()
     if not path.exists():
         return []
     records = []
     with path.open("r", encoding="utf-8") as f:
-        for line in f:
+        for lineno, line in enumerate(f, 1):
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 records.append(json.loads(line))
+            except json.JSONDecodeError:
+                import warnings
+                warnings.warn(
+                    f"preferences.jsonl line {lineno} is not valid JSON and was skipped",
+                    stacklevel=2,
+                )
     return records
 
 

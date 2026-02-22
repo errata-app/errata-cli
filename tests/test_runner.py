@@ -1,35 +1,54 @@
-"""Tests for runner.stream_all()."""
+"""Tests for runner.run_all()."""
 
 from __future__ import annotations
 
 import pytest
-from collections.abc import AsyncIterator
 
-from errata.models.base import ModelAdapter, ModelResponse
-from errata.runner import stream_all
+from errata.models.base import AgentEvent, FileWrite, ModelAdapter, ModelResponse
+from errata.runner import run_all
 
 
 class _StubAdapter(ModelAdapter):
-    def __init__(self, model_id: str, chunks: list[str], *, fail: bool = False):
+    def __init__(
+        self,
+        model_id: str,
+        text: str = "",
+        writes: list[FileWrite] | None = None,
+        events: list[AgentEvent] | None = None,
+        *,
+        fail: bool = False,
+    ):
         self.model_id = model_id
-        self._chunks = chunks
+        self._text = text
+        self._writes = writes or []
+        self._events = events or []
         self._fail = fail
 
-    async def stream(self, prompt: str) -> AsyncIterator[str]:
+    async def run_agent(
+        self,
+        prompt: str,
+        on_event,
+        verbose: bool = False,
+    ) -> ModelResponse:
         if self._fail:
             raise RuntimeError(f"{self.model_id} failed")
-        for chunk in self._chunks:
-            yield chunk
+        for ev in self._events:
+            on_event(ev)
+        return ModelResponse(
+            model_id=self.model_id,
+            text=self._text,
+            latency_ms=0,
+            proposed_writes=self._writes,
+        )
 
 
 @pytest.mark.asyncio
-async def test_stream_all_returns_correct_order():
+async def test_run_all_returns_correct_order():
     adapters = [
-        _StubAdapter("model-a", ["Hello"]),
-        _StubAdapter("model-b", ["World"]),
+        _StubAdapter("model-a", text="Hello"),
+        _StubAdapter("model-b", text="World"),
     ]
-    chunks_received = []
-    results = await stream_all(adapters, "prompt", lambda mid, c: chunks_received.append((mid, c)))
+    results = await run_all(adapters, "prompt", lambda mid, e: None)
 
     assert [r.model_id for r in results] == ["model-a", "model-b"]
     assert results[0].text == "Hello"
@@ -37,21 +56,22 @@ async def test_stream_all_returns_correct_order():
 
 
 @pytest.mark.asyncio
-async def test_stream_all_calls_on_chunk():
-    adapters = [_StubAdapter("m", ["a", "b", "c"])]
+async def test_run_all_calls_on_event():
+    ev = AgentEvent("reading", "foo.py")
+    adapters = [_StubAdapter("m", events=[ev])]
     received = []
-    await stream_all(adapters, "p", lambda mid, chunk: received.append((mid, chunk)))
+    await run_all(adapters, "p", lambda mid, e: received.append((mid, e)))
 
-    assert received == [("m", "a"), ("m", "b"), ("m", "c")]
+    assert received == [("m", ev)]
 
 
 @pytest.mark.asyncio
-async def test_stream_all_error_adapter_does_not_affect_others():
+async def test_run_all_error_adapter_does_not_affect_others():
     adapters = [
-        _StubAdapter("good", ["ok"]),
-        _StubAdapter("bad", [], fail=True),
+        _StubAdapter("good", text="ok"),
+        _StubAdapter("bad", fail=True),
     ]
-    results = await stream_all(adapters, "p", lambda *_: None)
+    results = await run_all(adapters, "p", lambda *_: None)
 
     good = next(r for r in results if r.model_id == "good")
     bad = next(r for r in results if r.model_id == "bad")
@@ -63,23 +83,30 @@ async def test_stream_all_error_adapter_does_not_affect_others():
 
 
 @pytest.mark.asyncio
-async def test_stream_all_error_chunk_appended_to_on_chunk():
-    """Error message should be surfaced via on_chunk so the display updates."""
-    adapters = [_StubAdapter("bad", [], fail=True)]
+async def test_run_all_error_surfaces_via_on_event():
+    adapters = [_StubAdapter("bad", fail=True)]
     received = []
-    await stream_all(adapters, "p", lambda mid, c: received.append((mid, c)))
+    await run_all(adapters, "p", lambda mid, e: received.append((mid, e)))
 
-    assert any("error" in c for _, c in received)
+    assert any(e.type == "error" for _, e in received)
 
 
 @pytest.mark.asyncio
-async def test_stream_all_latency_recorded():
-    adapters = [_StubAdapter("m", ["x"])]
-    results = await stream_all(adapters, "p", lambda *_: None)
+async def test_run_all_latency_recorded():
+    adapters = [_StubAdapter("m", text="x")]
+    results = await run_all(adapters, "p", lambda *_: None)
     assert results[0].latency_ms >= 0
 
 
 @pytest.mark.asyncio
-async def test_stream_all_empty_adapters():
-    results = await stream_all([], "p", lambda *_: None)
+async def test_run_all_empty_adapters():
+    results = await run_all([], "p", lambda *_: None)
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_run_all_proposed_writes_preserved():
+    writes = [FileWrite("src/foo.py", "content")]
+    adapters = [_StubAdapter("m", writes=writes)]
+    results = await run_all(adapters, "p", lambda *_: None)
+    assert results[0].proposed_writes == writes
