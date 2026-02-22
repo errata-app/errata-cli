@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/suarezc/errata/internal/models"
@@ -65,6 +66,7 @@ type App struct {
 	responses  []models.ModelResponse
 	selection  string // user's typed selection
 	lastPrompt string
+	vp         viewport.Model
 }
 
 // New creates the App model.
@@ -89,6 +91,17 @@ func New(adapters []models.ModelAdapter, prefPath, sessionID string) *App {
 // SetProgram wires up the tea.Program reference so goroutines can send messages.
 func (a *App) SetProgram(p *tea.Program) { a.prog = p }
 
+// viewportHeight returns the number of lines the diff viewport should occupy.
+func (a App) viewportHeight() int {
+	// Reserve: 2 header + (responses+3) menu lines + 2 choice line + 1 scroll hint
+	reserved := 2 + len(a.responses) + 6
+	h := a.height - reserved
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
 func (a App) Init() tea.Cmd {
 	return textarea.Blink
 }
@@ -102,6 +115,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.input.SetWidth(msg.Width - 4)
+		if a.mode == modeSelecting {
+			a.vp.Width = msg.Width
+			a.vp.Height = a.viewportHeight()
+		}
 		return a, nil
 
 	case tea.KeyMsg:
@@ -132,6 +149,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.responses = msg.responses
 		a.mode = modeSelecting
 		a.selection = ""
+		a.vp = viewport.New(a.width, a.viewportHeight())
+		a.vp.SetContent(RenderDiffs(a.responses))
 		return a, nil
 	}
 
@@ -225,6 +244,11 @@ func (a App) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
 		return a, tea.Quit
 
+	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
+		var cmd tea.Cmd
+		a.vp, cmd = a.vp.Update(msg)
+		return a, cmd
+
 	case tea.KeyEnter:
 		choice := strings.TrimSpace(a.selection)
 		a.selection = ""
@@ -301,7 +325,14 @@ func (a App) View() string {
 		sb.WriteByte('\n')
 
 	case modeSelecting:
-		sb.WriteString(RenderDiffs(a.responses))
+		sb.WriteString(a.vp.View())
+		sb.WriteByte('\n')
+		if !a.vp.AtBottom() {
+			hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).
+				Render(fmt.Sprintf("  ↑↓/pgup/pgdn  %.0f%%", a.vp.ScrollPercent()*100))
+			sb.WriteString(hint)
+			sb.WriteByte('\n')
+		}
 		sb.WriteString(RenderSelectionMenu(a.responses))
 		sb.WriteString("\nchoice> ")
 		sb.WriteString(a.selection)

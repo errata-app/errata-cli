@@ -23,6 +23,10 @@ type Config struct {
 	DefaultGeminiModel    string
 
 	PreferencesPath string
+
+	// DebugLogPath is the path for the append-only JSONL debug log.
+	// Empty (default) disables debug logging entirely.
+	DebugLogPath string
 }
 
 // Load reads .env (if present) then environment variables and returns a Config.
@@ -37,6 +41,7 @@ func Load() Config {
 		PreferencesPath:       "data/preferences.jsonl",
 	}
 
+	cfg.DebugLogPath = os.Getenv("ERRATA_DEBUG_LOG")
 	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	cfg.GoogleAPIKey = os.Getenv("GOOGLE_API_KEY")

@@ -39,17 +39,11 @@ func RenderDiffs(responses []models.ModelResponse) string {
 		if len(resp.ProposedWrites) == 0 {
 			sb.WriteString(contextStyle.Render("  (no file writes proposed)"))
 			sb.WriteByte('\n')
-			// show first line of text as a preview
 			if resp.Text != "" {
-				first := resp.Text
-				if idx := strings.Index(first, "\n"); idx >= 0 {
-					first = first[:idx]
+				for _, line := range strings.Split(resp.Text, "\n") {
+					sb.WriteString(contextStyle.Render("  " + line))
+					sb.WriteByte('\n')
 				}
-				if len(first) > 80 {
-					first = first[:80] + "…"
-				}
-				sb.WriteString(contextStyle.Render("  " + first))
-				sb.WriteByte('\n')
 			}
 			sb.WriteByte('\n')
 			continue

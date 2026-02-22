@@ -30,11 +30,9 @@ func TestCompute_ExistingFile(t *testing.T) {
 }
 
 func TestCompute_Truncated(t *testing.T) {
-	// Generate a file with many lines
-	var old, new_ string
-	for i := range 30 {
-		old += "line\n"
-		_ = i
+	// Generate more lines than MaxDiffLines to trigger truncation.
+	var new_ string
+	for range diff.MaxDiffLines + 10 {
 		new_ += "changed\n"
 	}
 	fd := diff.Compute("phantom.txt", new_)

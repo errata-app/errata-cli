@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/logging"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/ui"
@@ -48,6 +49,18 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	}
 
 	sessionID := newSessionID()
+
+	if cfg.DebugLogPath != "" {
+		logger, err := logging.NewLogger(cfg.DebugLogPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not open log file %q: %v\n", cfg.DebugLogPath, err)
+		} else {
+			defer logger.Close()
+			adapters = logging.WrapAll(adapters, sessionID, logger)
+			fmt.Fprintf(os.Stderr, "logging runs to %s\n", cfg.DebugLogPath)
+		}
+	}
+
 	return ui.Run(adapters, cfg.PreferencesPath, sessionID, warnings)
 }
 
@@ -60,6 +73,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	for _, w := range warnings {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
+
+	sessionID := newSessionID()
+
+	if cfg.DebugLogPath != "" {
+		logger, err := logging.NewLogger(cfg.DebugLogPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not open log file %q: %v\n", cfg.DebugLogPath, err)
+		} else {
+			defer logger.Close()
+			adapters = logging.WrapAll(adapters, sessionID, logger)
+			fmt.Fprintf(os.Stderr, "logging runs to %s\n", cfg.DebugLogPath)
+		}
+	}
+
 	addr := ":8080"
 	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
 	return web.New(adapters, cfg.PreferencesPath).Start(addr)

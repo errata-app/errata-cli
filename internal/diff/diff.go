@@ -9,7 +9,7 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
-const MaxDiffLines = 20
+const MaxDiffLines = 500
 
 // LineKind classifies a single diff line.
 type LineKind string
