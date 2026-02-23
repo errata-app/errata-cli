@@ -450,6 +450,13 @@ Test files: `*_test.go` alongside source in the same directory.
 Stub adapters implement `ModelAdapter` in test files — no shared fixture infrastructure.
 Table-driven tests preferred for config, preferences, and diff packages.
 
+**Testing requirements for every change:**
+- Any new function or package must have accompanying tests.
+- Any bug fix must include a regression test that would have caught the original bug.
+- Any struct that is serialized to disk (JSON, JSONL) must have a round-trip test
+  (write → read → assert values) to catch unexported-field and missing-json-tag bugs.
+- Run `go test ./...` before considering a task complete.
+
 ---
 
 ## Files to Never Commit
