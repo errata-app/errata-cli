@@ -28,6 +28,7 @@ type panelState struct {
 	inputTokens  int64
 	outputTokens int64
 	costUSD      float64
+	histTokens   int64 // estimated history tokens at run start (for fill % display)
 }
 
 func newPanelState(modelID string, idx int) *panelState {
@@ -69,6 +70,10 @@ func renderPanel(p *panelState, width int) string {
 				status = fmt.Sprintf("done  %dms  ·  %s tok  ·  $%.4f", p.latencyMS, tok, p.costUSD)
 			} else {
 				status = fmt.Sprintf("done  %dms  ·  %s tok", p.latencyMS, tok)
+			}
+			if cw := models.ContextWindowTokens(p.modelID); cw > 0 && p.histTokens > 0 {
+				pct := float64(p.histTokens) / float64(cw) * 100
+				status += fmt.Sprintf("  ·  ~%.0f%% ctx", pct)
 			}
 		}
 	}

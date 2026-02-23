@@ -158,10 +158,23 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, adapters []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
 				defer cancel()
 
+				effectiveHistories := hists
+				for _, ad := range adapters {
+					if runner.ShouldAutoCompact(effectiveHistories, ad.ID()) {
+						send(wsServerMsg{Type: "agent_event", ModelID: ad.ID(), EventType: "text", Data: "[auto-compacting history…]"})
+						effectiveHistories = runner.CompactHistories(
+							runCtx, []models.ModelAdapter{ad},
+							effectiveHistories, func(modelID string, e models.AgentEvent) {
+								send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+							},
+						)
+					}
+				}
+
 				rs := runner.RunAll(
 					runCtx,
 					adapters,
-					hists,
+					effectiveHistories,
 					prompt,
 					func(modelID string, e models.AgentEvent) {
 						send(wsServerMsg{
@@ -188,7 +201,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				lastRun = rs
 				lastPrompt = prompt
-				histories = runner.AppendHistory(histories, adapterIDs, rs, prompt)
+				histories = runner.AppendHistory(effectiveHistories, adapterIDs, rs, prompt)
 				mu.Unlock()
 
 				send(wsServerMsg{Type: "complete", Responses: buildCompletePayload(rs)})
@@ -284,6 +297,31 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if cancel != nil {
 				cancel()
 			}
+
+		case "compact":
+			mu.Lock()
+			toCompact := activeAdapters
+			if toCompact == nil {
+				toCompact = s.adapters
+			}
+			histsToCompact := make(map[string][]models.ConversationTurn, len(histories))
+			for k, v := range histories {
+				histsToCompact[k] = v
+			}
+			mu.Unlock()
+
+			go func() {
+				updated := runner.CompactHistories(
+					ctx, toCompact, histsToCompact,
+					func(modelID string, e models.AgentEvent) {
+						send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+					},
+				)
+				mu.Lock()
+				histories = updated
+				mu.Unlock()
+				send(wsServerMsg{Type: "compact_complete"})
+			}()
 		}
 	}
 }

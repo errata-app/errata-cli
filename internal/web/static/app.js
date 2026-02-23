@@ -171,6 +171,10 @@ function handleServerMessage(msg) {
       break;
     }
 
+    case 'compact_complete':
+      appendHistoryMsg('History compacted.', '');
+      break;
+
     case 'cancelled':
       savedRunData = null;
       toIdle('Cancelled.');
@@ -640,6 +644,14 @@ function handleSend() {
     const args = prompt.slice(6).trim();
     const ids = args ? args.split(/\s+/) : [];
     wsSend({ type: 'set_models', model_ids: ids });
+    return;
+  }
+
+  // Handle /compact slash command.
+  if (/^\/compact$/i.test(prompt)) {
+    inputEl.value = '';
+    appendHistoryMsg('Compacting conversation history…', '');
+    wsSend({ type: 'compact' });
     return;
   }
 

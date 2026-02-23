@@ -134,6 +134,31 @@ func TestLoadPricing_CacheRoundTrip(t *testing.T) {
 			"if this returns 0, modelPricing fields may be unexported or missing json tags")
 }
 
+// ─── ContextWindowTokens ──────────────────────────────────────────────────────
+
+func TestContextWindowTokens_KnownModel(t *testing.T) {
+	resetDynamicPricing(t)
+	cw := ContextWindowTokens("claude-sonnet-4-6")
+	assert.Equal(t, int64(200_000), cw)
+}
+
+func TestContextWindowTokens_UnknownModel(t *testing.T) {
+	resetDynamicPricing(t)
+	assert.Equal(t, int64(0), ContextWindowTokens("no-such-model-xyz"))
+}
+
+func TestContextWindowTokens_QualifiedID(t *testing.T) {
+	resetDynamicPricing(t)
+	// "anthropic/claude-sonnet-4-6" strips to "claude-sonnet-4-6" in the hardcoded table.
+	assert.Equal(t, int64(200_000), ContextWindowTokens("anthropic/claude-sonnet-4-6"))
+}
+
+func TestContextWindowTokens_Gemini(t *testing.T) {
+	resetDynamicPricing(t)
+	cw := ContextWindowTokens("gemini-2.0-flash")
+	assert.Equal(t, int64(1_000_000), cw)
+}
+
 // TestLoadPricing_MissingCache_FallsBackToHardcoded verifies that when no
 // cache file exists and the OpenRouter fetch fails, the hardcoded table is used.
 func TestLoadPricing_MissingCache_FallsBackToHardcoded(t *testing.T) {

@@ -13,30 +13,32 @@ import (
 	"time"
 )
 
-// modelPricing holds per-million-token prices for a model.
+// modelPricing holds per-million-token prices and context window size for a model.
 // InputPMT / OutputPMT = USD price per million tokens.
+// ContextWindow = max input context size in tokens; 0 means unknown.
 type modelPricing struct {
-	InputPMT  float64 `json:"input_pmt"`
-	OutputPMT float64 `json:"output_pmt"`
+	InputPMT      float64 `json:"input_pmt"`
+	OutputPMT     float64 `json:"output_pmt"`
+	ContextWindow int64   `json:"context_window,omitempty"`
 }
 
 // pricingTable is the hardcoded last-resort fallback, keyed by bare model ID.
 // Update this when providers change rates and the OpenRouter fetch is unavailable.
 var pricingTable = map[string]modelPricing{
 	// Anthropic
-	"claude-opus-4-6":           {15.00, 75.00},
-	"claude-sonnet-4-6":         {3.00, 15.00},
-	"claude-haiku-4-5":          {0.80, 4.00},
-	"claude-haiku-4-5-20251001": {0.80, 4.00},
+	"claude-opus-4-6":           {InputPMT: 15.00, OutputPMT: 75.00, ContextWindow: 200_000},
+	"claude-sonnet-4-6":         {InputPMT: 3.00, OutputPMT: 15.00, ContextWindow: 200_000},
+	"claude-haiku-4-5":          {InputPMT: 0.80, OutputPMT: 4.00, ContextWindow: 200_000},
+	"claude-haiku-4-5-20251001": {InputPMT: 0.80, OutputPMT: 4.00, ContextWindow: 200_000},
 	// OpenAI
-	"gpt-4o":      {2.50, 10.00},
-	"gpt-4o-mini": {0.15, 0.60},
-	"o1":          {15.00, 60.00},
-	"o3-mini":     {1.10, 4.40},
+	"gpt-4o":      {InputPMT: 2.50, OutputPMT: 10.00, ContextWindow: 128_000},
+	"gpt-4o-mini": {InputPMT: 0.15, OutputPMT: 0.60, ContextWindow: 128_000},
+	"o1":          {InputPMT: 15.00, OutputPMT: 60.00, ContextWindow: 200_000},
+	"o3-mini":     {InputPMT: 1.10, OutputPMT: 4.40, ContextWindow: 200_000},
 	// Google
-	"gemini-2.0-flash": {0.075, 0.30},
-	"gemini-1.5-pro":   {1.25, 5.00},
-	"gemini-1.5-flash": {0.075, 0.30},
+	"gemini-2.0-flash": {InputPMT: 0.075, OutputPMT: 0.30, ContextWindow: 1_000_000},
+	"gemini-1.5-pro":   {InputPMT: 1.25, OutputPMT: 5.00, ContextWindow: 2_000_000},
+	"gemini-1.5-flash": {InputPMT: 0.075, OutputPMT: 0.30, ContextWindow: 1_000_000},
 }
 
 var (
@@ -142,6 +144,7 @@ type orModelsResp struct {
 			Prompt     string `json:"prompt"`
 			Completion string `json:"completion"`
 		} `json:"pricing"`
+		ContextLength int64 `json:"context_length"`
 	} `json:"data"`
 }
 
@@ -173,11 +176,28 @@ func fetchOpenRouterPricing() (map[string]modelPricing, error) {
 		}
 		// OpenRouter prices are per-token; convert to per-million-token.
 		table[m.ID] = modelPricing{
-			InputPMT:  inp * 1_000_000,
-			OutputPMT: out * 1_000_000,
+			InputPMT:      inp * 1_000_000,
+			OutputPMT:     out * 1_000_000,
+			ContextWindow: m.ContextLength,
 		}
 	}
 	return table, nil
+}
+
+// ContextWindowTokens returns the known context window size in tokens for modelID, or 0
+// if the model is unknown. Uses the same qualified→bare lookup chain as CostUSD.
+func ContextWindowTokens(modelID string) int64 {
+	p, ok := lookupPricing(modelID)
+	if ok && p.ContextWindow > 0 {
+		return p.ContextWindow
+	}
+	if strings.Contains(modelID, "/") {
+		bare := modelID[strings.LastIndex(modelID, "/")+1:]
+		if p, ok = lookupPricing(bare); ok && p.ContextWindow > 0 {
+			return p.ContextWindow
+		}
+	}
+	return 0
 }
 
 // ─── Cache I/O ────────────────────────────────────────────────────────────────

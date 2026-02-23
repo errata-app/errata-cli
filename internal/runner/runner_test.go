@@ -299,3 +299,88 @@ func TestAppendHistory_ExistingHistoryPreserved(t *testing.T) {
 	assert.Equal(t, "new q", h["m"][2].Content)
 	assert.Equal(t, "new ans", h["m"][3].Content)
 }
+
+// ─── TrimHistory ─────────────────────────────────────────────────────────────
+
+func turns(n int) []models.ConversationTurn {
+	out := make([]models.ConversationTurn, n)
+	for i := range out {
+		if i%2 == 0 {
+			out[i] = models.ConversationTurn{Role: "user", Content: fmt.Sprintf("q%d", i/2+1)}
+		} else {
+			out[i] = models.ConversationTurn{Role: "assistant", Content: fmt.Sprintf("a%d", i/2+1)}
+		}
+	}
+	return out
+}
+
+func TestTrimHistory_NoopWhenBelowMax(t *testing.T) {
+	h := turns(4)
+	got := runner.TrimHistory(h, 10)
+	assert.Equal(t, h, got)
+}
+
+func TestTrimHistory_NoopWhenEqual(t *testing.T) {
+	h := turns(4)
+	got := runner.TrimHistory(h, 4)
+	assert.Equal(t, h, got)
+}
+
+func TestTrimHistory_KeepsRecentTurns(t *testing.T) {
+	h := turns(8) // 4 Q&A pairs
+	got := runner.TrimHistory(h, 4)
+	require.Len(t, got, 4)
+	assert.Equal(t, "q3", got[0].Content)
+	assert.Equal(t, "a3", got[1].Content)
+	assert.Equal(t, "q4", got[2].Content)
+	assert.Equal(t, "a4", got[3].Content)
+}
+
+func TestTrimHistory_ZeroMaxReturnsUnchanged(t *testing.T) {
+	h := turns(6)
+	assert.Equal(t, h, runner.TrimHistory(h, 0))
+}
+
+func TestTrimHistory_PreservesEvenPairs(t *testing.T) {
+	// maxTurns=5 (odd) should be treated as 4
+	h := turns(8)
+	got := runner.TrimHistory(h, 5)
+	assert.Len(t, got, 4)
+}
+
+// ─── EstimateHistoryTokens ───────────────────────────────────────────────────
+
+func TestEstimateHistoryTokens_EmptyHistory(t *testing.T) {
+	assert.Equal(t, int64(0), runner.EstimateHistoryTokens(nil))
+}
+
+func TestEstimateHistoryTokens_RoughCount(t *testing.T) {
+	h := []models.ConversationTurn{
+		{Role: "user", Content: "aaaa"},     // 4 chars → 1 token
+		{Role: "assistant", Content: "bbbbbbbb"}, // 8 chars → 2 tokens
+	}
+	assert.Equal(t, int64(3), runner.EstimateHistoryTokens(h))
+}
+
+// ─── IsContextOverflowError ──────────────────────────────────────────────────
+
+func TestIsContextOverflowError_MatchesKnownPatterns(t *testing.T) {
+	patterns := []string{
+		"context_length_exceeded",
+		"This model's maximum context length is 128000 tokens",
+		"prompt is too long",
+		"prompt_too_long",
+		"exceeds the model's maximum context",
+		"too many tokens in the input",
+		"context window exceeded",
+	}
+	for _, p := range patterns {
+		assert.True(t, runner.IsContextOverflowError(p), "expected match for: %q", p)
+	}
+}
+
+func TestIsContextOverflowError_DoesNotMatchGenericError(t *testing.T) {
+	assert.False(t, runner.IsContextOverflowError("internal server error"))
+	assert.False(t, runner.IsContextOverflowError("authentication failed"))
+	assert.False(t, runner.IsContextOverflowError(""))
+}

@@ -26,7 +26,12 @@ type agentEventMsg struct {
 }
 
 type runCompleteMsg struct {
-	responses []models.ModelResponse
+	responses          []models.ModelResponse
+	compactedHistories map[string][]models.ConversationTurn // non-nil if auto-compact ran
+}
+
+type compactCompleteMsg struct {
+	histories map[string][]models.ConversationTurn
 }
 
 // ---- app modes ----
@@ -225,6 +230,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.feedVP.GotoBottom()
 		return a, nil
 
+	case compactCompleteMsg:
+		a.conversationHistories = msg.histories
+		return a.withMessage("History compacted."), nil
+
 	case runCompleteMsg:
 		// Mark panels done. runner.RunAll preserves adapter order, so results[i] == panels[i].
 		for i, resp := range msg.responses {
@@ -239,6 +248,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.costUSD = resp.CostUSD
 			if resp.Error != "" {
 				p.errMsg = resp.Error
+				if runner.IsContextOverflowError(resp.Error) {
+					p.errMsg = "context limit reached — use /clear or /compact to reset"
+				}
 			}
 		}
 
@@ -248,6 +260,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		panelIDs := make([]string, len(a.panels))
 		for i, p := range a.panels {
 			panelIDs[i] = p.modelID
+		}
+		// If auto-compact ran, use the post-compact state as the base for AppendHistory.
+		if msg.compactedHistories != nil {
+			a.conversationHistories = msg.compactedHistories
 		}
 		a.conversationHistories = runner.AppendHistory(a.conversationHistories, panelIDs, msg.responses, a.lastPrompt)
 
@@ -352,6 +368,24 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 		a.feedVP.Height = a.feedVPHeight()
 		a.feedVP.SetContent("")
 		return a, nil
+	case "/compact":
+		toCompact := a.adapters
+		if a.activeAdapters != nil {
+			toCompact = a.activeAdapters
+		}
+		histories := a.conversationHistories
+		prog := a.prog
+		return a.withMessage("Compacting conversation history…"), func() tea.Msg {
+			updated := runner.CompactHistories(
+				context.Background(),
+				toCompact,
+				histories,
+				func(modelID string, e models.AgentEvent) {
+					prog.Send(agentEventMsg{modelID: modelID, event: e})
+				},
+			)
+			return compactCompleteMsg{histories: updated}
+		}
 	case "/help":
 		return a.withMessage(helpText()), nil
 	}
@@ -367,7 +401,9 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	a.panels = nil
 	a.panelIdx = make(map[string]int)
 	for i, ad := range toRun {
-		a.panels = append(a.panels, newPanelState(ad.ID(), i))
+		ps := newPanelState(ad.ID(), i)
+		ps.histTokens = runner.EstimateHistoryTokens(a.conversationHistories[ad.ID()])
+		a.panels = append(a.panels, ps)
 		a.panelIdx[ad.ID()] = i
 	}
 
@@ -386,17 +422,33 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	histories := a.conversationHistories // read-only in goroutine; written only by main loop
 
 	return a, func() tea.Msg {
+		effectiveHistories := histories
+		var compacted map[string][]models.ConversationTurn
+		for _, ad := range adapters {
+			if runner.ShouldAutoCompact(effectiveHistories, ad.ID()) {
+				prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
+					Type: "text", Data: "[auto-compacting history…]",
+				}})
+				effectiveHistories = runner.CompactHistories(
+					context.Background(), []models.ModelAdapter{ad},
+					effectiveHistories, func(id string, e models.AgentEvent) {
+						prog.Send(agentEventMsg{modelID: id, event: e})
+					},
+				)
+				compacted = effectiveHistories
+			}
+		}
 		responses := runner.RunAll(
 			context.Background(),
 			adapters,
-			histories,
+			effectiveHistories,
 			trimmed,
 			func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
 			},
 			verbose,
 		)
-		return runCompleteMsg{responses: responses}
+		return runCompleteMsg{responses: responses, compactedHistories: compacted}
 	}
 }
 
@@ -578,7 +630,8 @@ func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {
 func helpText() string {
 	return `Commands:
   /help              Show this message
-  /clear             Clear display history
+  /clear             Clear display history and conversation memory
+  /compact           Summarise conversation history to free up context
   /verbose           Toggle verbose mode
   /models            List active models
   /model [id...]     Restrict to model(s); bare /model resets to all
