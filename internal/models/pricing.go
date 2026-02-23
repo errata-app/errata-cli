@@ -14,8 +14,11 @@ import (
 )
 
 // modelPricing holds per-million-token prices for a model.
-// inputPMT / outputPMT = USD price per million tokens.
-type modelPricing struct{ inputPMT, outputPMT float64 }
+// InputPMT / OutputPMT = USD price per million tokens.
+type modelPricing struct {
+	InputPMT  float64 `json:"input_pmt"`
+	OutputPMT float64 `json:"output_pmt"`
+}
 
 // pricingTable is the hardcoded last-resort fallback, keyed by bare model ID.
 // Update this when providers change rates and the OpenRouter fetch is unavailable.
@@ -111,7 +114,7 @@ func CostUSD(qualifiedID string, inputTokens, outputTokens int64) float64 {
 	if !ok {
 		return 0
 	}
-	return (float64(inputTokens)*p.inputPMT + float64(outputTokens)*p.outputPMT) / 1_000_000
+	return (float64(inputTokens)*p.InputPMT + float64(outputTokens)*p.OutputPMT) / 1_000_000
 }
 
 func lookupPricing(key string) (modelPricing, bool) {
@@ -170,8 +173,8 @@ func fetchOpenRouterPricing() (map[string]modelPricing, error) {
 		}
 		// OpenRouter prices are per-token; convert to per-million-token.
 		table[m.ID] = modelPricing{
-			inputPMT:  inp * 1_000_000,
-			outputPMT: out * 1_000_000,
+			InputPMT:  inp * 1_000_000,
+			OutputPMT: out * 1_000_000,
 		}
 	}
 	return table, nil
@@ -191,7 +194,15 @@ func readPricingCache(path string) *pricingCacheFile {
 	if len(c.Models) == 0 {
 		return nil
 	}
-	return &c
+	// Validate that at least one entry has non-zero prices. A cache where all
+	// entries are {0,0} indicates a corrupt write (e.g. from the unexported-fields
+	// bug) and should be treated as missing so a fresh fetch is triggered.
+	for _, p := range c.Models {
+		if p.InputPMT > 0 || p.OutputPMT > 0 {
+			return &c
+		}
+	}
+	return nil
 }
 
 func writePricingCache(path string, c *pricingCacheFile) {
