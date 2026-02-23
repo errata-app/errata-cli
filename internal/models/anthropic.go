@@ -56,7 +56,7 @@ func (a *AnthropicAdapter) RunAgent(
 				LatencyMS:    time.Since(start).Milliseconds(),
 				InputTokens:  totalInput,
 				OutputTokens: totalOutput,
-				CostUSD:      CostUSD(a.modelID, totalInput, totalOutput),
+				CostUSD:      CostUSD("anthropic/"+a.modelID, totalInput, totalOutput),
 				Error:        err.Error(),
 			}, err
 		}
@@ -117,7 +117,7 @@ func (a *AnthropicAdapter) RunAgent(
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,
 		OutputTokens:   totalOutput,
-		CostUSD:        CostUSD(a.modelID, totalInput, totalOutput),
+		CostUSD:        CostUSD("anthropic/"+a.modelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }

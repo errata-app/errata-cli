@@ -38,11 +38,13 @@ errata/
 │   │   └── config.go        # Config struct, Load(), ResolvedActiveModels()
 │   ├── models/
 │   │   ├── base.go          # ModelAdapter interface, AgentEvent, ModelResponse
-│   │   ├── registry.go      # NewAdapter(), ListAdapters() — prefix routing
-│   │   ├── pricing.go       # pricingTable, CostUSD() — hardcoded $/M-token rates
+│   │   ├── registry.go      # NewAdapter(), ListAdapters() — prefix/slash routing
+│   │   ├── pricing.go       # LoadPricing(), CostUSD() — OpenRouter fetch + hardcoded fallback
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
-│   │   └── gemini.go        # GeminiAdapter.RunAgent()
+│   │   ├── gemini.go        # GeminiAdapter.RunAgent()
+│   │   ├── openrouter.go    # OpenRouterAdapter — OpenAI-compat, "provider/model" IDs
+│   │   └── litellm.go       # LiteLLMAdapter — OpenAI-compat, "litellm/<model>" IDs
 │   ├── runner/
 │   │   └── runner.go        # RunAll() — goroutines + sync.WaitGroup
 │   ├── tools/
@@ -126,16 +128,28 @@ Agent timeout: **5 minutes** per adapter (`context.WithTimeout`).
 ## Token Usage & Cost
 
 Every adapter accumulates `InputTokens` and `OutputTokens` across all turns of its agentic
-loop. `models.CostUSD(modelID, input, output)` looks up per-million-token rates from
-`internal/models/pricing.go` and returns the estimated USD cost (0 for unknown model IDs).
+loop. `models.CostUSD(qualifiedID, input, output)` looks up per-million-token rates and
+returns the estimated USD cost (0 for unknown model IDs, gracefully omitted from UI).
+
+**Pricing source:** `models.LoadPricing(cacheFile)` is called at startup. It fetches
+`https://openrouter.ai/api/v1/models` (no auth required) and caches the result at
+`data/pricing_cache.json` for 24 hours. Fallback chain:
+1. Fresh cache (< 24 h) → use it
+2. OpenRouter fetch succeeds → overwrite cache, use it
+3. Stale cache → use it (log a warning)
+4. No cache, fetch failed → fall back to hardcoded table in `pricing.go`
+
+**Qualified IDs:** OpenRouter keys models as `provider/model`
+(e.g. `anthropic/claude-sonnet-4-6`). Each native adapter passes its provider prefix
+to `CostUSD` (e.g. `CostUSD("anthropic/"+modelID, ...)`). If the qualified key is
+not found, `CostUSD` falls back to the bare portion after `/` for hardcoded-table
+compatibility. OpenRouter and LiteLLM adapters pass their model ID as-is.
 
 These are surfaced in:
 - **TUI panels** — `done  1234ms  ·  8.4k tok  ·  $0.0083` in the panel status line
 - **TUI diff headers** — same stats in the `── model-id  …` section separator
 - **TUI selection menu** — `(1234ms  $0.0083)` next to each option
 - **Web diff headers and selection buttons** — same format
-
-`pricing.go` must be updated manually when providers change their published rates.
 
 ---
 
@@ -244,7 +258,8 @@ This is intentional — moving it to `models` would create a cycle since adapter
 
 ## Agentic Tool Loop Pattern
 
-Each adapter (`anthropic.go`, `openai.go`, `gemini.go`) follows the same pattern:
+Each adapter (`anthropic.go`, `openai.go`, `gemini.go`, `openrouter.go`, `litellm.go`)
+follows the same pattern:
 
 ```go
 var totalInput, totalOutput int64
@@ -266,7 +281,8 @@ return ModelResponse{
     ...,
     InputTokens:  totalInput,
     OutputTokens: totalOutput,
-    CostUSD:      CostUSD(modelID, totalInput, totalOutput),
+    // native adapters prefix their provider; OpenRouter/LiteLLM pass ID as-is:
+    CostUSD:      CostUSD("anthropic/"+modelID, totalInput, totalOutput),
     ProposedWrites: proposed,
 }
 ```
@@ -361,17 +377,33 @@ ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=AIza...
 
+# OpenRouter — access any model via a single API key
+OPENROUTER_API_KEY=sk-or-...
+
+# LiteLLM — self-hosted proxy; base URL must include /v1
+LITELLM_BASE_URL=http://localhost:4000/v1
+LITELLM_API_KEY=optional
+
 # Optional: pin specific models (comma-separated)
-ERRATA_ACTIVE_MODELS=claude-opus-4-6,claude-sonnet-4-6
+ERRATA_ACTIVE_MODELS=claude-opus-4-6,anthropic/claude-sonnet-4-6
 ```
 
-Default models (one per provider, by available API key):
+Default models (auto-detected from available API keys; native providers only):
 
-| Provider  | Default model        | ID prefix routing     |
-|-----------|----------------------|-----------------------|
-| Anthropic | `claude-sonnet-4-6`  | `claude*`             |
-| OpenAI    | `gpt-4o`             | `gpt-*`, `o1`, `o3`   |
-| Google    | `gemini-2.0-flash`   | `gemini*`             |
+| Provider  | Default model        | ID routing rule              |
+|-----------|----------------------|------------------------------|
+| Anthropic | `claude-sonnet-4-6`  | prefix `claude`              |
+| OpenAI    | `gpt-4o`             | prefix `gpt-`, `o1`, `o3`    |
+| Google    | `gemini-2.0-flash`   | prefix `gemini`              |
+| OpenRouter | _(none; must set `ERRATA_ACTIVE_MODELS`)_ | contains `/` |
+| LiteLLM   | _(none; must set `ERRATA_ACTIVE_MODELS`)_ | prefix `litellm/` |
+
+**OpenRouter** model IDs use `provider/model` format (e.g. `anthropic/claude-sonnet-4-6`,
+`meta-llama/llama-3-70b-instruct`). Any model ID containing `/` routes to OpenRouter.
+
+**LiteLLM** model IDs use the `litellm/` prefix (e.g. `litellm/claude-sonnet-4-6`).
+The prefix is stripped before the API call; it remains in the display name.
+`litellm/` must come before the `/` routing check in the registry to take precedence.
 
 ---
 

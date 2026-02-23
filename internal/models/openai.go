@@ -55,7 +55,7 @@ func (a *OpenAIAdapter) RunAgent(
 				LatencyMS:    time.Since(start).Milliseconds(),
 				InputTokens:  totalInput,
 				OutputTokens: totalOutput,
-				CostUSD:      CostUSD(a.modelID, totalInput, totalOutput),
+				CostUSD:      CostUSD("openai/"+a.modelID, totalInput, totalOutput),
 				Error:        err.Error(),
 			}, err
 		}
@@ -118,7 +118,7 @@ func (a *OpenAIAdapter) RunAgent(
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,
 		OutputTokens:   totalOutput,
-		CostUSD:        CostUSD(a.modelID, totalInput, totalOutput),
+		CostUSD:        CostUSD("openai/"+a.modelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }

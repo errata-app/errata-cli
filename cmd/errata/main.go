@@ -43,6 +43,7 @@ func main() {
 
 func runREPL(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
+	models.LoadPricing(cfg.PricingCachePath)
 	adapters, warnings := models.ListAdapters(cfg)
 	if len(adapters) == 0 {
 		return fmt.Errorf("no models available — set at least one API key in .env")
@@ -66,6 +67,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
+	models.LoadPricing(cfg.PricingCachePath)
 	adapters, warnings := models.ListAdapters(cfg)
 	if len(adapters) == 0 {
 		return fmt.Errorf("no models available — set at least one API key in .env")

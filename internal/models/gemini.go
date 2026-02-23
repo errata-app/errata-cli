@@ -54,7 +54,7 @@ func (a *GeminiAdapter) RunAgent(
 				LatencyMS:    time.Since(start).Milliseconds(),
 				InputTokens:  totalInput,
 				OutputTokens: totalOutput,
-				CostUSD:      CostUSD(a.modelID, totalInput, totalOutput),
+				CostUSD:      CostUSD("google/"+a.modelID, totalInput, totalOutput),
 				Error:        err.Error(),
 			}, err
 		}
@@ -118,7 +118,7 @@ func (a *GeminiAdapter) RunAgent(
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,
 		OutputTokens:   totalOutput,
-		CostUSD:        CostUSD(a.modelID, totalInput, totalOutput),
+		CostUSD:        CostUSD("google/"+a.modelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }

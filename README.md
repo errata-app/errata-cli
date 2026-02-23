@@ -21,7 +21,7 @@ it to disk. Every choice is logged so you can see which models you actually pref
 ## Requirements
 
 - Go 1.23+
-- At least one API key: Anthropic, OpenAI, or Google
+- At least one API key: Anthropic, OpenAI, Google, or OpenRouter
 
 ---
 
@@ -47,12 +47,21 @@ cp .env.example .env
 
 ```bash
 # .env
+
+# Native providers — auto-detected; one default model per available key
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=AIza...
+
+# OpenRouter — single key for any model from any provider
+OPENROUTER_API_KEY=sk-or-...
+
+# LiteLLM — self-hosted proxy (base URL must include /v1)
+LITELLM_BASE_URL=http://localhost:4000/v1
+LITELLM_API_KEY=optional
 ```
 
-Errata auto-detects which models to run based on which keys are present:
+Errata auto-detects native providers from available keys:
 
 | Provider  | Default model         |
 |-----------|-----------------------|
@@ -60,17 +69,39 @@ Errata auto-detects which models to run based on which keys are present:
 | OpenAI    | `gpt-4o`              |
 | Google    | `gemini-2.0-flash`    |
 
+OpenRouter and LiteLLM models must be listed explicitly in `ERRATA_ACTIVE_MODELS`.
+
 ---
 
 ## Usage
 
-### Start the REPL
+### TUI (terminal REPL)
 
 ```bash
 ./errata
 ```
 
-### Run a prompt
+### Web UI
+
+```bash
+./errata serve           # starts on :8080
+./errata serve --port 3000
+```
+
+Open `http://localhost:8080` in your browser. The web UI is functionally identical to the
+TUI and shares the same WebSocket-based backend.
+
+### Preference summary
+
+```bash
+./errata stats
+```
+
+Prints a ranked tally of how often each model has been selected across all past runs.
+
+---
+
+## Running a prompt
 
 Prompts work best when they reference actual files in your working directory:
 
@@ -87,17 +118,18 @@ Live panels show each model's tool activity as it works:
 ╰──────────────────────────────────╯  ╰───────────────────────────────╯
 ```
 
-Once all models finish, a diff view shows exactly what each proposed:
+Once all models finish, a diff view shows exactly what each proposed, along with latency,
+token usage, and estimated cost:
 
 ```
-── claude-sonnet-4-6  891ms ───────────────────────────────
+── claude-sonnet-4-6  891ms  ·  8.4k tok  ·  $0.0083 ─────────────────
     src/utils/retry.py  +12 -3
     + def retry(max_attempts=3, backoff=2.0):
     -     time.sleep(1)
     +     time.sleep(backoff ** attempt)
     … 4 more lines
 
-── gpt-4o  1243ms ─────────────────────────────────────────
+── gpt-4o  1243ms  ·  6.1k tok  ·  $0.0031 ───────────────────────────
     src/utils/retry.py  +8 -1
     +     delay = min(base * 2 ** attempt, max_delay)
 ```
@@ -106,18 +138,14 @@ Then the selection prompt:
 
 ```
 Select a response to apply:
-  1  claude-sonnet-4-6             (891ms)   →  src/utils/retry.py
-  2  gpt-4o                        (1243ms)  →  src/utils/retry.py
+  1  claude-sonnet-4-6             (891ms $0.0083)   →  src/utils/retry.py
+  2  gpt-4o                        (1243ms $0.0031)  →  src/utils/retry.py
   s  Skip
 
 choice>
 ```
 
 Pick a number — that model's writes are applied to disk immediately.
-
-### Verbose mode
-
-Toggle `/verbose` to also see each model's explanatory text alongside tool events.
 
 ---
 
@@ -126,22 +154,56 @@ Toggle `/verbose` to also see each model's explanatory text alongside tool event
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
+| `/clear` | Clear the display history |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/models` | List currently active models |
+| `/model <id> [id...]` | Restrict subsequent runs to specific model(s) |
+| `/model` | Reset model filter — all configured models run again |
 | `/exit` or `/quit` | Exit |
 | `Ctrl-D` | Exit |
 
 ---
 
-## Pinning models
+## Model filtering
 
-Override which models run via `ERRATA_ACTIVE_MODELS` in your `.env`:
+You can narrow which models run without restarting Errata. The filter is sticky — it
+persists across prompts until explicitly reset.
 
-```bash
-ERRATA_ACTIVE_MODELS=claude-opus-4-6,claude-sonnet-4-6
+**At runtime (both TUI and web):**
+
+```
+/model claude-sonnet-4-6          # only Claude for the next runs
+/model claude-sonnet-4-6 gpt-4o   # two models
+/model                            # reset — all configured models run again
 ```
 
-Any model ID whose prefix matches a configured provider can be used here.
+Unknown model IDs are rejected immediately with a list of valid options.
+
+**Statically via environment variable:**
+
+```bash
+# .env
+# Native models
+ERRATA_ACTIVE_MODELS=claude-opus-4-6,claude-sonnet-4-6
+
+# OpenRouter models — use "provider/model" format
+ERRATA_ACTIVE_MODELS=anthropic/claude-sonnet-4-6,openai/gpt-4o,meta-llama/llama-3-70b-instruct
+
+# LiteLLM models — use "litellm/<model>" format
+ERRATA_ACTIVE_MODELS=litellm/claude-sonnet-4-6,litellm/gpt-4o
+
+# Mix native and OpenRouter
+ERRATA_ACTIVE_MODELS=claude-sonnet-4-6,anthropic/claude-opus-4-6
+```
+
+The env var sets the starting set of active models; `/model` overrides it for the session.
+
+---
+
+## Verbose mode
+
+Toggle `/verbose` to also see each model's explanatory text alongside tool events. Verbose
+mode is off by default in the TUI and on by default in the web UI.
 
 ---
 
@@ -196,23 +258,35 @@ errata/
 │   │   └── config.go        # Config struct, Load(), ResolvedActiveModels()
 │   ├── models/
 │   │   ├── base.go          # ModelAdapter interface, AgentEvent, ModelResponse
-│   │   ├── registry.go      # NewAdapter(), ListAdapters() — prefix routing
+│   │   ├── registry.go      # NewAdapter(), ListAdapters() — routing by prefix/slash
+│   │   ├── pricing.go       # LoadPricing(), CostUSD() — OpenRouter fetch + fallback
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
-│   │   └── gemini.go        # GeminiAdapter.RunAgent()
+│   │   ├── gemini.go        # GeminiAdapter.RunAgent()
+│   │   ├── openrouter.go    # OpenRouterAdapter — any model via "provider/model" IDs
+│   │   └── litellm.go       # LiteLLMAdapter — local/self-hosted proxy
 │   ├── runner/
 │   │   └── runner.go        # RunAll() — goroutines + sync.WaitGroup
 │   ├── tools/
 │   │   └── tools.go         # FileWrite, tool schemas, ExecuteRead(), ApplyWrites()
 │   ├── diff/
-│   │   └── diff.go          # Compute() → FileDiff (LCS-based, no external library)
+│   │   └── diff.go          # Compute() → FileDiff (Myers algorithm via sergi/go-diff)
+│   ├── logging/
+│   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
 │   ├── preferences/
 │   │   └── preferences.go   # Record(), LoadAll(), Summarize()
-│   └── ui/
-│       ├── app.go           # bubbletea program, mode state machine
-│       ├── panels.go        # agent panel rendering (lipgloss)
-│       ├── diff.go          # diff + selection menu rendering
-│       └── keys.go          # key bindings
+│   ├── ui/
+│   │   ├── app.go           # bubbletea program, mode state machine
+│   │   ├── panels.go        # agent panel rendering (lipgloss)
+│   │   ├── diff.go          # diff + selection menu rendering
+│   │   └── keys.go          # key bindings
+│   └── web/
+│       ├── server.go        # Server struct, route registration, embedded static assets
+│       ├── handlers.go      # WebSocket handler, REST handlers (/api/stats, /api/models)
+│       └── static/
+│           ├── index.html
+│           ├── style.css
+│           └── app.js
 ├── go.mod
 ├── go.sum
 └── Makefile

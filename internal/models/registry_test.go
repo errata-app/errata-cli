@@ -39,6 +39,25 @@ func geminiCfg() config.Config {
 	}
 }
 
+func openRouterCfg() config.Config {
+	return config.Config{
+		OpenRouterAPIKey:      "sk-or-test",
+		DefaultAnthropicModel: "claude-sonnet-4-6",
+		DefaultOpenAIModel:    "gpt-4o",
+		DefaultGeminiModel:    "gemini-2.0-flash",
+	}
+}
+
+func liteLLMCfg() config.Config {
+	return config.Config{
+		LiteLLMBaseURL:        "http://localhost:4000/v1",
+		LiteLLMAPIKey:         "test-key",
+		DefaultAnthropicModel: "claude-sonnet-4-6",
+		DefaultOpenAIModel:    "gpt-4o",
+		DefaultGeminiModel:    "gemini-2.0-flash",
+	}
+}
+
 // --- NewAdapter ---
 
 func TestNewAdapter_AnthropicReturnsCorrectType(t *testing.T) {
@@ -104,6 +123,66 @@ func TestNewAdapter_UnknownPrefix(t *testing.T) {
 	_, err := models.NewAdapter("llama-3-unknown", cfg)
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "unknown") || strings.Contains(err.Error(), "Unknown"))
+}
+
+func TestNewAdapter_OpenRouterReturnsCorrectType(t *testing.T) {
+	a, err := models.NewAdapter("anthropic/claude-sonnet-4-6", openRouterCfg())
+	require.NoError(t, err)
+	_, ok := a.(*models.OpenRouterAdapter)
+	assert.True(t, ok, "expected *OpenRouterAdapter")
+	assert.Equal(t, "anthropic/claude-sonnet-4-6", a.ID())
+}
+
+func TestNewAdapter_OpenRouterMissingKey(t *testing.T) {
+	cfg := config.Config{}
+	_, err := models.NewAdapter("openai/gpt-4o", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OPENROUTER_API_KEY")
+}
+
+func TestNewAdapter_OpenRouterVariousProviders(t *testing.T) {
+	cfg := openRouterCfg()
+	tests := []string{
+		"anthropic/claude-sonnet-4-6",
+		"openai/gpt-4o",
+		"google/gemini-2.0-flash",
+		"meta-llama/llama-3-70b-instruct",
+	}
+	for _, modelID := range tests {
+		t.Run(modelID, func(t *testing.T) {
+			a, err := models.NewAdapter(modelID, cfg)
+			require.NoError(t, err)
+			_, ok := a.(*models.OpenRouterAdapter)
+			assert.True(t, ok)
+		})
+	}
+}
+
+func TestNewAdapter_LiteLLMReturnsCorrectType(t *testing.T) {
+	a, err := models.NewAdapter("litellm/claude-sonnet-4-6", liteLLMCfg())
+	require.NoError(t, err)
+	_, ok := a.(*models.LiteLLMAdapter)
+	assert.True(t, ok, "expected *LiteLLMAdapter")
+	assert.Equal(t, "litellm/claude-sonnet-4-6", a.ID())
+}
+
+func TestNewAdapter_LiteLLMMissingBaseURL(t *testing.T) {
+	cfg := config.Config{}
+	_, err := models.NewAdapter("litellm/gpt-4o", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "LITELLM_BASE_URL")
+}
+
+func TestNewAdapter_LiteLLMTakesPrecedenceOverOpenRouter(t *testing.T) {
+	// A model starting with "litellm/" must route to LiteLLM even though it contains "/".
+	cfg := config.Config{
+		OpenRouterAPIKey: "sk-or-test",
+		LiteLLMBaseURL:   "http://localhost:4000/v1",
+	}
+	a, err := models.NewAdapter("litellm/claude-sonnet-4-6", cfg)
+	require.NoError(t, err)
+	_, ok := a.(*models.LiteLLMAdapter)
+	assert.True(t, ok, "litellm/ prefix must route to LiteLLMAdapter, not OpenRouterAdapter")
 }
 
 // --- ListAdapters ---

@@ -8,8 +8,27 @@ import (
 )
 
 // NewAdapter returns a ModelAdapter for the given model ID using cfg for API keys.
+//
+// Routing rules (checked in order):
+//  1. "litellm/<model>"     → LiteLLMAdapter (requires LITELLM_BASE_URL)
+//  2. "provider/model"      → OpenRouterAdapter (requires OPENROUTER_API_KEY)
+//  3. "claude*"             → AnthropicAdapter
+//  4. "gpt-*", "o1", "o3*" → OpenAIAdapter
+//  5. "gemini*"             → GeminiAdapter
 func NewAdapter(modelID string, cfg config.Config) (ModelAdapter, error) {
 	switch {
+	case strings.HasPrefix(modelID, "litellm/"):
+		if cfg.LiteLLMBaseURL == "" {
+			return nil, fmt.Errorf("LITELLM_BASE_URL not set")
+		}
+		return NewLiteLLMAdapter(modelID, cfg.LiteLLMAPIKey, cfg.LiteLLMBaseURL), nil
+
+	case strings.Contains(modelID, "/"):
+		if cfg.OpenRouterAPIKey == "" {
+			return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
+		}
+		return NewOpenRouterAdapter(modelID, cfg.OpenRouterAPIKey), nil
+
 	case strings.HasPrefix(modelID, "claude"):
 		if cfg.AnthropicAPIKey == "" {
 			return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
