@@ -23,6 +23,7 @@ type panelState struct {
 	color        string
 	events       []models.AgentEvent
 	done         bool
+	errMsg       string // non-empty when run errored
 	latencyMS    int64
 	inputTokens  int64
 	outputTokens int64
@@ -43,6 +44,9 @@ func (p *panelState) addEvent(e models.AgentEvent) {
 // renderPanel returns a lipgloss-styled box for one model.
 func renderPanel(p *panelState, width int) string {
 	color := lipgloss.Color(p.color)
+	if p.done && p.errMsg != "" {
+		color = lipgloss.Color("#AF0000")
+	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(color)
 	borderStyle := lipgloss.NewStyle().
@@ -53,11 +57,19 @@ func renderPanel(p *panelState, width int) string {
 
 	status := "running…"
 	if p.done {
-		tok := fmtTokens(p.inputTokens + p.outputTokens)
-		if p.costUSD > 0 {
-			status = fmt.Sprintf("done  %dms  ·  %s tok  ·  $%.4f", p.latencyMS, tok, p.costUSD)
+		if p.errMsg != "" {
+			short := p.errMsg
+			if len(short) > 45 {
+				short = short[:45] + "…"
+			}
+			status = "error: " + short
 		} else {
-			status = fmt.Sprintf("done  %dms  ·  %s tok", p.latencyMS, tok)
+			tok := fmtTokens(p.inputTokens + p.outputTokens)
+			if p.costUSD > 0 {
+				status = fmt.Sprintf("done  %dms  ·  %s tok  ·  $%.4f", p.latencyMS, tok, p.costUSD)
+			} else {
+				status = fmt.Sprintf("done  %dms  ·  %s tok", p.latencyMS, tok)
+			}
 		}
 	}
 	title := titleStyle.Render(p.modelID) + "  " +

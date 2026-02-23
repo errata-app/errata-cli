@@ -17,13 +17,14 @@ func TestRenderDiffs_EmptyResponses(t *testing.T) {
 	assert.Equal(t, "", out)
 }
 
-func TestRenderDiffs_SkipsFailedResponses(t *testing.T) {
+func TestRenderDiffs_ShowsFailedResponses(t *testing.T) {
 	responses := []models.ModelResponse{
 		{ModelID: "bad-model", Error: "timeout"},
 		{ModelID: "good-model", LatencyMS: 100},
 	}
 	out := ui.RenderDiffs(responses)
-	assert.NotContains(t, out, "bad-model")
+	assert.Contains(t, out, "bad-model")
+	assert.Contains(t, out, "timeout")
 	assert.Contains(t, out, "good-model")
 }
 
@@ -102,14 +103,18 @@ func TestRenderSelectionMenu_ListsOKModels(t *testing.T) {
 	assert.Contains(t, out, "1243ms")
 }
 
-func TestRenderSelectionMenu_SkipsFailedResponses(t *testing.T) {
+func TestRenderSelectionMenu_ShowsFailedResponsesAsNonSelectable(t *testing.T) {
 	responses := []models.ModelResponse{
 		{ModelID: "ok-model", LatencyMS: 500},
 		{ModelID: "err-model", Error: "crashed"},
 	}
 	out := ui.RenderSelectionMenu(responses)
 	assert.Contains(t, out, "ok-model")
-	assert.NotContains(t, out, "err-model")
+	assert.Contains(t, out, "err-model") // shown but not numbered
+	assert.Contains(t, out, "(error)")
+	// ok-model should be numbered 1; err-model should appear as "-"
+	assert.Contains(t, out, "  1  ok-model")
+	assert.Contains(t, out, "  -  err-model")
 }
 
 func TestRenderSelectionMenu_ShowsNoWritesLabel(t *testing.T) {

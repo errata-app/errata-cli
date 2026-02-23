@@ -16,14 +16,22 @@ var (
 	hunkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#0087AF"))
 )
 
-// RenderDiffs returns a multi-line string showing diffs for all successful responses.
+// RenderDiffs returns a multi-line string showing diffs for all responses, including errors.
 func RenderDiffs(responses []models.ModelResponse) string {
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000"))
 	var sb strings.Builder
 	for i, resp := range responses {
+		color := colorFor(i)
+		ruleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color))
+
 		if !resp.OK() {
+			sb.WriteString(ruleStyle.Render(fmt.Sprintf("── %s  %dms  error ", resp.ModelID, resp.LatencyMS)))
+			sb.WriteByte('\n')
+			sb.WriteString(errStyle.Render("  " + resp.Error))
+			sb.WriteString("\n\n")
 			continue
 		}
-		color := colorFor(i)
+
 		meta := fmt.Sprintf("%dms", resp.LatencyMS)
 		if tot := resp.InputTokens + resp.OutputTokens; tot > 0 {
 			meta += "  ·  " + fmtTokens(tot) + " tok"
@@ -31,9 +39,7 @@ func RenderDiffs(responses []models.ModelResponse) string {
 				meta += fmt.Sprintf("  ·  $%.4f", resp.CostUSD)
 			}
 		}
-		rule := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).
-			Render(fmt.Sprintf("── %s  %s ", resp.ModelID, meta))
-		sb.WriteString(rule)
+		sb.WriteString(ruleStyle.Render(fmt.Sprintf("── %s  %s ", resp.ModelID, meta)))
 		sb.WriteByte('\n')
 
 		if len(resp.ProposedWrites) == 0 {
@@ -92,15 +98,21 @@ func renderFileDiff(fd diff.FileDiff) string {
 }
 
 // RenderSelectionMenu returns the numbered selection prompt string.
+// Failed responses are shown as non-selectable; only OK responses get numbers.
 func RenderSelectionMenu(responses []models.ModelResponse) string {
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	var sb strings.Builder
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Render("Select a response to apply:"))
 	sb.WriteByte('\n')
 
-	for i, resp := range responses {
+	selIdx := 0
+	for _, resp := range responses {
 		if !resp.OK() {
+			sb.WriteString(dimStyle.Render(fmt.Sprintf("  -  %-30s (error)", resp.ModelID)))
+			sb.WriteByte('\n')
 			continue
 		}
+		selIdx++
 		var files []string
 		for _, fw := range resp.ProposedWrites {
 			files = append(files, fw.Path)
@@ -114,7 +126,7 @@ func RenderSelectionMenu(responses []models.ModelResponse) string {
 			cost = fmt.Sprintf("  $%.4f", resp.CostUSD)
 		}
 		line := fmt.Sprintf("  %d  %-30s (%dms%s)   →  %s",
-			i+1, resp.ModelID, resp.LatencyMS, cost, fileStr)
+			selIdx, resp.ModelID, resp.LatencyMS, cost, fileStr)
 		sb.WriteString(line)
 		sb.WriteByte('\n')
 	}
