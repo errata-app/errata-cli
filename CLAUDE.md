@@ -2,10 +2,14 @@
 
 ## Project Overview
 
-**Errata** is a CLI tool that sends programming prompts to multiple AI models simultaneously,
+**Errata** is a tool that sends programming prompts to multiple AI models simultaneously,
 runs each as a coding agent with `read_file` / `write_file` tools, shows live tool-event panels,
 lets the user select the best proposal, and applies the winner's file writes to disk.
 Every selection is logged for preference analysis over time.
+
+Two user surfaces share the same core engine:
+- **TUI** (`./errata`) — bubbletea REPL for terminal use
+- **Web** (`./errata serve`) — browser UI over WebSocket, persists history in localStorage
 
 ---
 
@@ -14,9 +18,11 @@ Every selection is logged for preference analysis over time.
 - **Language:** Go 1.23+
 - **CLI:** `github.com/spf13/cobra` — subcommand routing and `--help`
 - **TUI:** `github.com/charmbracelet/bubbletea` + `github.com/charmbracelet/lipgloss`
+- **Web:** `net/http` + `github.com/coder/websocket` (embedded static assets via `//go:embed`)
 - **AI SDKs:** `anthropic-sdk-go v1.26`, `openai-go v1.12`, `google/generative-ai-go v0.20.1`
 - **Config:** `github.com/joho/godotenv` + `os.Getenv`
 - **Preferences:** append-only JSONL at `data/preferences.jsonl`
+- **Run logs:** append-only JSONL at `data/log.jsonl` (via `internal/logging`)
 - **Distribution:** single static binary; cross-compiled via `make build-all`
 
 ---
@@ -33,6 +39,7 @@ errata/
 │   ├── models/
 │   │   ├── base.go          # ModelAdapter interface, AgentEvent, ModelResponse
 │   │   ├── registry.go      # NewAdapter(), ListAdapters() — prefix routing
+│   │   ├── pricing.go       # pricingTable, CostUSD() — hardcoded $/M-token rates
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
 │   │   └── gemini.go        # GeminiAdapter.RunAgent()
@@ -41,14 +48,23 @@ errata/
 │   ├── tools/
 │   │   └── tools.go         # FileWrite, ToolDef, ExecuteRead(), ApplyWrites()
 │   ├── diff/
-│   │   └── diff.go          # Compute() → FileDiff (LCS; shared by TUI + future web)
+│   │   └── diff.go          # Compute() → FileDiff (LCS; shared by TUI + web)
 │   ├── preferences/
 │   │   └── preferences.go   # Record(), LoadAll(), Summarize()
-│   └── ui/
-│       ├── app.go           # bubbletea program, mode state machine
-│       ├── panels.go        # live agent panel rendering
-│       ├── diff.go          # diff + selection menu rendering
-│       └── keys.go          # key bindings
+│   ├── logging/
+│   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
+│   ├── ui/
+│   │   ├── app.go           # bubbletea program, mode state machine
+│   │   ├── panels.go        # live agent panel rendering + fmtTokens()
+│   │   ├── diff.go          # diff + selection menu rendering
+│   │   └── keys.go          # key bindings
+│   └── web/
+│       ├── server.go        # Server struct, route registration, embedded static assets
+│       ├── handlers.go      # WebSocket handler, REST handlers (/api/stats, /api/models)
+│       └── static/
+│           ├── index.html
+│           ├── style.css
+│           └── app.js
 ├── go.mod / go.sum
 └── Makefile
 ```
@@ -60,6 +76,8 @@ errata/
 ```bash
 go build -o errata ./cmd/errata   # build binary
 ./errata                           # start TUI REPL
+./errata serve                     # start web server (default :8080)
+./errata serve --port 3000         # custom port
 ./errata stats                     # print preference summary (non-interactive)
 make test                          # go test ./...
 make lint                          # golangci-lint run ./...
@@ -70,36 +88,140 @@ make build-all                     # cross-compile darwin/linux/windows to dist/
 
 ## REPL Slash Commands
 
+Both the TUI and the web textarea accept slash commands.
+
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
-| `/models` | List currently active models |
-| `/exit` or `/quit` | Exit |
-| `Ctrl-D` | Exit |
+| `/models` | List currently active models (marks filter if set) |
+| `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
+| `/model` | Reset model filter back to all configured models |
+| `/exit` or `/quit` | Exit (TUI only) |
+| `Ctrl-D` | Exit (TUI only) |
+
+**Verbose mode** defaults to **off** in the TUI and **on** in the web UI (since the web is
+designed for discussion and text responses are useful there).
 
 ---
 
 ## Core Workflow
 
-1. User types a prompt in the REPL
-2. `runner.RunAll()` fans out to all adapters concurrently via goroutines
+1. User types a prompt (TUI REPL or web textarea)
+2. `runner.RunAll()` fans out to all active adapters concurrently via goroutines
 3. Each adapter runs a multi-turn agentic loop:
    - `read_file` calls execute immediately (path-traversal guarded, read-only)
    - `write_file` calls are **intercepted** — stored as proposals, not written to disk
    - Loop exits when the model stops calling tools
-4. `ui` renders live tool-event panels while goroutines run
-5. After all agents finish, a compact diff view shows each model's proposed changes
-6. User selects a number; that model's `ProposedWrites` are applied via `tools.ApplyWrites()`
-7. Preference entry appended to `data/preferences.jsonl`
+4. Live tool-event panels render while goroutines run
+5. If no model proposed any file writes, responses are shown as text and the run ends
+6. Otherwise a compact diff view shows each model's proposed changes
+7. User selects a response; that model's `ProposedWrites` are applied via `tools.ApplyWrites()`
+8. Preference entry appended to `data/preferences.jsonl`
 
 Agent timeout: **5 minutes** per adapter (`context.WithTimeout`).
 
 ---
 
-## Package Import Graph
+## Token Usage & Cost
 
-Understanding the import relationships prevents cycles:
+Every adapter accumulates `InputTokens` and `OutputTokens` across all turns of its agentic
+loop. `models.CostUSD(modelID, input, output)` looks up per-million-token rates from
+`internal/models/pricing.go` and returns the estimated USD cost (0 for unknown model IDs).
+
+These are surfaced in:
+- **TUI panels** — `done  1234ms  ·  8.4k tok  ·  $0.0083` in the panel status line
+- **TUI diff headers** — same stats in the `── model-id  …` section separator
+- **TUI selection menu** — `(1234ms  $0.0083)` next to each option
+- **Web diff headers and selection buttons** — same format
+
+`pricing.go` must be updated manually when providers change their published rates.
+
+---
+
+## Model Filtering (`/model`)
+
+Both surfaces maintain a per-session **active adapter filter** (nil = use all). The filter
+is sticky — it persists across prompts until explicitly reset.
+
+- `/model claude-sonnet-4-6` → only that adapter runs for subsequent prompts
+- `/model claude-sonnet-4-6 gpt-4o` → two adapters run
+- `/model` (bare) → reset to all configured adapters
+
+Validation is **strict**: unknown model IDs are rejected immediately with the list of
+available IDs. No changes take effect if any ID in the list is invalid.
+
+**Implementation:** `App.activeAdapters` (TUI) and `activeAdapters` local var (web, per
+connection). Both pass the filtered slice to `runner.RunAll`; only filtered panels are
+created. The server-side WebSocket message type is `set_models`; client sends
+`{type: "set_models", model_ids: [...]}`, server replies `{type: "models_set", models: [...]}`.
+
+---
+
+## Run Logging (`internal/logging`)
+
+Every `RunAgent` call is logged to an append-only JSONL file (`data/log.jsonl` by default).
+The `logging.Wrap` / `logging.WrapAll` functions return a `ModelAdapter` decorator that
+intercepts `RunAgent`, collects all tool events, and appends a structured `Entry` after
+the call returns. Pass `nil` to disable logging with zero overhead.
+
+Log schema per line:
+```json
+{
+  "ts": "...", "session_id": "...", "run_id": "...", "model_id": "...", "prompt": "...",
+  "events": [{"type": "reading|writing|text|error", "data": "..."}],
+  "response": {
+    "text": "...", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+    "latency_ms": 0, "proposed_files": ["..."],
+    "writes": [{"path": "...", "content": "..."}], "error": ""
+  }
+}
+```
+
+---
+
+## Web Architecture
+
+The web server embeds all static assets at compile time (`//go:embed static`).
+Each browser tab gets one persistent WebSocket connection; the server maintains
+per-connection state (active adapter filter, last run results, cancel function).
+
+### WebSocket message protocol
+
+**Client → Server:**
+
+| `type` | Fields | Description |
+|--------|--------|-------------|
+| `run` | `prompt`, `verbose` | Start a new agent run |
+| `select` | `model_id` | Apply a model's proposed writes |
+| `cancel` | — | Cancel the running agents |
+| `set_models` | `model_ids` | Set model filter (empty = reset to all) |
+
+**Server → Client:**
+
+| `type` | Fields | Description |
+|--------|--------|-------------|
+| `agent_event` | `model_id`, `event_type`, `data` | Streaming tool event |
+| `complete` | `responses[]` | All agents finished; payload includes diffs, tokens, cost |
+| `applied` | `applied[]` | File writes applied successfully |
+| `cancelled` | — | Run was cancelled |
+| `models_set` | `models[]` | Confirms new active model filter |
+| `error` | `message` | Server-side error |
+
+### Web client state machine
+
+```
+idle → running → selecting → idle
+                    ↓
+                 (skip)
+```
+
+History is persisted to `localStorage` (capped at 50 entries). Completed runs are stored
+as typed `{type:'run'}` entries that render as collapsible panels in the history view.
+
+---
+
+## Package Import Graph
 
 ```
 tools       ← stdlib only
@@ -107,9 +229,11 @@ models      ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
 config      ← stdlib only
 runner      ← models, context, sync
 diff        ← os, strings, sergi/go-diff
+logging     ← models (ModelAdapter, ModelResponse), stdlib
 preferences ← models (for ModelResponse latency/ID), encoding/json, os
 ui          ← models, tools, runner, diff, bubbletea, lipgloss
-cmd/errata  ← config, models, preferences, ui
+web         ← models, runner, tools, diff, preferences, logging, coder/websocket
+cmd/errata  ← config, models, preferences, logging, ui, web
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -123,8 +247,12 @@ This is intentional — moving it to `models` would create a cycle since adapter
 Each adapter (`anthropic.go`, `openai.go`, `gemini.go`) follows the same pattern:
 
 ```go
+var totalInput, totalOutput int64
 for {
     resp := callAPI(messages, tools)
+    // accumulate token usage across turns:
+    totalInput  += resp.Usage.InputTokens
+    totalOutput += resp.Usage.OutputTokens
     for _, block := range resp.Content {
         if block is text  → collect text, optionally emit AgentEvent{Type:"text"}
         if block is tool_use:
@@ -134,18 +262,22 @@ for {
     if no tool calls → break
     append tool results to messages, loop
 }
-return ModelResponse{..., ProposedWrites: proposed}
+return ModelResponse{
+    ...,
+    InputTokens:  totalInput,
+    OutputTokens: totalOutput,
+    CostUSD:      CostUSD(modelID, totalInput, totalOutput),
+    ProposedWrites: proposed,
+}
 ```
 
-The loop always feeds tool results back before the next turn. Writes are **never** executed
-inside the loop — they accumulate in `proposed []tools.FileWrite` and are returned in
-`ModelResponse.ProposedWrites`.
+Tokens are accumulated across all turns (each turn re-sends context, so input grows).
+Writes are **never** executed inside the loop — they accumulate in `proposed` and are
+returned in `ModelResponse.ProposedWrites`.
 
 ---
 
 ## Provider SDK Notes
-
-Each SDK has its own naming conventions for the same concepts. Key details:
 
 ### Anthropic (`anthropic-sdk-go v1.26`)
 - Response content: `[]ContentBlockUnion` — use `.AsText()`, `.AsToolUse()` to downcast
@@ -154,6 +286,7 @@ Each SDK has its own naming conventions for the same concepts. Key details:
 - Tool results: `anthropic.NewToolResultBlock(toolUseID, content, isError)` → `ContentBlockParamUnion`
 - Tool definitions: `ToolUnionParam{OfTool: &ToolParam{...}}` with `ToolInputSchemaParam`
 - `anthropic.String(s)` wraps a string in `param.Opt[string]` for optional fields
+- Token usage: `resp.Usage.InputTokens` / `resp.Usage.OutputTokens` (both `int64`)
 
 ### OpenAI (`openai-go v1.12`)
 - Convenience constructors: `openai.UserMessage(s)`, `openai.ToolMessage(content, toolCallID)`
@@ -162,6 +295,7 @@ Each SDK has its own naming conventions for the same concepts. Key details:
 - Function arguments are a JSON string: `json.Unmarshal([]byte(tc.Function.Arguments), &input)`
 - Tool definitions: `ChatCompletionToolParam{Function: shared.FunctionDefinitionParam{...}}`
 - `shared.FunctionParameters` is `map[string]any` — pass the full JSON schema object
+- Token usage: `resp.Usage.PromptTokens` / `resp.Usage.CompletionTokens` (guard nil `resp.Usage`)
 
 ### Gemini (`google/generative-ai-go v0.20.1`)
 - Use `genai.NewClient(ctx, option.WithAPIKey(key))` then `client.GenerativeModel(modelID)`
@@ -171,6 +305,7 @@ Each SDK has its own naming conventions for the same concepts. Key details:
 - Tool schemas: `*genai.Tool{FunctionDeclarations: []*genai.FunctionDeclaration{...}}`
   with `*genai.Schema{Type: genai.TypeObject, Properties: ..., Required: ...}`
 - `extractStringArgs` helper converts `map[string]any` args to `map[string]string`
+- Token usage: `resp.UsageMetadata.PromptTokenCount` / `resp.UsageMetadata.CandidatesTokenCount` (guard nil)
 
 ---
 
@@ -182,22 +317,23 @@ The TUI uses the Elm architecture: `Model → View`, `Update` on messages.
 ```
 idle → running → selecting → idle
                     ↓
-                 (skip)
+                 (skip / no writes)
 ```
 
 - **idle**: `textarea` visible, slash commands handled, history shown
 - **running**: agent panels rendered live; goroutines send `agentEventMsg` via `prog.Send()`
 - **selecting**: diff view + numbered menu; key input collected character by character
+- **no-writes shortcut**: if no adapter proposed any writes, skip selecting and return to idle
 
 ### Goroutine → TUI communication
 ```go
-go func() {
+return a, func() tea.Msg {
     responses := runner.RunAll(ctx, adapters, prompt,
         func(modelID string, event models.AgentEvent) {
             prog.Send(agentEventMsg{modelID, event})  // safe from any goroutine
         }, verbose)
-    prog.Send(runCompleteMsg{responses})
-}()
+    return runCompleteMsg{responses}
+}
 ```
 
 `tea.Cmd` is returned from `Update` to start the goroutine; `program.Send()` injects
@@ -212,6 +348,7 @@ long-running concurrent work.
 diffs via `DiffLinesToRunes` → `DiffMainRunes` → `DiffCharsToLines`.
 Output is a flat list of `Add / Remove / Context` lines, capped at `MaxDiffLines = 20`.
 Hunk headers (`@@`) are omitted; instead, a "… N more lines" truncation notice is shown.
+Used by both TUI (`internal/ui/diff.go`) and web (`internal/web/handlers.go`).
 
 ---
 
@@ -257,13 +394,14 @@ Append-only. Corrupt lines are skipped with `log.Printf` (never crash on bad dat
 
 ## Development Guidelines
 
-- All rendering (lipgloss, panel layout, diff colors) lives in `internal/ui/` — no lipgloss imports elsewhere
+- All TUI rendering (lipgloss, panel layout, diff colors) lives in `internal/ui/` — no lipgloss imports elsewhere
 - Tool schemas are defined once in `internal/tools/` and translated per-provider in each adapter
-- `internal/diff/` has no external dependencies — keep it that way for future web reuse
+- `internal/diff/` has no external dependencies — keep it that way
 - Preferences are append-only — always `O_APPEND|O_CREATE`, never truncate
 - If a model's API key is missing, skip it with a warning; never crash on missing keys
 - Context cancellation (`ctx.Done()`) propagates through all adapter API calls automatically
 - Each adapter has a compile-time interface check: `var _ ModelAdapter = (*XAdapter)(nil)`
+- `pricing.go` rates are hardcoded and must be updated manually — no runtime fetch
 
 ---
 
@@ -285,4 +423,5 @@ Table-driven tests preferred for config, preferences, and diff packages.
 
 - `.env`
 - `data/preferences.jsonl` (contains prompt history)
+- `data/log.jsonl` (contains full prompt + response content)
 - `dist/` (compiled binaries from `make build-all`)

@@ -43,9 +43,10 @@ const (
 
 // App is the bubbletea model.
 type App struct {
-	adapters  []models.ModelAdapter
-	prefPath  string
-	sessionID string
+	adapters       []models.ModelAdapter
+	activeAdapters []models.ModelAdapter // nil = use all adapters
+	prefPath       string
+	sessionID      string
 
 	mode    mode
 	verbose bool
@@ -58,9 +59,9 @@ type App struct {
 	histIdx int
 
 	// running
-	panels    []*panelState
-	panelIdx  map[string]int
-	prog      *tea.Program
+	panels   []*panelState
+	panelIdx map[string]int
+	prog     *tea.Program
 
 	// selecting
 	responses  []models.ModelResponse
@@ -139,13 +140,31 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// mark all panels done
 		for _, resp := range msg.responses {
 			if idx, ok := a.panelIdx[resp.ModelID]; ok {
-				a.panels[idx].done         = true
-				a.panels[idx].latencyMS    = resp.LatencyMS
-				a.panels[idx].inputTokens  = resp.InputTokens
+				a.panels[idx].done = true
+				a.panels[idx].latencyMS = resp.LatencyMS
+				a.panels[idx].inputTokens = resp.InputTokens
 				a.panels[idx].outputTokens = resp.OutputTokens
-				a.panels[idx].costUSD      = resp.CostUSD
+				a.panels[idx].costUSD = resp.CostUSD
 			}
 		}
+		// If no model proposed any writes, show text in history and return to idle.
+		hasWrites := false
+		for _, resp := range msg.responses {
+			if len(resp.ProposedWrites) > 0 {
+				hasWrites = true
+				break
+			}
+		}
+		if !hasWrites {
+			for _, resp := range msg.responses {
+				if resp.OK() && resp.Text != "" {
+					a.history = append(a.history, fmt.Sprintf("[%s] %s", resp.ModelID, resp.Text))
+				}
+			}
+			a.mode = modeIdle
+			return a, nil
+		}
+
 		a.responses = msg.responses
 		a.mode = modeSelecting
 		a.selection = ""
@@ -187,8 +206,17 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
-	// slash commands
-	switch strings.ToLower(strings.TrimSpace(prompt)) {
+	trimmed := strings.TrimSpace(prompt)
+	lower := strings.ToLower(trimmed)
+
+	// /model is a prefix command (takes optional args)
+	if lower == "/model" || strings.HasPrefix(lower, "/model ") {
+		args := strings.TrimSpace(trimmed[len("/model"):])
+		return a.handleModelCommand(args)
+	}
+
+	// slash commands (exact match)
+	switch lower {
 	case "/exit", "/quit":
 		return a, tea.Quit
 	case "/verbose":
@@ -200,11 +228,22 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 		a.history = append(a.history, fmt.Sprintf("Verbose mode %s.", state))
 		return a, nil
 	case "/models":
+		active := a.activeAdapters
+		if active == nil {
+			active = a.adapters
+		}
 		var ids []string
-		for _, ad := range a.adapters {
+		for _, ad := range active {
 			ids = append(ids, ad.ID())
 		}
-		a.history = append(a.history, "Models: "+strings.Join(ids, ", "))
+		suffix := ""
+		if a.activeAdapters != nil {
+			suffix = " (filtered)"
+		}
+		a.history = append(a.history, "Models: "+strings.Join(ids, ", ")+suffix)
+		return a, nil
+	case "/clear":
+		a.history = nil
 		return a, nil
 	case "/help":
 		a.history = append(a.history, helpText())
@@ -212,16 +251,21 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	}
 
 	// launch agents
+	toRun := a.adapters
+	if a.activeAdapters != nil {
+		toRun = a.activeAdapters
+	}
+
 	a.lastPrompt = prompt
 	a.mode = modeRunning
 	a.panels = nil
 	a.panelIdx = make(map[string]int)
-	for i, ad := range a.adapters {
+	for i, ad := range toRun {
 		a.panels = append(a.panels, newPanelState(ad.ID(), i))
 		a.panelIdx[ad.ID()] = i
 	}
 
-	adapters := a.adapters
+	adapters := toRun
 	verbose := a.verbose
 	prog := a.prog
 
@@ -354,12 +398,58 @@ func (a App) View() string {
 	return sb.String()
 }
 
+func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {
+	if args == "" {
+		// Reset to all models.
+		a.activeAdapters = nil
+		var ids []string
+		for _, ad := range a.adapters {
+			ids = append(ids, ad.ID())
+		}
+		a.history = append(a.history, "Active models: all — "+strings.Join(ids, ", "))
+		return a, nil
+	}
+
+	requested := strings.Fields(args)
+	var selected []models.ModelAdapter
+	for _, id := range requested {
+		var found models.ModelAdapter
+		for _, ad := range a.adapters {
+			if ad.ID() == id {
+				found = ad
+				break
+			}
+		}
+		if found == nil {
+			var available []string
+			for _, ad := range a.adapters {
+				available = append(available, ad.ID())
+			}
+			a.history = append(a.history, fmt.Sprintf(
+				"Unknown model %q. Available: %s", id, strings.Join(available, ", "),
+			))
+			return a, nil
+		}
+		selected = append(selected, found)
+	}
+
+	a.activeAdapters = selected
+	var ids []string
+	for _, ad := range selected {
+		ids = append(ids, ad.ID())
+	}
+	a.history = append(a.history, "Active models: "+strings.Join(ids, ", "))
+	return a, nil
+}
+
 func helpText() string {
 	return `Commands:
-  /help     Show this message
-  /verbose  Toggle verbose mode
-  /models   List active models
-  /exit     Exit`
+  /help              Show this message
+  /clear             Clear display history
+  /verbose           Toggle verbose mode
+  /models            List active models
+  /model [id...]     Restrict to model(s); bare /model resets to all
+  /exit              Exit`
 }
 
 // Run starts the bubbletea program and blocks until exit.

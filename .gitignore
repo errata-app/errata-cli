@@ -1,5 +1,6 @@
 .env
 data/preferences.jsonl
+data/log.jsonl
 __pycache__/
 *.pyc
 *.pyo
