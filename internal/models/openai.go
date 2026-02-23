@@ -40,6 +40,7 @@ func (a *OpenAIAdapter) RunAgent(
 	var textParts []string
 	var proposed []tools.FileWrite
 	var totalInput, totalOutput int64
+	var resolvedModel string
 	start := time.Now()
 
 	for {
@@ -59,6 +60,9 @@ func (a *OpenAIAdapter) RunAgent(
 			}, err
 		}
 
+		if resolvedModel == "" {
+			resolvedModel = resp.Model
+		}
 		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
 			totalInput += resp.Usage.PromptTokens
 			totalOutput += resp.Usage.CompletionTokens
@@ -105,8 +109,11 @@ func (a *OpenAIAdapter) RunAgent(
 		}
 	}
 
+	if resolvedModel == "" {
+		resolvedModel = a.modelID
+	}
 	return ModelResponse{
-		ModelID:        a.modelID,
+		ModelID:        resolvedModel,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,

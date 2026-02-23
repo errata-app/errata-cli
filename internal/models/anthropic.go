@@ -40,6 +40,7 @@ func (a *AnthropicAdapter) RunAgent(
 	var textParts []string
 	var proposed []tools.FileWrite
 	var totalInput, totalOutput int64
+	var resolvedModel string
 	start := time.Now()
 
 	for {
@@ -59,7 +60,9 @@ func (a *AnthropicAdapter) RunAgent(
 				Error:        err.Error(),
 			}, err
 		}
-
+		if resolvedModel == "" {
+			resolvedModel = string(resp.Model)
+		}
 		totalInput += resp.Usage.InputTokens
 		totalOutput += resp.Usage.OutputTokens
 
@@ -105,8 +108,11 @@ func (a *AnthropicAdapter) RunAgent(
 		messages = append(messages, anthropic.NewUserMessage(toolResults...))
 	}
 
+	if resolvedModel == "" {
+		resolvedModel = a.modelID
+	}
 	return ModelResponse{
-		ModelID:        a.modelID,
+		ModelID:        resolvedModel,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,

@@ -19,7 +19,7 @@ Two user surfaces share the same core engine:
 - **CLI:** `github.com/spf13/cobra` — subcommand routing and `--help`
 - **TUI:** `github.com/charmbracelet/bubbletea` + `github.com/charmbracelet/lipgloss`
 - **Web:** `net/http` + `github.com/coder/websocket` (embedded static assets via `//go:embed`)
-- **AI SDKs:** `anthropic-sdk-go v1.26`, `openai-go v1.12`, `google/generative-ai-go v0.20.1`
+- **AI SDKs:** `anthropic-sdk-go v1.26`, `openai-go v1.12`, `google.golang.org/genai v1.47`
 - **Config:** `github.com/joho/godotenv` + `os.Getenv`
 - **Preferences:** append-only JSONL at `data/preferences.jsonl`
 - **Run logs:** append-only JSONL at `data/log.jsonl` (via `internal/logging`)
@@ -297,15 +297,16 @@ returned in `ModelResponse.ProposedWrites`.
 - `shared.FunctionParameters` is `map[string]any` — pass the full JSON schema object
 - Token usage: `resp.Usage.PromptTokens` / `resp.Usage.CompletionTokens` (guard nil `resp.Usage`)
 
-### Gemini (`google/generative-ai-go v0.20.1`)
-- Use `genai.NewClient(ctx, option.WithAPIKey(key))` then `client.GenerativeModel(modelID)`
-- Tool-use loop via `model.StartChat()` → `chat.SendMessage(ctx, parts...)`
-- Response parts: `resp.Candidates[0].Content.Parts` — type-switch on `genai.Text` vs `genai.FunctionCall`
-- Tool results: send back `genai.FunctionResponse{Name, Response}` as the next message parts
-- Tool schemas: `*genai.Tool{FunctionDeclarations: []*genai.FunctionDeclaration{...}}`
-  with `*genai.Schema{Type: genai.TypeObject, Properties: ..., Required: ...}`
-- `extractStringArgs` helper converts `map[string]any` args to `map[string]string`
-- Token usage: `resp.UsageMetadata.PromptTokenCount` / `resp.UsageMetadata.CandidatesTokenCount` (guard nil)
+### Gemini (`google.golang.org/genai v1.47`)
+- Use `genai.NewClient(ctx, &genai.ClientConfig{APIKey: key})`
+- Tool-use loop via `client.Models.GenerateContent(ctx, modelID, contents, config)` with manually managed `[]*genai.Content` history
+- Response parts: `resp.Candidates[0].Content.Parts` — check `part.Text != ""` and `part.FunctionCall != nil`
+- `part.FunctionCall.Args` is already `map[string]any` — use `extractStringMap` to convert to `map[string]string`
+- Tool results: `genai.NewPartFromFunctionResponse(name, map[string]any{"result": ...})`, appended as a user turn via `genai.NewContentFromParts(toolResults, genai.RoleUser)`
+- Tool schemas: `&genai.Tool{FunctionDeclarations: []*genai.FunctionDeclaration{...}}`
+  with `&genai.Schema{Type: genai.TypeObject, Properties: ..., Required: ...}`, passed in `GenerateContentConfig.Tools`
+- Token usage: `resp.UsageMetadata.PromptTokenCount` / `resp.UsageMetadata.CandidatesTokenCount` (int32, guard nil)
+- Model version: `resp.ModelVersion` (string) — populated in response, used as `ModelID` in `ModelResponse`
 
 ---
 

@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
+
 	"github.com/suarezc/errata/internal/tools"
-	"google.golang.org/api/option"
 )
 
 // GeminiAdapter implements ModelAdapter for Gemini models.
@@ -28,28 +28,26 @@ func (a *GeminiAdapter) RunAgent(
 	onEvent func(AgentEvent),
 	verbose bool,
 ) (ModelResponse, error) {
-	client, err := genai.NewClient(ctx, option.WithAPIKey(a.apiKey))
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: a.apiKey})
 	if err != nil {
 		return ModelResponse{ModelID: a.modelID, Error: err.Error()}, err
 	}
-	defer client.Close()
 
-	model := client.GenerativeModel(a.modelID)
-	model.Tools = buildGeminiTools()
-
-	chat := model.StartChat()
+	config := &genai.GenerateContentConfig{
+		Tools: buildGeminiTools(),
+	}
+	contents := []*genai.Content{
+		genai.NewContentFromText(prompt, genai.RoleUser),
+	}
 
 	var textParts []string
 	var proposed []tools.FileWrite
 	var totalInput, totalOutput int64
+	var resolvedModel string
 	start := time.Now()
 
-	userMsg := genai.Text(prompt)
-	var currentMsg []genai.Part
-	currentMsg = append(currentMsg, userMsg)
-
 	for {
-		resp, err := chat.SendMessage(ctx, currentMsg...)
+		resp, err := client.Models.GenerateContent(ctx, a.modelID, contents, config)
 		if err != nil {
 			return ModelResponse{
 				ModelID:      a.modelID,
@@ -61,55 +59,61 @@ func (a *GeminiAdapter) RunAgent(
 			}, err
 		}
 
+		if resolvedModel == "" && resp.ModelVersion != "" {
+			resolvedModel = resp.ModelVersion
+		}
+
 		if resp.UsageMetadata != nil {
 			totalInput += int64(resp.UsageMetadata.PromptTokenCount)
 			totalOutput += int64(resp.UsageMetadata.CandidatesTokenCount)
 		}
 
-		candidate := resp.Candidates[0]
-		var funcResponses []genai.Part
-		currentMsg = nil
+		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+			break
+		}
+		modelContent := resp.Candidates[0].Content
+		contents = append(contents, modelContent)
 
-		for _, part := range candidate.Content.Parts {
-			switch v := part.(type) {
-			case genai.Text:
-				textParts = append(textParts, string(v))
+		var toolResults []*genai.Part
+		for _, part := range modelContent.Parts {
+			if part.Text != "" {
+				textParts = append(textParts, part.Text)
 				if verbose {
-					onEvent(AgentEvent{Type: "text", Data: string(v)})
+					onEvent(AgentEvent{Type: "text", Data: part.Text})
 				}
+			}
 
-			case genai.FunctionCall:
-				args := extractStringArgs(v.Args)
-				switch v.Name {
+			if part.FunctionCall != nil {
+				fc := part.FunctionCall
+				args := extractStringMap(fc.Args)
+
+				switch fc.Name {
 				case tools.ReadToolName:
 					path := args["path"]
 					onEvent(AgentEvent{Type: "reading", Data: path})
 					content := tools.ExecuteRead(path)
-					funcResponses = append(funcResponses, genai.FunctionResponse{
-						Name:     v.Name,
-						Response: map[string]any{"result": content},
-					})
+					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"result": content}))
 
 				case tools.WriteToolName:
 					path := args["path"]
 					onEvent(AgentEvent{Type: "writing", Data: path})
 					proposed = append(proposed, tools.FileWrite{Path: path, Content: args["content"]})
-					funcResponses = append(funcResponses, genai.FunctionResponse{
-						Name:     v.Name,
-						Response: map[string]any{"result": "Write queued — will be applied if selected."},
-					})
+					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"result": "Write queued — will be applied if selected."}))
 				}
 			}
 		}
 
-		if len(funcResponses) == 0 {
+		if len(toolResults) == 0 {
 			break
 		}
-		currentMsg = funcResponses
+		contents = append(contents, genai.NewContentFromParts(toolResults, genai.RoleUser))
 	}
 
+	if resolvedModel == "" {
+		resolvedModel = a.modelID
+	}
 	return ModelResponse{
-		ModelID:        a.modelID,
+		ModelID:        resolvedModel,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,
@@ -144,12 +148,6 @@ func buildGeminiTools() []*genai.Tool {
 	return []*genai.Tool{{FunctionDeclarations: decls}}
 }
 
-func extractStringArgs(args map[string]any) map[string]string {
-	out := make(map[string]string, len(args))
-	for k, v := range args {
-		if s, ok := v.(string); ok {
-			out[k] = s
-		}
-	}
-	return out
+func init() {
+	var _ ModelAdapter = (*GeminiAdapter)(nil)
 }
