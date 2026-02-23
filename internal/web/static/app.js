@@ -13,8 +13,8 @@ function fmtStat(resp) {
   const tot = (resp.input_tokens || 0) + (resp.output_tokens || 0);
   if (tot > 0) s += '  ·  ' + fmtTokens(tot) + ' tok';
   if (resp.cost_usd > 0) s += '  ·  $' + resp.cost_usd.toFixed(4);
-  if (resp.context_window_tokens > 0 && resp.hist_tokens > 0) {
-    s += '  ·  ~' + Math.round(resp.hist_tokens / resp.context_window_tokens * 100) + '% ctx';
+  if (resp.context_window_tokens > 0 && resp.input_tokens > 0) {
+    s += '  ·  ~' + Math.round(resp.input_tokens / resp.context_window_tokens * 100) + '% ctx';
   }
   return s;
 }
@@ -40,7 +40,6 @@ function slimResponse(r) {
     input_tokens:          r.input_tokens           || 0,
     output_tokens:         r.output_tokens          || 0,
     cost_usd:              r.cost_usd               || 0,
-    hist_tokens:           r.hist_tokens            || 0,
     context_window_tokens: r.context_window_tokens  || 0,
     error:                 r.error                  || '',
     text:                  r.text                   || '',
