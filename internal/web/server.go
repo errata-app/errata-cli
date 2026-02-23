@@ -1,0 +1,52 @@
+// Package web implements the HTTP server for the Errata web interface.
+// The frontend communicates over a single WebSocket connection per browser session.
+package web
+
+import (
+	"crypto/rand"
+	"embed"
+	"encoding/hex"
+	"io/fs"
+	"net/http"
+
+	"github.com/suarezc/errata/internal/models"
+)
+
+//go:embed static
+var staticFiles embed.FS
+
+// Server is the Errata web interface.
+type Server struct {
+	adapters  []models.ModelAdapter
+	prefPath  string
+	sessionID string
+}
+
+// New creates a Server. A fresh session ID is generated on each call.
+func New(adapters []models.ModelAdapter, prefPath string) *Server {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return &Server{
+		adapters:  adapters,
+		prefPath:  prefPath,
+		sessionID: hex.EncodeToString(b),
+	}
+}
+
+// Start registers routes and begins serving on addr (e.g. ":8080").
+func (s *Server) Start(addr string) error {
+	mux := http.NewServeMux()
+
+	// Embedded static assets: /, /style.css, /app.js
+	sub, _ := fs.Sub(staticFiles, "static")
+	mux.Handle("GET /", http.FileServer(http.FS(sub)))
+
+	// WebSocket endpoint — one connection per browser session
+	mux.HandleFunc("GET /ws", s.handleWS)
+
+	// Stateless REST endpoints
+	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /api/models", s.handleModels)
+
+	return http.ListenAndServe(addr, mux)
+}
