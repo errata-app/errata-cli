@@ -170,6 +170,17 @@ func TestRunAll_LatencyRecorded(t *testing.T) {
 	assert.GreaterOrEqual(t, results[0].LatencyMS, int64(0))
 }
 
+func TestRunAll_NormalizesModelID(t *testing.T) {
+	// Adapter returns an API-resolved model name (e.g. "gpt-4o-2024-08-06").
+	// runner.RunAll must overwrite it with the configured adapter ID ("gpt-4o").
+	a := &stubAdapter{
+		id:       "gpt-4o",
+		response: models.ModelResponse{ModelID: "gpt-4o-2024-08-06", Text: "done"},
+	}
+	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, false)
+	assert.Equal(t, "gpt-4o", results[0].ModelID)
+}
+
 func TestRunAll_EmptyAdapters(t *testing.T) {
 	results := runner.RunAll(context.Background(), []models.ModelAdapter{}, nil, "p", func(string, models.AgentEvent) {}, false)
 	assert.Empty(t, results)

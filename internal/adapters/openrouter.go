@@ -8,7 +8,6 @@ import (
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -54,7 +53,6 @@ func (a *OpenRouterAdapter) RunAgent(
 	var textParts []string
 	var proposed []tools.FileWrite
 	var totalInput, totalOutput int64
-	var resolvedModel string
 	start := time.Now()
 
 	for {
@@ -64,19 +62,9 @@ func (a *OpenRouterAdapter) RunAgent(
 			Messages: messages,
 		})
 		if err != nil {
-			return models.ModelResponse{
-				ModelID:      a.modelID,
-				LatencyMS:    time.Since(start).Milliseconds(),
-				InputTokens:  totalInput,
-				OutputTokens: totalOutput,
-				CostUSD:      pricing.CostUSD(a.modelID, totalInput, totalOutput),
-				Error:        err.Error(),
-			}, err
+			return BuildErrorResponse(a.modelID, a.modelID, start, totalInput, totalOutput, err), err
 		}
 
-		if resolvedModel == "" {
-			resolvedModel = resp.Model
-		}
 		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
 			totalInput += resp.Usage.PromptTokens
 			totalOutput += resp.Usage.CompletionTokens
@@ -102,36 +90,14 @@ func (a *OpenRouterAdapter) RunAgent(
 		for _, tc := range msg.ToolCalls {
 			var input map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &input)
-			args := extractStringMap(input)
-
-			switch tc.Function.Name {
-			case tools.ReadToolName:
-				path := args["path"]
-				onEvent(models.AgentEvent{Type: "reading", Data: path})
-				content := tools.ExecuteRead(path)
-				messages = append(messages, openai.ToolMessage(content, tc.ID))
-
-			case tools.WriteToolName:
-				path := args["path"]
-				onEvent(models.AgentEvent{Type: "writing", Data: path})
-				proposed = append(proposed, tools.FileWrite{Path: path, Content: args["content"]})
-				messages = append(messages, openai.ToolMessage("Write queued — will be applied if selected.", tc.ID))
+			result, ok := DispatchTool(tc.Function.Name, extractStringMap(input), onEvent, &proposed)
+			if ok {
+				messages = append(messages, openai.ToolMessage(result, tc.ID))
 			}
 		}
 	}
 
-	if resolvedModel == "" {
-		resolvedModel = a.modelID
-	}
-	return models.ModelResponse{
-		ModelID:        resolvedModel,
-		Text:           join(textParts),
-		LatencyMS:      time.Since(start).Milliseconds(),
-		InputTokens:    totalInput,
-		OutputTokens:   totalOutput,
-		CostUSD:        pricing.CostUSD(a.modelID, totalInput, totalOutput),
-		ProposedWrites: proposed,
-	}, nil
+	return BuildSuccessResponse(a.modelID, a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
 func init() {

@@ -8,6 +8,17 @@ function fmtTokens(n) {
   return String(n);
 }
 
+function fmtStat(resp) {
+  let s = resp.latency_ms + 'ms';
+  const tot = (resp.input_tokens || 0) + (resp.output_tokens || 0);
+  if (tot > 0) s += '  ·  ' + fmtTokens(tot) + ' tok';
+  if (resp.cost_usd > 0) s += '  ·  $' + resp.cost_usd.toFixed(4);
+  if (resp.context_window_tokens > 0 && resp.hist_tokens > 0) {
+    s += '  ·  ~' + Math.round(resp.hist_tokens / resp.context_window_tokens * 100) + '% ctx';
+  }
+  return s;
+}
+
 function saveHistory() {
   try {
     localStorage.setItem('errata_history', JSON.stringify(history.slice(-50)));
@@ -24,13 +35,15 @@ function loadHistory() {
 // Slim down a full server response object to what we need to store.
 function slimResponse(r) {
   return {
-    model_id:      r.model_id,
-    latency_ms:    r.latency_ms    || 0,
-    input_tokens:  r.input_tokens  || 0,
-    output_tokens: r.output_tokens || 0,
-    cost_usd:      r.cost_usd      || 0,
-    error:         r.error         || '',
-    text:          r.text          || '',
+    model_id:              r.model_id,
+    latency_ms:            r.latency_ms             || 0,
+    input_tokens:          r.input_tokens           || 0,
+    output_tokens:         r.output_tokens          || 0,
+    cost_usd:              r.cost_usd               || 0,
+    hist_tokens:           r.hist_tokens            || 0,
+    context_window_tokens: r.context_window_tokens  || 0,
+    error:                 r.error                  || '',
+    text:                  r.text                   || '',
   };
 }
 
@@ -114,11 +127,7 @@ function handleServerMessage(msg) {
           if (resp.error) {
             hdr.textContent = resp.model_id + '  —  error';
           } else {
-            let stat = resp.latency_ms + 'ms';
-            const tot = (resp.input_tokens || 0) + (resp.output_tokens || 0);
-            if (tot > 0) stat += '  ·  ' + fmtTokens(tot) + ' tok';
-            if (resp.cost_usd > 0) stat += '  ·  $' + resp.cost_usd.toFixed(4);
-            hdr.textContent = resp.model_id + '  ·  ' + stat;
+            hdr.textContent = resp.model_id + '  ·  ' + fmtStat(resp);
           }
         });
 
@@ -391,11 +400,7 @@ function renderRunEntry(entry) {
     if (isErr) {
       hdr.textContent = resp.model_id + '  —  error';
     } else {
-      let stat = resp.latency_ms + 'ms';
-      const tot = resp.input_tokens + resp.output_tokens;
-      if (tot > 0) stat += '  ·  ' + fmtTokens(tot) + ' tok';
-      if (resp.cost_usd > 0) stat += '  ·  $' + resp.cost_usd.toFixed(4);
-      hdr.textContent = resp.model_id + '  ·  ' + stat;
+      hdr.textContent = resp.model_id + '  ·  ' + fmtStat(resp);
     }
     panel.appendChild(hdr);
 
@@ -530,13 +535,7 @@ function buildSelectingContent(responses, container) {
     const hdr = document.createElement('div');
     hdr.className = 'diff-model-header';
     hdr.style.color = color;
-    let meta = `${resp.latency_ms}ms`;
-    const totalTok = (resp.input_tokens || 0) + (resp.output_tokens || 0);
-    if (totalTok > 0) {
-      meta += `  ·  ${fmtTokens(totalTok)} tok`;
-      if (resp.cost_usd > 0) meta += `  ·  $${resp.cost_usd.toFixed(4)}`;
-    }
-    hdr.textContent = `── ${resp.model_id}  ${meta}`;
+    hdr.textContent = `── ${resp.model_id}  ${fmtStat(resp)}`;
     section.appendChild(hdr);
 
     if (!resp.proposed_writes || resp.proposed_writes.length === 0) {

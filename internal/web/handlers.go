@@ -14,6 +14,7 @@ import (
 	"github.com/suarezc/errata/internal/diff"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
+	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -64,14 +65,16 @@ type writeData struct {
 }
 
 type responseData struct {
-	ModelID        string      `json:"model_id"`
-	Text           string      `json:"text"`
-	LatencyMS      int64       `json:"latency_ms"`
-	InputTokens    int64       `json:"input_tokens"`
-	OutputTokens   int64       `json:"output_tokens"`
-	CostUSD        float64     `json:"cost_usd"`
-	Error          string      `json:"error,omitempty"`
-	ProposedWrites []writeData `json:"proposed_writes"`
+	ModelID             string      `json:"model_id"`
+	Text                string      `json:"text"`
+	LatencyMS           int64       `json:"latency_ms"`
+	InputTokens         int64       `json:"input_tokens"`
+	OutputTokens        int64       `json:"output_tokens"`
+	CostUSD             float64     `json:"cost_usd"`
+	HistTokens          int64       `json:"hist_tokens"`
+	ContextWindowTokens int64       `json:"context_window_tokens"`
+	Error               string      `json:"error,omitempty"`
+	ProposedWrites      []writeData `json:"proposed_writes"`
 }
 
 // ─── WebSocket handler ────────────────────────────────────────────────────────
@@ -171,6 +174,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 
+				// Snapshot history token counts before the run (used for context % display).
+				histTokens := make(map[string]int64, len(adapters))
+				for _, ad := range adapters {
+					histTokens[ad.ID()] = runner.EstimateHistoryTokens(effectiveHistories[ad.ID()])
+				}
+
 				rs := runner.RunAll(
 					runCtx,
 					adapters,
@@ -204,7 +213,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				histories = runner.AppendHistory(effectiveHistories, adapterIDs, rs, prompt)
 				mu.Unlock()
 
-				send(wsServerMsg{Type: "complete", Responses: buildCompletePayload(rs)})
+				send(wsServerMsg{Type: "complete", Responses: buildCompletePayload(rs, histTokens)})
 			}(msg.Prompt, runCtx, cancel, msg.Verbose, toRun, histSnapshot)
 
 		case "select":
@@ -348,7 +357,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 // ─── Serialisation helper ─────────────────────────────────────────────────────
 
-func buildCompletePayload(responses []models.ModelResponse) []responseData {
+func buildCompletePayload(responses []models.ModelResponse, histTokens map[string]int64) []responseData {
 	result := make([]responseData, len(responses))
 	for i, resp := range responses {
 		writes := make([]writeData, len(resp.ProposedWrites))
@@ -372,14 +381,16 @@ func buildCompletePayload(responses []models.ModelResponse) []responseData {
 			}
 		}
 		result[i] = responseData{
-			ModelID:        resp.ModelID,
-			Text:           resp.Text,
-			LatencyMS:      resp.LatencyMS,
-			InputTokens:    resp.InputTokens,
-			OutputTokens:   resp.OutputTokens,
-			CostUSD:        resp.CostUSD,
-			Error:          resp.Error,
-			ProposedWrites: writes,
+			ModelID:             resp.ModelID,
+			Text:                resp.Text,
+			LatencyMS:           resp.LatencyMS,
+			InputTokens:         resp.InputTokens,
+			OutputTokens:        resp.OutputTokens,
+			CostUSD:             resp.CostUSD,
+			HistTokens:          histTokens[resp.ModelID],
+			ContextWindowTokens: pricing.ContextWindowTokens(resp.ModelID),
+			Error:               resp.Error,
+			ProposedWrites:      writes,
 		}
 	}
 	return result

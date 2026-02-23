@@ -3,13 +3,11 @@ package adapters
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -49,7 +47,6 @@ func (a *AnthropicAdapter) RunAgent(
 	var textParts []string
 	var proposed []tools.FileWrite
 	var totalInput, totalOutput int64
-	var resolvedModel string
 	start := time.Now()
 
 	for {
@@ -60,17 +57,7 @@ func (a *AnthropicAdapter) RunAgent(
 			Messages:  messages,
 		})
 		if err != nil {
-			return models.ModelResponse{
-				ModelID:      a.modelID,
-				LatencyMS:    time.Since(start).Milliseconds(),
-				InputTokens:  totalInput,
-				OutputTokens: totalOutput,
-				CostUSD:      pricing.CostUSD("anthropic/"+a.modelID, totalInput, totalOutput),
-				Error:        err.Error(),
-			}, err
-		}
-		if resolvedModel == "" {
-			resolvedModel = string(resp.Model)
+			return BuildErrorResponse(a.modelID, "anthropic/"+a.modelID, start, totalInput, totalOutput, err), err
 		}
 		totalInput += resp.Usage.InputTokens
 		totalOutput += resp.Usage.OutputTokens
@@ -90,20 +77,9 @@ func (a *AnthropicAdapter) RunAgent(
 				tu := block.AsToolUse()
 				var input map[string]any
 				_ = json.Unmarshal(tu.Input, &input)
-				args := extractStringMap(input)
-
-				switch tu.Name {
-				case tools.ReadToolName:
-					path := args["path"]
-					onEvent(models.AgentEvent{Type: "reading", Data: path})
-					content := tools.ExecuteRead(path)
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, content, false))
-
-				case tools.WriteToolName:
-					path := args["path"]
-					onEvent(models.AgentEvent{Type: "writing", Data: path})
-					proposed = append(proposed, tools.FileWrite{Path: path, Content: args["content"]})
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, "Write queued — will be applied if selected.", false))
+				result, ok := DispatchTool(tu.Name, extractStringMap(input), onEvent, &proposed)
+				if ok {
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, result, false))
 				}
 			}
 		}
@@ -115,18 +91,7 @@ func (a *AnthropicAdapter) RunAgent(
 		messages = append(messages, anthropic.NewUserMessage(toolResults...))
 	}
 
-	if resolvedModel == "" {
-		resolvedModel = a.modelID
-	}
-	return models.ModelResponse{
-		ModelID:        resolvedModel,
-		Text:           join(textParts),
-		LatencyMS:      time.Since(start).Milliseconds(),
-		InputTokens:    totalInput,
-		OutputTokens:   totalOutput,
-		CostUSD:        pricing.CostUSD("anthropic/"+a.modelID, totalInput, totalOutput),
-		ProposedWrites: proposed,
-	}, nil
+	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
 func buildAnthropicTools() []anthropic.ToolUnionParam {
@@ -153,20 +118,6 @@ func buildAnthropicTools() []anthropic.ToolUnionParam {
 		out = append(out, anthropic.ToolUnionParam{OfTool: &tp})
 	}
 	return out
-}
-
-func extractStringMap(m map[string]any) map[string]string {
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		if s, ok := v.(string); ok {
-			out[k] = s
-		}
-	}
-	return out
-}
-
-func join(parts []string) string {
-	return strings.Join(parts, "")
 }
 
 func init() {

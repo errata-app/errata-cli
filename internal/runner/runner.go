@@ -62,6 +62,7 @@ func RunAll(
 			start := time.Now()
 			h := TrimHistory(histories[a.ID()], maxHistoryTurns())
 			resp, err := a.RunAgent(tctx, h, prompt, filtered)
+			resp.ModelID = a.ID() // enforce: ModelID always matches the configured adapter ID
 
 			if err != nil {
 				filtered(models.AgentEvent{Type: "error", Data: err.Error()})
