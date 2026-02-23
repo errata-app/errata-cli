@@ -11,6 +11,7 @@ import (
 
 const agentTimeout = 5 * time.Minute
 
+// Silly little comment to test prs
 // RunAll sends prompt to every adapter concurrently and returns all responses.
 // onEvent is called from goroutines — callers must be safe for concurrent use.
 func RunAll(
