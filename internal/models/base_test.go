@@ -20,7 +20,6 @@ func (s *stubAdapter) RunAgent(
 	ctx context.Context,
 	prompt string,
 	onEvent func(models.AgentEvent),
-	verbose bool,
 ) (models.ModelResponse, error) {
 	return s.response, nil
 }
@@ -60,7 +59,7 @@ func TestStubAdapter_RunAgent(t *testing.T) {
 			Text:    "done",
 		},
 	}
-	resp, err := a.RunAgent(context.Background(), "prompt", func(models.AgentEvent) {}, false)
+	resp, err := a.RunAgent(context.Background(), "prompt", func(models.AgentEvent) {})
 	assert.NoError(t, err)
 	assert.Equal(t, "done", resp.Text)
 }

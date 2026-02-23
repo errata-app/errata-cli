@@ -35,13 +35,12 @@ type ModelAdapter interface {
 	ID() string
 
 	// RunAgent runs the multi-turn agentic tool-use loop.
-	// It calls onEvent for each tool event and (if verbose) text chunk.
+	// It calls onEvent for each tool event and text chunk.
 	// read_file calls execute immediately; write_file calls are intercepted
 	// and returned in ModelResponse.ProposedWrites.
 	RunAgent(
 		ctx context.Context,
 		prompt string,
 		onEvent func(AgentEvent),
-		verbose bool,
 	) (ModelResponse, error)
 }

@@ -23,7 +23,6 @@ func (s *stubAdapter) RunAgent(
 	ctx context.Context,
 	prompt string,
 	onEvent func(models.AgentEvent),
-	verbose bool,
 ) (models.ModelResponse, error) {
 	for _, e := range s.events {
 		onEvent(e)
@@ -42,7 +41,6 @@ func (e *errorAdapter) RunAgent(
 	ctx context.Context,
 	prompt string,
 	onEvent func(models.AgentEvent),
-	verbose bool,
 ) (models.ModelResponse, error) {
 	return models.ModelResponse{}, fmt.Errorf("%s", e.msg)
 }
@@ -117,7 +115,22 @@ func TestRunAll_ErrorAdapterDoesNotAffectOthers(t *testing.T) {
 	assert.Contains(t, badRes.Error, "bad failed")
 }
 
-func TestRunAll_ErrorSurfacesViaOnEvent(t *testing.T) {
+func TestRunAll_ErrorSurfacesViaOnEventVerbose(t *testing.T) {
+	bad := &errorAdapter{id: "bad", msg: "agent crashed"}
+
+	var mu sync.Mutex
+	var received []models.AgentEvent
+	runner.RunAll(context.Background(), []models.ModelAdapter{bad}, "p", func(_ string, e models.AgentEvent) {
+		mu.Lock()
+		received = append(received, e)
+		mu.Unlock()
+	}, true)
+
+	assert.True(t, len(received) > 0)
+	assert.Equal(t, "error", received[len(received)-1].Type)
+}
+
+func TestRunAll_ErrorEventSuppressedNonVerbose(t *testing.T) {
 	bad := &errorAdapter{id: "bad", msg: "agent crashed"}
 
 	var mu sync.Mutex
@@ -128,8 +141,7 @@ func TestRunAll_ErrorSurfacesViaOnEvent(t *testing.T) {
 		mu.Unlock()
 	}, false)
 
-	assert.True(t, len(received) > 0)
-	assert.Equal(t, "error", received[len(received)-1].Type)
+	assert.Empty(t, received)
 }
 
 func TestRunAll_LatencyRecorded(t *testing.T) {

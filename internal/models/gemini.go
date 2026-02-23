@@ -26,7 +26,6 @@ func (a *GeminiAdapter) RunAgent(
 	ctx context.Context,
 	prompt string,
 	onEvent func(AgentEvent),
-	verbose bool,
 ) (ModelResponse, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: a.apiKey})
 	if err != nil {
@@ -78,9 +77,7 @@ func (a *GeminiAdapter) RunAgent(
 		for _, part := range modelContent.Parts {
 			if part.Text != "" {
 				textParts = append(textParts, part.Text)
-				if verbose {
-					onEvent(AgentEvent{Type: "text", Data: part.Text})
-				}
+				onEvent(AgentEvent{Type: "text", Data: part.Text})
 			}
 
 			if part.FunctionCall != nil {

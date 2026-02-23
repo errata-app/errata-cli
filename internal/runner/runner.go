@@ -33,13 +33,19 @@ func RunAll(
 			tctx, cancel := context.WithTimeout(ctx, agentTimeout)
 			defer cancel()
 
-			start := time.Now()
-			resp, err := a.RunAgent(tctx, prompt, func(e models.AgentEvent) {
+			// filtered suppresses "text" and "error" events when not verbose.
+			filtered := func(e models.AgentEvent) {
+				if !verbose && (e.Type == "text" || e.Type == "error") {
+					return
+				}
 				onEvent(a.ID(), e)
-			}, verbose)
+			}
+
+			start := time.Now()
+			resp, err := a.RunAgent(tctx, prompt, filtered)
 
 			if err != nil {
-				onEvent(a.ID(), models.AgentEvent{Type: "error", Data: err.Error()})
+				filtered(models.AgentEvent{Type: "error", Data: err.Error()})
 				results[i] = models.ModelResponse{
 					ModelID:   a.ID(),
 					LatencyMS: time.Since(start).Milliseconds(),

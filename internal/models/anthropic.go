@@ -28,7 +28,6 @@ func (a *AnthropicAdapter) RunAgent(
 	ctx context.Context,
 	prompt string,
 	onEvent func(AgentEvent),
-	verbose bool,
 ) (ModelResponse, error) {
 	client := anthropic.NewClient(option.WithAPIKey(a.apiKey))
 
@@ -75,9 +74,7 @@ func (a *AnthropicAdapter) RunAgent(
 			case "text":
 				text := block.AsText().Text
 				textParts = append(textParts, text)
-				if verbose {
-					onEvent(AgentEvent{Type: "text", Data: text})
-				}
+				onEvent(AgentEvent{Type: "text", Data: text})
 
 			case "tool_use":
 				tu := block.AsToolUse()

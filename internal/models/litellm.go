@@ -43,7 +43,6 @@ func (a *LiteLLMAdapter) RunAgent(
 	ctx context.Context,
 	prompt string,
 	onEvent func(AgentEvent),
-	verbose bool,
 ) (ModelResponse, error) {
 	opts := []option.RequestOption{
 		option.WithBaseURL(a.baseURL),
@@ -97,9 +96,7 @@ func (a *LiteLLMAdapter) RunAgent(
 
 		if msg.Content != "" {
 			textParts = append(textParts, msg.Content)
-			if verbose {
-				onEvent(AgentEvent{Type: "text", Data: msg.Content})
-			}
+			onEvent(AgentEvent{Type: "text", Data: msg.Content})
 		}
 
 		if len(msg.ToolCalls) == 0 || choice.FinishReason == "stop" {

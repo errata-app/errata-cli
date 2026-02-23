@@ -138,7 +138,6 @@ func (a *loggingAdapter) RunAgent(
 	ctx context.Context,
 	prompt string,
 	onEvent func(models.AgentEvent),
-	verbose bool,
 ) (models.ModelResponse, error) {
 	var (
 		mu     sync.Mutex
@@ -153,7 +152,7 @@ func (a *loggingAdapter) RunAgent(
 		onEvent(e)
 	}
 
-	resp, err := a.inner.RunAgent(ctx, prompt, wrappedOnEvent, verbose)
+	resp, err := a.inner.RunAgent(ctx, prompt, wrappedOnEvent)
 
 	var proposedFiles []string
 	var writes []WriteRecord

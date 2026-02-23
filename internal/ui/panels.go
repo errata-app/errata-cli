@@ -84,6 +84,17 @@ func renderPanel(p *panelState, width int) string {
 	return borderStyle.Render(strings.Join(lines, "\n"))
 }
 
+// truncateLine strips after the first newline and caps at max runes.
+func truncateLine(s string, max int) string {
+	if idx := strings.Index(s, "\n"); idx >= 0 {
+		s = s[:idx]
+	}
+	if len([]rune(s)) > max {
+		s = string([]rune(s)[:max]) + "…"
+	}
+	return s
+}
+
 func renderEvent(e models.AgentEvent) string {
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	switch e.Type {
@@ -92,17 +103,9 @@ func renderEvent(e models.AgentEvent) string {
 	case "writing":
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AFAF00")).Render("writing  ") + e.Data
 	case "error":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error    ") + e.Data
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error    ") + truncateLine(e.Data, 60)
 	case "text":
-		// verbose text — truncate long lines
-		line := e.Data
-		if idx := strings.Index(line, "\n"); idx >= 0 {
-			line = line[:idx]
-		}
-		if len(line) > 60 {
-			line = line[:60] + "…"
-		}
-		return dimStyle.Render(line)
+		return dimStyle.Render(truncateLine(e.Data, 60))
 	default:
 		return dimStyle.Render(e.Data)
 	}

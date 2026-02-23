@@ -28,7 +28,6 @@ func (a *OpenAIAdapter) RunAgent(
 	ctx context.Context,
 	prompt string,
 	onEvent func(AgentEvent),
-	verbose bool,
 ) (ModelResponse, error) {
 	client := openai.NewClient(option.WithAPIKey(a.apiKey))
 
@@ -79,9 +78,7 @@ func (a *OpenAIAdapter) RunAgent(
 
 		if msg.Content != "" {
 			textParts = append(textParts, msg.Content)
-			if verbose {
-				onEvent(AgentEvent{Type: "text", Data: msg.Content})
-			}
+			onEvent(AgentEvent{Type: "text", Data: msg.Content})
 		}
 
 		if len(msg.ToolCalls) == 0 || choice.FinishReason == "stop" {
