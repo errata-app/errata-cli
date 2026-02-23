@@ -37,16 +37,18 @@ errata/
 │   ├── config/
 │   │   └── config.go        # Config struct, Load(), ResolvedActiveModels()
 │   ├── models/
-│   │   ├── base.go          # ModelAdapter interface, AgentEvent, ModelResponse
+│   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
+│   ├── adapters/
 │   │   ├── registry.go      # NewAdapter(), ListAdapters() — prefix/slash routing
-│   │   ├── pricing.go       # LoadPricing(), CostUSD() — OpenRouter fetch + hardcoded fallback
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
 │   │   ├── gemini.go        # GeminiAdapter.RunAgent()
 │   │   ├── openrouter.go    # OpenRouterAdapter — OpenAI-compat, "provider/model" IDs
 │   │   └── litellm.go       # LiteLLMAdapter — OpenAI-compat, "litellm/<model>" IDs
+│   ├── pricing/
+│   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens() — OpenRouter fetch + hardcoded fallback
 │   ├── runner/
-│   │   └── runner.go        # RunAll() — goroutines + sync.WaitGroup
+│   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories()
 │   ├── tools/
 │   │   └── tools.go         # FileWrite, ToolDef, ExecuteRead(), ApplyWrites()
 │   ├── diff/
@@ -96,6 +98,7 @@ Both the TUI and the web textarea accept slash commands.
 |---------|-------------|
 | `/help` | Show available commands |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
+| `/compact` | Summarize conversation history to free up context window |
 | `/models` | List currently active models (marks filter if set) |
 | `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
 | `/model` | Reset model filter back to all configured models |
@@ -128,10 +131,10 @@ Agent timeout: **5 minutes** per adapter (`context.WithTimeout`).
 ## Token Usage & Cost
 
 Every adapter accumulates `InputTokens` and `OutputTokens` across all turns of its agentic
-loop. `models.CostUSD(qualifiedID, input, output)` looks up per-million-token rates and
+loop. `pricing.CostUSD(qualifiedID, input, output)` looks up per-million-token rates and
 returns the estimated USD cost (0 for unknown model IDs, gracefully omitted from UI).
 
-**Pricing source:** `models.LoadPricing(cacheFile)` is called at startup. It fetches
+**Pricing source:** `pricing.LoadPricing(cacheFile)` is called at startup. It fetches
 `https://openrouter.ai/api/v1/models` (no auth required) and caches the result at
 `data/pricing_cache.json` for 24 hours. Fallback chain:
 1. Fresh cache (< 24 h) → use it
@@ -169,6 +172,32 @@ available IDs. No changes take effect if any ID in the list is invalid.
 connection). Both pass the filtered slice to `runner.RunAll`; only filtered panels are
 created. The server-side WebSocket message type is `set_models`; client sends
 `{type: "set_models", model_ids: [...]}`, server replies `{type: "models_set", models: [...]}`.
+
+---
+
+## Context Window Management
+
+Errata maintains a per-model `map[string][]ConversationTurn` conversation history across
+prompts within a session. Each panel status line shows `~N% ctx` to indicate estimated
+history fill relative to the model's known context window.
+
+**Sliding window (automatic, in `RunAll`):**
+`runner.TrimHistory` keeps the most recent `maxHistoryTurns` turns (default 20, rounded
+to whole user+assistant pairs) before each API call. Override via `ERRATA_MAX_HISTORY_TURNS`.
+
+**Compaction (manual + automatic):**
+- `/compact` (both surfaces) calls `runner.CompactHistories`, which runs each adapter
+  against its own history with a summarization prompt and replaces the history with a
+  single `[user: "[Previous conversation — compacted]", assistant: <summary>]` pair.
+- Auto-compact triggers in `RunAll` when `runner.ShouldAutoCompact` returns true
+  (estimated history tokens / context window ≥ 80%). The run proceeds with the
+  compacted history.
+- Panel status shows `~N% ctx` based on `pricing.ContextWindowTokens(modelID)`.
+  Returns 0 for unknown models (display suppressed).
+
+**Context overflow recovery:** `runner.IsContextOverflowError` matches known
+context-limit error strings from all providers. When detected, the TUI shows
+`"context limit reached — use /clear or /compact to reset"`.
 
 ---
 
@@ -210,6 +239,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 | `select` | `model_id` | Apply a model's proposed writes |
 | `cancel` | — | Cancel the running agents |
 | `set_models` | `model_ids` | Set model filter (empty = reset to all) |
+| `compact` | — | Summarize conversation history to free context window |
 
 **Server → Client:**
 
@@ -219,6 +249,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 | `complete` | `responses[]` | All agents finished; payload includes diffs, tokens, cost |
 | `applied` | `applied[]` | File writes applied successfully |
 | `cancelled` | — | Run was cancelled |
+| `compact_complete` | — | History compaction finished |
 | `models_set` | `models[]` | Confirms new active model filter |
 | `error` | `message` | Server-side error |
 
@@ -239,20 +270,26 @@ as typed `{type:'run'}` entries that render as collapsible panels in the history
 
 ```
 tools       ← stdlib only
+pricing     ← stdlib only
 models      ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
 config      ← stdlib only
-runner      ← models, context, sync
+adapters    ← models, pricing, tools, config, provider SDKs
+runner      ← models, pricing
 diff        ← os, strings, sergi/go-diff
 logging     ← models (ModelAdapter, ModelResponse), stdlib
 preferences ← models (for ModelResponse latency/ID), encoding/json, os
-ui          ← models, tools, runner, diff, bubbletea, lipgloss
+ui          ← models, pricing, tools, runner, diff, bubbletea, lipgloss
 web         ← models, runner, tools, diff, preferences, logging, coder/websocket
-cmd/errata  ← config, models, preferences, logging, ui, web
+cmd/errata  ← config, adapters, pricing, logging, ui, web
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
 This is intentional — moving it to `models` would create a cycle since adapters
-(inside `models`) import `tools`, and `tools.ApplyWrites` needs `FileWrite`.
+import `tools`, and `tools.ApplyWrites` needs `FileWrite`.
+
+**Critical:** Never import `adapters` from within `models`, `pricing`, `runner`, `tools`,
+`logging`, `diff`, or `preferences` — these packages sit below `adapters` in the import
+graph and must remain adapter-agnostic.
 
 ---
 

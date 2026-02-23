@@ -8,10 +8,11 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/logging"
-	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
+	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/ui"
 	"github.com/suarezc/errata/internal/web"
 )
@@ -43,8 +44,8 @@ func main() {
 
 func runREPL(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
-	models.LoadPricing(cfg.PricingCachePath)
-	adapters, warnings := models.ListAdapters(cfg)
+	pricing.LoadPricing(cfg.PricingCachePath)
+	adapters, warnings := adapters.ListAdapters(cfg)
 	if len(adapters) == 0 {
 		return fmt.Errorf("no models available — set at least one API key in .env")
 	}
@@ -67,8 +68,8 @@ func runREPL(cmd *cobra.Command, args []string) error {
 
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
-	models.LoadPricing(cfg.PricingCachePath)
-	adapters, warnings := models.ListAdapters(cfg)
+	pricing.LoadPricing(cfg.PricingCachePath)
+	adapters, warnings := adapters.ListAdapters(cfg)
 	if len(adapters) == 0 {
 		return fmt.Errorf("no models available — set at least one API key in .env")
 	}

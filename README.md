@@ -155,6 +155,7 @@ Pick a number — that model's writes are applied to disk immediately.
 |---------|-------------|
 | `/help` | Show available commands |
 | `/clear` | Clear the display history |
+| `/compact` | Summarize conversation history to free up context window |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/models` | List currently active models |
 | `/model <id> [id...]` | Restrict subsequent runs to specific model(s) |
@@ -204,6 +205,24 @@ The env var sets the starting set of active models; `/model` overrides it for th
 
 Toggle `/verbose` to also see each model's explanatory text alongside tool events. Verbose
 mode is off by default in the TUI and on by default in the web UI.
+
+---
+
+## Context window management
+
+Errata maintains a per-model conversation history across prompts within a session. Each
+panel's status line shows the estimated context fill (e.g. `~42% ctx`) so you can see
+how much of a model's window is in use.
+
+Two mechanisms keep history from growing unbounded:
+
+**Sliding window (automatic):** Only the most recent 20 turns are sent to the model on
+each call. Set `ERRATA_MAX_HISTORY_TURNS` in `.env` to override.
+
+**Compaction (manual or automatic):** `/compact` asks each model to write a concise
+summary of the conversation so far, then replaces the full history with that summary.
+This preserves continuity while freeing context. Compaction also triggers automatically
+when a model's estimated history fill reaches 80%.
 
 ---
 
@@ -257,16 +276,18 @@ errata/
 │   ├── config/
 │   │   └── config.go        # Config struct, Load(), ResolvedActiveModels()
 │   ├── models/
-│   │   ├── base.go          # ModelAdapter interface, AgentEvent, ModelResponse
+│   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
+│   ├── adapters/
 │   │   ├── registry.go      # NewAdapter(), ListAdapters() — routing by prefix/slash
-│   │   ├── pricing.go       # LoadPricing(), CostUSD() — OpenRouter fetch + fallback
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
 │   │   ├── gemini.go        # GeminiAdapter.RunAgent()
 │   │   ├── openrouter.go    # OpenRouterAdapter — any model via "provider/model" IDs
 │   │   └── litellm.go       # LiteLLMAdapter — local/self-hosted proxy
+│   ├── pricing/
+│   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens() — OpenRouter fetch + fallback
 │   ├── runner/
-│   │   └── runner.go        # RunAll() — goroutines + sync.WaitGroup
+│   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories()
 │   ├── tools/
 │   │   └── tools.go         # FileWrite, tool schemas, ExecuteRead(), ApplyWrites()
 │   ├── diff/
