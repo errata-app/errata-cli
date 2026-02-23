@@ -315,7 +315,6 @@ for {
     append tool results to messages, loop
 }
 return ModelResponse{
-    ...,
     InputTokens:  totalInput,
     OutputTokens: totalOutput,
     // native adapters prefix their provider; OpenRouter/LiteLLM pass ID as-is:
@@ -327,6 +326,11 @@ return ModelResponse{
 Tokens are accumulated across all turns (each turn re-sends context, so input grows).
 Writes are **never** executed inside the loop — they accumulate in `proposed` and are
 returned in `ModelResponse.ProposedWrites`.
+
+**`ModelID` is enforced by the runner:** `runner.RunAll` overwrites `resp.ModelID = a.ID()`
+after every `RunAgent` call. Adapters do not need to set it. Provider SDKs return resolved
+names like `gpt-4o-2024-08-06`; the runner normalises back to the configured ID so all UI
+panel lookups and preference recording work correctly.
 
 ---
 
