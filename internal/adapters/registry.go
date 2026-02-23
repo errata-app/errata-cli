@@ -1,10 +1,11 @@
-package models
+package adapters
 
 import (
 	"fmt"
 	"strings"
 
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/models"
 )
 
 // NewAdapter returns a ModelAdapter for the given model ID using cfg for API keys.
@@ -15,7 +16,7 @@ import (
 //  3. "claude*"             → AnthropicAdapter
 //  4. "gpt-*", "o1", "o3*" → OpenAIAdapter
 //  5. "gemini*"             → GeminiAdapter
-func NewAdapter(modelID string, cfg config.Config) (ModelAdapter, error) {
+func NewAdapter(modelID string, cfg config.Config) (models.ModelAdapter, error) {
 	switch {
 	case strings.HasPrefix(modelID, "litellm/"):
 		if cfg.LiteLLMBaseURL == "" {
@@ -56,18 +57,18 @@ func NewAdapter(modelID string, cfg config.Config) (ModelAdapter, error) {
 
 // ListAdapters builds adapters for all resolved active models.
 // Returns the adapter slice and a list of warning strings for skipped models.
-func ListAdapters(cfg config.Config) ([]ModelAdapter, []string) {
-	models := cfg.ResolvedActiveModels()
-	var adapters []ModelAdapter
+func ListAdapters(cfg config.Config) ([]models.ModelAdapter, []string) {
+	modelIDs := cfg.ResolvedActiveModels()
+	var result []models.ModelAdapter
 	var warnings []string
 
-	for _, id := range models {
+	for _, id := range modelIDs {
 		a, err := NewAdapter(id, cfg)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("skipping %s: %v", id, err))
 			continue
 		}
-		adapters = append(adapters, a)
+		result = append(result, a)
 	}
-	return adapters, warnings
+	return result, warnings
 }

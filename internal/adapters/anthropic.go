@@ -1,4 +1,4 @@
-package models
+package adapters
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -26,10 +28,10 @@ func (a *AnthropicAdapter) ID() string { return a.modelID }
 
 func (a *AnthropicAdapter) RunAgent(
 	ctx     context.Context,
-	history []ConversationTurn,
+	history []models.ConversationTurn,
 	prompt  string,
-	onEvent func(AgentEvent),
-) (ModelResponse, error) {
+	onEvent func(models.AgentEvent),
+) (models.ModelResponse, error) {
 	client := anthropic.NewClient(option.WithAPIKey(a.apiKey))
 
 	toolParams := buildAnthropicTools()
@@ -58,12 +60,12 @@ func (a *AnthropicAdapter) RunAgent(
 			Messages:  messages,
 		})
 		if err != nil {
-			return ModelResponse{
+			return models.ModelResponse{
 				ModelID:      a.modelID,
 				LatencyMS:    time.Since(start).Milliseconds(),
 				InputTokens:  totalInput,
 				OutputTokens: totalOutput,
-				CostUSD:      CostUSD("anthropic/"+a.modelID, totalInput, totalOutput),
+				CostUSD:      pricing.CostUSD("anthropic/"+a.modelID, totalInput, totalOutput),
 				Error:        err.Error(),
 			}, err
 		}
@@ -82,7 +84,7 @@ func (a *AnthropicAdapter) RunAgent(
 			case "text":
 				text := block.AsText().Text
 				textParts = append(textParts, text)
-				onEvent(AgentEvent{Type: "text", Data: text})
+				onEvent(models.AgentEvent{Type: "text", Data: text})
 
 			case "tool_use":
 				tu := block.AsToolUse()
@@ -93,13 +95,13 @@ func (a *AnthropicAdapter) RunAgent(
 				switch tu.Name {
 				case tools.ReadToolName:
 					path := args["path"]
-					onEvent(AgentEvent{Type: "reading", Data: path})
+					onEvent(models.AgentEvent{Type: "reading", Data: path})
 					content := tools.ExecuteRead(path)
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, content, false))
 
 				case tools.WriteToolName:
 					path := args["path"]
-					onEvent(AgentEvent{Type: "writing", Data: path})
+					onEvent(models.AgentEvent{Type: "writing", Data: path})
 					proposed = append(proposed, tools.FileWrite{Path: path, Content: args["content"]})
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, "Write queued — will be applied if selected.", false))
 				}
@@ -116,13 +118,13 @@ func (a *AnthropicAdapter) RunAgent(
 	if resolvedModel == "" {
 		resolvedModel = a.modelID
 	}
-	return ModelResponse{
+	return models.ModelResponse{
 		ModelID:        resolvedModel,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,
 		OutputTokens:   totalOutput,
-		CostUSD:        CostUSD("anthropic/"+a.modelID, totalInput, totalOutput),
+		CostUSD:        pricing.CostUSD("anthropic/"+a.modelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }
@@ -169,5 +171,5 @@ func join(parts []string) string {
 
 func init() {
 	// Ensure AnthropicAdapter satisfies ModelAdapter at compile time.
-	var _ ModelAdapter = (*AnthropicAdapter)(nil)
+	var _ models.ModelAdapter = (*AnthropicAdapter)(nil)
 }

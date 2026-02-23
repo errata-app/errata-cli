@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/pricing"
 )
 
 const agentTimeout = 5 * time.Minute
@@ -154,7 +155,7 @@ func IsContextOverflowError(errStr string) bool {
 // auto-compact threshold relative to the model's known context window.
 // Returns false when the context window is unknown.
 func ShouldAutoCompact(histories map[string][]models.ConversationTurn, adapterID string) bool {
-	cw := models.ContextWindowTokens(adapterID)
+	cw := pricing.ContextWindowTokens(adapterID)
 	if cw == 0 {
 		return false
 	}

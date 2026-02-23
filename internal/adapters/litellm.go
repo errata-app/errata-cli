@@ -1,4 +1,4 @@
-package models
+package adapters
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -41,10 +43,10 @@ func (a *LiteLLMAdapter) ID() string { return a.modelID }
 
 func (a *LiteLLMAdapter) RunAgent(
 	ctx     context.Context,
-	history []ConversationTurn,
+	history []models.ConversationTurn,
 	prompt  string,
-	onEvent func(AgentEvent),
-) (ModelResponse, error) {
+	onEvent func(models.AgentEvent),
+) (models.ModelResponse, error) {
 	opts := []option.RequestOption{
 		option.WithBaseURL(a.baseURL),
 	}
@@ -79,12 +81,12 @@ func (a *LiteLLMAdapter) RunAgent(
 			Messages: messages,
 		})
 		if err != nil {
-			return ModelResponse{
+			return models.ModelResponse{
 				ModelID:      a.modelID,
 				LatencyMS:    time.Since(start).Milliseconds(),
 				InputTokens:  totalInput,
 				OutputTokens: totalOutput,
-				CostUSD:      CostUSD(a.bareModelID, totalInput, totalOutput),
+				CostUSD:      pricing.CostUSD(a.bareModelID, totalInput, totalOutput),
 				Error:        err.Error(),
 			}, err
 		}
@@ -104,7 +106,7 @@ func (a *LiteLLMAdapter) RunAgent(
 
 		if msg.Content != "" {
 			textParts = append(textParts, msg.Content)
-			onEvent(AgentEvent{Type: "text", Data: msg.Content})
+			onEvent(models.AgentEvent{Type: "text", Data: msg.Content})
 		}
 
 		if len(msg.ToolCalls) == 0 || choice.FinishReason == "stop" {
@@ -119,30 +121,30 @@ func (a *LiteLLMAdapter) RunAgent(
 			switch tc.Function.Name {
 			case tools.ReadToolName:
 				path := args["path"]
-				onEvent(AgentEvent{Type: "reading", Data: path})
+				onEvent(models.AgentEvent{Type: "reading", Data: path})
 				content := tools.ExecuteRead(path)
 				messages = append(messages, openai.ToolMessage(content, tc.ID))
 
 			case tools.WriteToolName:
 				path := args["path"]
-				onEvent(AgentEvent{Type: "writing", Data: path})
+				onEvent(models.AgentEvent{Type: "writing", Data: path})
 				proposed = append(proposed, tools.FileWrite{Path: path, Content: args["content"]})
 				messages = append(messages, openai.ToolMessage("Write queued — will be applied if selected.", tc.ID))
 			}
 		}
 	}
 
-	return ModelResponse{
+	return models.ModelResponse{
 		ModelID:        a.modelID,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,
 		OutputTokens:   totalOutput,
-		CostUSD:        CostUSD(a.bareModelID, totalInput, totalOutput),
+		CostUSD:        pricing.CostUSD(a.bareModelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }
 
 func init() {
-	var _ ModelAdapter = (*LiteLLMAdapter)(nil)
+	var _ models.ModelAdapter = (*LiteLLMAdapter)(nil)
 }

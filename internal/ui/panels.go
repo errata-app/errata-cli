@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/pricing"
 )
 
 const maxPanelEvents = 20
@@ -71,7 +72,7 @@ func renderPanel(p *panelState, width int) string {
 			} else {
 				status = fmt.Sprintf("done  %dms  ·  %s tok", p.latencyMS, tok)
 			}
-			if cw := models.ContextWindowTokens(p.modelID); cw > 0 && p.histTokens > 0 {
+			if cw := pricing.ContextWindowTokens(p.modelID); cw > 0 && p.histTokens > 0 {
 				pct := float64(p.histTokens) / float64(cw) * 100
 				status += fmt.Sprintf("  ·  ~%.0f%% ctx", pct)
 			}

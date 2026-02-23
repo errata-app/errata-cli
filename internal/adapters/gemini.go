@@ -1,4 +1,4 @@
-package models
+package adapters
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -24,13 +26,13 @@ func (a *GeminiAdapter) ID() string { return a.modelID }
 
 func (a *GeminiAdapter) RunAgent(
 	ctx     context.Context,
-	history []ConversationTurn,
+	history []models.ConversationTurn,
 	prompt  string,
-	onEvent func(AgentEvent),
-) (ModelResponse, error) {
+	onEvent func(models.AgentEvent),
+) (models.ModelResponse, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: a.apiKey})
 	if err != nil {
-		return ModelResponse{ModelID: a.modelID, Error: err.Error()}, err
+		return models.ModelResponse{ModelID: a.modelID, Error: err.Error()}, err
 	}
 
 	config := &genai.GenerateContentConfig{
@@ -56,12 +58,12 @@ func (a *GeminiAdapter) RunAgent(
 	for {
 		resp, err := client.Models.GenerateContent(ctx, a.modelID, contents, config)
 		if err != nil {
-			return ModelResponse{
+			return models.ModelResponse{
 				ModelID:      a.modelID,
 				LatencyMS:    time.Since(start).Milliseconds(),
 				InputTokens:  totalInput,
 				OutputTokens: totalOutput,
-				CostUSD:      CostUSD("google/"+a.modelID, totalInput, totalOutput),
+				CostUSD:      pricing.CostUSD("google/"+a.modelID, totalInput, totalOutput),
 				Error:        err.Error(),
 			}, err
 		}
@@ -85,7 +87,7 @@ func (a *GeminiAdapter) RunAgent(
 		for _, part := range modelContent.Parts {
 			if part.Text != "" {
 				textParts = append(textParts, part.Text)
-				onEvent(AgentEvent{Type: "text", Data: part.Text})
+				onEvent(models.AgentEvent{Type: "text", Data: part.Text})
 			}
 
 			if part.FunctionCall != nil {
@@ -95,13 +97,13 @@ func (a *GeminiAdapter) RunAgent(
 				switch fc.Name {
 				case tools.ReadToolName:
 					path := args["path"]
-					onEvent(AgentEvent{Type: "reading", Data: path})
+					onEvent(models.AgentEvent{Type: "reading", Data: path})
 					content := tools.ExecuteRead(path)
 					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"result": content}))
 
 				case tools.WriteToolName:
 					path := args["path"]
-					onEvent(AgentEvent{Type: "writing", Data: path})
+					onEvent(models.AgentEvent{Type: "writing", Data: path})
 					proposed = append(proposed, tools.FileWrite{Path: path, Content: args["content"]})
 					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"result": "Write queued — will be applied if selected."}))
 				}
@@ -117,13 +119,13 @@ func (a *GeminiAdapter) RunAgent(
 	if resolvedModel == "" {
 		resolvedModel = a.modelID
 	}
-	return ModelResponse{
+	return models.ModelResponse{
 		ModelID:        resolvedModel,
 		Text:           join(textParts),
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,
 		OutputTokens:   totalOutput,
-		CostUSD:        CostUSD("google/"+a.modelID, totalInput, totalOutput),
+		CostUSD:        pricing.CostUSD("google/"+a.modelID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 	}, nil
 }
@@ -154,5 +156,5 @@ func buildGeminiTools() []*genai.Tool {
 }
 
 func init() {
-	var _ ModelAdapter = (*GeminiAdapter)(nil)
+	var _ models.ModelAdapter = (*GeminiAdapter)(nil)
 }
