@@ -25,16 +25,24 @@ func NewAnthropicAdapter(modelID, apiKey string) *AnthropicAdapter {
 func (a *AnthropicAdapter) ID() string { return a.modelID }
 
 func (a *AnthropicAdapter) RunAgent(
-	ctx context.Context,
-	prompt string,
+	ctx     context.Context,
+	history []ConversationTurn,
+	prompt  string,
 	onEvent func(AgentEvent),
 ) (ModelResponse, error) {
 	client := anthropic.NewClient(option.WithAPIKey(a.apiKey))
 
 	toolParams := buildAnthropicTools()
-	messages := []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
+	messages := make([]anthropic.MessageParam, 0, len(history)+1)
+	for _, turn := range history {
+		switch turn.Role {
+		case "user":
+			messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(turn.Content)))
+		case "assistant":
+			messages = append(messages, anthropic.NewAssistantMessage(anthropic.NewTextBlock(turn.Content)))
+		}
 	}
+	messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)))
 
 	var textParts []string
 	var proposed []tools.FileWrite

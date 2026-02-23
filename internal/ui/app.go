@@ -82,6 +82,9 @@ type App struct {
 	selection    string
 	selectionErr string
 	lastPrompt   string
+
+	// per-model conversation history; keyed by adapter ID
+	conversationHistories map[string][]models.ConversationTurn
 }
 
 // New creates the App model.
@@ -239,6 +242,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Accumulate conversation history for each adapter that returned text.
+		// Use panels[i].modelID (the configured adapter ID) as the key, not resp.ModelID,
+		// to avoid mismatches from resolved version strings (e.g. Gemini).
+		panelIDs := make([]string, len(a.panels))
+		for i, p := range a.panels {
+			panelIDs[i] = p.modelID
+		}
+		a.conversationHistories = runner.AppendHistory(a.conversationHistories, panelIDs, msg.responses, a.lastPrompt)
+
 		// Store responses on the last feed item so renderFeedContent renders the diff.
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].responses = msg.responses
@@ -335,6 +347,7 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 		return a.withMessage("Models: " + strings.Join(ids, ", ") + suffix), nil
 	case "/clear":
 		a.feed = nil
+		a.conversationHistories = nil
 		a.feedVP.Width = a.width
 		a.feedVP.Height = a.feedVPHeight()
 		a.feedVP.SetContent("")
@@ -370,11 +383,13 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	adapters := toRun
 	verbose := a.verbose
 	prog := a.prog
+	histories := a.conversationHistories // read-only in goroutine; written only by main loop
 
 	return a, func() tea.Msg {
 		responses := runner.RunAll(
 			context.Background(),
 			adapters,
+			histories,
 			trimmed,
 			func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})

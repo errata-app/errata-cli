@@ -40,8 +40,9 @@ func NewLiteLLMAdapter(modelID, apiKey, baseURL string) *LiteLLMAdapter {
 func (a *LiteLLMAdapter) ID() string { return a.modelID }
 
 func (a *LiteLLMAdapter) RunAgent(
-	ctx context.Context,
-	prompt string,
+	ctx     context.Context,
+	history []ConversationTurn,
+	prompt  string,
 	onEvent func(AgentEvent),
 ) (ModelResponse, error) {
 	opts := []option.RequestOption{
@@ -55,9 +56,16 @@ func (a *LiteLLMAdapter) RunAgent(
 	client := openai.NewClient(opts...)
 
 	toolParams := buildOpenAITools()
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.UserMessage(prompt),
+	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+1)
+	for _, turn := range history {
+		switch turn.Role {
+		case "user":
+			messages = append(messages, openai.UserMessage(turn.Content))
+		case "assistant":
+			messages = append(messages, openai.ChatCompletionMessage{Role: "assistant", Content: turn.Content}.ToParam())
+		}
 	}
+	messages = append(messages, openai.UserMessage(prompt))
 
 	var textParts []string
 	var proposed []tools.FileWrite

@@ -25,16 +25,24 @@ func NewOpenAIAdapter(modelID, apiKey string) *OpenAIAdapter {
 func (a *OpenAIAdapter) ID() string { return a.modelID }
 
 func (a *OpenAIAdapter) RunAgent(
-	ctx context.Context,
-	prompt string,
+	ctx     context.Context,
+	history []ConversationTurn,
+	prompt  string,
 	onEvent func(AgentEvent),
 ) (ModelResponse, error) {
 	client := openai.NewClient(option.WithAPIKey(a.apiKey))
 
 	toolParams := buildOpenAITools()
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.UserMessage(prompt),
+	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+1)
+	for _, turn := range history {
+		switch turn.Role {
+		case "user":
+			messages = append(messages, openai.UserMessage(turn.Content))
+		case "assistant":
+			messages = append(messages, openai.ChatCompletionMessage{Role: "assistant", Content: turn.Content}.ToParam())
+		}
 	}
+	messages = append(messages, openai.UserMessage(prompt))
 
 	var textParts []string
 	var proposed []tools.FileWrite

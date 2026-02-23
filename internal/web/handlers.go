@@ -117,6 +117,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		lastRun        []models.ModelResponse // results of last completed run
 		lastPrompt     string
 		activeAdapters []models.ModelAdapter  // nil = use all s.adapters
+		histories      map[string][]models.ConversationTurn // per-model conversation history
 	)
 
 	for {
@@ -139,22 +140,28 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				toRun = s.adapters
 			}
 
+			// Snapshot histories for the goroutine (read-only during run).
 			mu.Lock()
 			oldCancel := cancelRun
 			runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			cancelRun = cancel
+			histSnapshot := make(map[string][]models.ConversationTurn, len(histories))
+			for k, v := range histories {
+				histSnapshot[k] = v
+			}
 			mu.Unlock()
 
 			if oldCancel != nil {
 				oldCancel()
 			}
 
-			go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, adapters []models.ModelAdapter) {
+			go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, adapters []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
 				defer cancel()
 
 				rs := runner.RunAll(
 					runCtx,
 					adapters,
+					hists,
 					prompt,
 					func(modelID string, e models.AgentEvent) {
 						send(wsServerMsg{
@@ -174,13 +181,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 
+				adapterIDs := make([]string, len(adapters))
+				for i, ad := range adapters {
+					adapterIDs[i] = ad.ID()
+				}
 				mu.Lock()
 				lastRun = rs
 				lastPrompt = prompt
+				histories = runner.AppendHistory(histories, adapterIDs, rs, prompt)
 				mu.Unlock()
 
 				send(wsServerMsg{Type: "complete", Responses: buildCompletePayload(rs)})
-			}(msg.Prompt, runCtx, cancel, msg.Verbose, toRun)
+			}(msg.Prompt, runCtx, cancel, msg.Verbose, toRun, histSnapshot)
 
 		case "select":
 			mu.Lock()

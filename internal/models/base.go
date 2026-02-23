@@ -7,6 +7,13 @@ import (
 	"github.com/suarezc/errata/internal/tools"
 )
 
+// ConversationTurn is one prior exchange in the conversation history.
+// Role is "user" or "assistant".
+type ConversationTurn struct {
+	Role    string
+	Content string
+}
+
 // AgentEvent is a single observable event emitted by an agent during its run.
 // Type is one of: "text", "reading", "writing", "error".
 type AgentEvent struct {
@@ -35,12 +42,14 @@ type ModelAdapter interface {
 	ID() string
 
 	// RunAgent runs the multi-turn agentic tool-use loop.
+	// history contains prior (user, assistant) turns for this model; nil = fresh conversation.
 	// It calls onEvent for each tool event and text chunk.
 	// read_file calls execute immediately; write_file calls are intercepted
 	// and returned in ModelResponse.ProposedWrites.
 	RunAgent(
-		ctx context.Context,
-		prompt string,
+		ctx     context.Context,
+		history []ConversationTurn,
+		prompt  string,
 		onEvent func(AgentEvent),
 	) (ModelResponse, error)
 }

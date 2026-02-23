@@ -135,8 +135,9 @@ type loggingAdapter struct {
 func (a *loggingAdapter) ID() string { return a.inner.ID() }
 
 func (a *loggingAdapter) RunAgent(
-	ctx context.Context,
-	prompt string,
+	ctx     context.Context,
+	history []models.ConversationTurn,
+	prompt  string,
 	onEvent func(models.AgentEvent),
 ) (models.ModelResponse, error) {
 	var (
@@ -152,7 +153,7 @@ func (a *loggingAdapter) RunAgent(
 		onEvent(e)
 	}
 
-	resp, err := a.inner.RunAgent(ctx, prompt, wrappedOnEvent)
+	resp, err := a.inner.RunAgent(ctx, history, prompt, wrappedOnEvent)
 
 	var proposedFiles []string
 	var writes []WriteRecord

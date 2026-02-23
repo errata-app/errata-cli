@@ -17,8 +17,9 @@ type stubAdapter struct {
 
 func (s *stubAdapter) ID() string { return s.id }
 func (s *stubAdapter) RunAgent(
-	ctx context.Context,
-	prompt string,
+	ctx     context.Context,
+	history []models.ConversationTurn,
+	prompt  string,
 	onEvent func(models.AgentEvent),
 ) (models.ModelResponse, error) {
 	return s.response, nil
@@ -59,7 +60,7 @@ func TestStubAdapter_RunAgent(t *testing.T) {
 			Text:    "done",
 		},
 	}
-	resp, err := a.RunAgent(context.Background(), "prompt", func(models.AgentEvent) {})
+	resp, err := a.RunAgent(context.Background(), nil, "prompt", func(models.AgentEvent) {})
 	assert.NoError(t, err)
 	assert.Equal(t, "done", resp.Text)
 }

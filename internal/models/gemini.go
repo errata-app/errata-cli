@@ -23,8 +23,9 @@ func NewGeminiAdapter(modelID, apiKey string) *GeminiAdapter {
 func (a *GeminiAdapter) ID() string { return a.modelID }
 
 func (a *GeminiAdapter) RunAgent(
-	ctx context.Context,
-	prompt string,
+	ctx     context.Context,
+	history []ConversationTurn,
+	prompt  string,
 	onEvent func(AgentEvent),
 ) (ModelResponse, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: a.apiKey})
@@ -35,9 +36,16 @@ func (a *GeminiAdapter) RunAgent(
 	config := &genai.GenerateContentConfig{
 		Tools: buildGeminiTools(),
 	}
-	contents := []*genai.Content{
-		genai.NewContentFromText(prompt, genai.RoleUser),
+	contents := make([]*genai.Content, 0, len(history)+1)
+	for _, turn := range history {
+		switch turn.Role {
+		case "user":
+			contents = append(contents, genai.NewContentFromText(turn.Content, genai.RoleUser))
+		case "assistant":
+			contents = append(contents, genai.NewContentFromText(turn.Content, "model"))
+		}
 	}
+	contents = append(contents, genai.NewContentFromText(prompt, genai.RoleUser))
 
 	var textParts []string
 	var proposed []tools.FileWrite

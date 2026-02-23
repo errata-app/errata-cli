@@ -24,8 +24,9 @@ type stubAdapter struct {
 
 func (s *stubAdapter) ID() string { return s.id }
 func (s *stubAdapter) RunAgent(
-	ctx context.Context,
-	prompt string,
+	ctx     context.Context,
+	history []models.ConversationTurn,
+	prompt  string,
 	onEvent func(models.AgentEvent),
 ) (models.ModelResponse, error) {
 	for _, e := range s.events {
@@ -96,7 +97,7 @@ func TestWrap_ForwardsEventsToOnEvent(t *testing.T) {
 	wrapped := logging.Wrap(inner, "s", l)
 
 	var received []models.AgentEvent
-	_, err = wrapped.RunAgent(context.Background(), "p", func(e models.AgentEvent) {
+	_, err = wrapped.RunAgent(context.Background(), nil, "p", func(e models.AgentEvent) {
 		received = append(received, e)
 	})
 	require.NoError(t, err)
@@ -134,7 +135,7 @@ func TestWrap_LogsEntryWithAllFields(t *testing.T) {
 	}
 
 	wrapped := logging.Wrap(inner, "test-session-id", l)
-	resp, err := wrapped.RunAgent(context.Background(), "fix the bug", func(models.AgentEvent) {})
+	resp, err := wrapped.RunAgent(context.Background(), nil, "fix the bug", func(models.AgentEvent) {})
 	require.NoError(t, err)
 	assert.Equal(t, "all done", resp.Text, "response must be passed through unchanged")
 	require.NoError(t, l.Close())
@@ -172,8 +173,8 @@ func TestWrap_AppendsTwoEntries(t *testing.T) {
 
 	a1 := &stubAdapter{id: "m1", response: models.ModelResponse{ModelID: "m1"}}
 	a2 := &stubAdapter{id: "m2", response: models.ModelResponse{ModelID: "m2"}}
-	logging.Wrap(a1, "s", l).RunAgent(context.Background(), "prompt-one", func(models.AgentEvent) {}) //nolint:errcheck
-	logging.Wrap(a2, "s", l).RunAgent(context.Background(), "prompt-two", func(models.AgentEvent) {}) //nolint:errcheck
+	logging.Wrap(a1, "s", l).RunAgent(context.Background(), nil, "prompt-one", func(models.AgentEvent) {}) //nolint:errcheck
+	logging.Wrap(a2, "s", l).RunAgent(context.Background(), nil, "prompt-two", func(models.AgentEvent) {}) //nolint:errcheck
 	require.NoError(t, l.Close())
 
 	data, err := os.ReadFile(path)
