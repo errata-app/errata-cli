@@ -154,7 +154,7 @@ Pick a number — that model's writes are applied to disk immediately.
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/clear` | Clear the display history |
+| `/clear` | Clear display history and wipe conversation context |
 | `/compact` | Summarize conversation history to free up context window |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/models` | List currently active models |
@@ -210,9 +210,11 @@ mode is off by default in the TUI and on by default in the web UI.
 
 ## Context window management
 
-Errata maintains a per-model conversation history across prompts within a session. Each
-panel's status line shows the estimated context fill (e.g. `~42% ctx`) so you can see
-how much of a model's window is in use.
+Errata maintains a per-model conversation history across prompts. History is saved to
+`data/history.json` after every run so you can close the client and pick up exactly
+where you left off. Use `/clear` to deliberately wipe it. Each panel's status line shows
+the estimated context fill (e.g. `~42% ctx`) so you can see how much of a model's window
+is in use.
 
 Two mechanisms keep history from growing unbounded:
 
@@ -292,6 +294,8 @@ errata/
 │   │   └── tools.go         # FileWrite, tool schemas, ExecuteRead(), ApplyWrites()
 │   ├── diff/
 │   │   └── diff.go          # Compute() → FileDiff (Myers algorithm via sergi/go-diff)
+│   ├── history/
+│   │   └── history.go       # Load(), Save(), Clear() — conversation history persistence
 │   ├── logging/
 │   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
 │   ├── preferences/

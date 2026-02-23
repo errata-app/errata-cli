@@ -33,6 +33,7 @@ type Config struct {
 
 	PreferencesPath  string
 	PricingCachePath string
+	HistoryPath      string
 
 	// DebugLogPath is the path for the append-only JSONL debug log.
 	// Empty (default) disables debug logging entirely.
@@ -50,6 +51,7 @@ func Load() Config {
 		DefaultGeminiModel:    "gemini-2.0-flash",
 		PreferencesPath:       "data/preferences.jsonl",
 		PricingCachePath:      "data/pricing_cache.json",
+		HistoryPath:           "data/history.json",
 	}
 
 	cfg.DebugLogPath = os.Getenv("ERRATA_DEBUG_LOG")

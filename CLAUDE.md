@@ -9,7 +9,7 @@ Every selection is logged for preference analysis over time.
 
 Two user surfaces share the same core engine:
 - **TUI** (`./errata`) — bubbletea REPL for terminal use
-- **Web** (`./errata serve`) — browser UI over WebSocket, persists history in localStorage
+- **Web** (`./errata serve`) — browser UI over WebSocket, persists conversation history to `data/history.json`
 
 ---
 
@@ -55,6 +55,8 @@ errata/
 │   │   └── diff.go          # Compute() → FileDiff (LCS; shared by TUI + web)
 │   ├── preferences/
 │   │   └── preferences.go   # Record(), LoadAll(), Summarize()
+│   ├── history/
+│   │   └── history.go       # Load(), Save(), Clear() — conversation history persistence
 │   ├── logging/
 │   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
 │   ├── ui/
@@ -240,6 +242,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 | `cancel` | — | Cancel the running agents |
 | `set_models` | `model_ids` | Set model filter (empty = reset to all) |
 | `compact` | — | Summarize conversation history to free context window |
+| `clear_history` | — | Wipe server-side conversation history and delete `data/history.json` |
 
 **Server → Client:**
 
@@ -250,6 +253,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 | `applied` | `applied[]` | File writes applied successfully |
 | `cancelled` | — | Run was cancelled |
 | `compact_complete` | — | History compaction finished |
+| `history_cleared` | — | Confirms server-side history was wiped |
 | `models_set` | `models[]` | Confirms new active model filter |
 | `error` | `message` | Server-side error |
 
@@ -261,8 +265,14 @@ idle → running → selecting → idle
                  (skip)
 ```
 
-History is persisted to `localStorage` (capped at 50 entries). Completed runs are stored
-as typed `{type:'run'}` entries that render as collapsible panels in the history view.
+**Display history** is persisted to `localStorage` (capped at 50 entries). Completed runs
+are stored as typed `{type:'run'}` entries that render as collapsible panels in the history view.
+
+**Conversation history** (the per-model `[]ConversationTurn` sent to the AI on each prompt)
+is stored server-side in `Server.histories` and persisted to `data/history.json` after every
+run and compact. All browser tabs share the same history. Reconnecting picks up where the
+previous connection left off. `/clear` sends `clear_history` to the server and wipes both
+the display history (localStorage) and the conversation history (disk).
 
 ---
 
@@ -276,10 +286,11 @@ config      ← stdlib only
 adapters    ← models, pricing, tools, config, provider SDKs
 runner      ← models, pricing
 diff        ← os, strings, sergi/go-diff
+history     ← models, encoding/json, os
 logging     ← models (ModelAdapter, ModelResponse), stdlib
 preferences ← models (for ModelResponse latency/ID), encoding/json, os
-ui          ← models, pricing, tools, runner, diff, bubbletea, lipgloss
-web         ← models, runner, tools, diff, preferences, logging, coder/websocket
+ui          ← models, pricing, tools, runner, diff, history, bubbletea, lipgloss
+web         ← models, runner, tools, diff, preferences, logging, history, coder/websocket
 cmd/errata  ← config, adapters, pricing, logging, ui, web
 ```
 
@@ -505,4 +516,5 @@ Table-driven tests preferred for config, preferences, and diff packages.
 - `.env`
 - `data/preferences.jsonl` (contains prompt history)
 - `data/log.jsonl` (contains full prompt + response content)
+- `data/history.json` (contains full conversation context)
 - `dist/` (compiled binaries from `make build-all`)

@@ -183,6 +183,10 @@ function handleServerMessage(msg) {
       appendHistoryMsg('History compacted.', '');
       break;
 
+    case 'history_cleared':
+      appendHistoryMsg('Conversation history cleared.', '');
+      break;
+
     case 'cancelled':
       savedRunData = null;
       toIdle('Cancelled.');
@@ -633,6 +637,7 @@ function handleSend() {
     history.length = 0;
     saveHistory();
     renderIdle();
+    wsSend({ type: 'clear_history' });
     return;
   }
 

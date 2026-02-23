@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/runner"
@@ -90,10 +91,11 @@ type App struct {
 
 	// per-model conversation history; keyed by adapter ID
 	conversationHistories map[string][]models.ConversationTurn
+	histPath              string
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, sessionID string) *App {
+func New(adapters []models.ModelAdapter, prefPath, histPath, sessionID string) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -102,13 +104,20 @@ func New(adapters []models.ModelAdapter, prefPath, sessionID string) *App {
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
 
+	h, err := history.Load(histPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load history: %v\n", err)
+	}
+
 	return &App{
-		adapters:  adapters,
-		prefPath:  prefPath,
-		sessionID: sessionID,
-		input:     ta,
-		feedVP:    viewport.New(80, 20),
-		panelIdx:  make(map[string]int),
+		adapters:              adapters,
+		prefPath:              prefPath,
+		histPath:              histPath,
+		sessionID:             sessionID,
+		input:                 ta,
+		feedVP:                viewport.New(80, 20),
+		panelIdx:              make(map[string]int),
+		conversationHistories: h,
 	}
 }
 
@@ -232,6 +241,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactCompleteMsg:
 		a.conversationHistories = msg.histories
+		if err := history.Save(a.histPath, a.conversationHistories); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
+		}
 		return a.withMessage("History compacted."), nil
 
 	case runCompleteMsg:
@@ -266,6 +278,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.conversationHistories = msg.compactedHistories
 		}
 		a.conversationHistories = runner.AppendHistory(a.conversationHistories, panelIDs, msg.responses, a.lastPrompt)
+		if err := history.Save(a.histPath, a.conversationHistories); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
+		}
 
 		// Store responses on the last feed item so renderFeedContent renders the diff.
 		if len(a.feed) > 0 {
@@ -364,6 +379,9 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	case "/clear":
 		a.feed = nil
 		a.conversationHistories = nil
+		if err := history.Clear(a.histPath); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
+		}
 		a.feedVP.Width = a.width
 		a.feedVP.Height = a.feedVPHeight()
 		a.feedVP.SetContent("")
@@ -639,8 +657,8 @@ func helpText() string {
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, sessionID string, warnings []string) error {
-	app := New(adapters, prefPath, sessionID)
+func Run(adapters []models.ModelAdapter, prefPath, histPath, sessionID string, warnings []string) error {
+	app := New(adapters, prefPath, histPath, sessionID)
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	app.SetProgram(p)

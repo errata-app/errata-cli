@@ -63,7 +63,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return ui.Run(adapters, cfg.PreferencesPath, sessionID, warnings)
+	return ui.Run(adapters, cfg.PreferencesPath, cfg.HistoryPath, sessionID, warnings)
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -92,7 +92,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	addr := ":8080"
 	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
-	return web.New(adapters, cfg.PreferencesPath).Start(addr)
+	return web.New(adapters, cfg.PreferencesPath, cfg.HistoryPath).Start(addr)
 }
 
 func runStats(cmd *cobra.Command, args []string) error {

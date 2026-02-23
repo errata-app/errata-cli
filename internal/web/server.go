@@ -7,8 +7,11 @@ import (
 	"embed"
 	"encoding/hex"
 	"io/fs"
+	"log"
 	"net/http"
+	"sync"
 
+	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 )
 
@@ -19,17 +22,30 @@ var staticFiles embed.FS
 type Server struct {
 	adapters  []models.ModelAdapter
 	prefPath  string
+	histPath  string
 	sessionID string
+
+	histMu    sync.RWMutex
+	histories map[string][]models.ConversationTurn // shared across all browser connections
 }
 
 // New creates a Server. A fresh session ID is generated on each call.
-func New(adapters []models.ModelAdapter, prefPath string) *Server {
+// Conversation history is loaded from histPath if it exists.
+func New(adapters []models.ModelAdapter, prefPath, histPath string) *Server {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
+
+	h, err := history.Load(histPath)
+	if err != nil {
+		log.Printf("web: could not load history: %v", err)
+	}
+
 	return &Server{
 		adapters:  adapters,
 		prefPath:  prefPath,
+		histPath:  histPath,
 		sessionID: hex.EncodeToString(b),
+		histories: h,
 	}
 }
 

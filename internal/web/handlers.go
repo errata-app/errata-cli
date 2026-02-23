@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/suarezc/errata/internal/diff"
+	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
@@ -115,11 +116,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		mu             sync.Mutex
-		cancelRun      context.CancelFunc    // cancel for the most recent run; nil initially
-		lastRun        []models.ModelResponse // results of last completed run
+		cancelRun      context.CancelFunc     // cancel for the most recent run; nil initially
+		lastRun        []models.ModelResponse  // results of last completed run
 		lastPrompt     string
-		activeAdapters []models.ModelAdapter  // nil = use all s.adapters
-		histories      map[string][]models.ConversationTurn // per-model conversation history
+		activeAdapters []models.ModelAdapter   // nil = use all s.adapters
 	)
 
 	for {
@@ -142,16 +142,20 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				toRun = s.adapters
 			}
 
-			// Snapshot histories for the goroutine (read-only during run).
+			// Snapshot per-connection run state.
 			mu.Lock()
 			oldCancel := cancelRun
 			runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			cancelRun = cancel
-			histSnapshot := make(map[string][]models.ConversationTurn, len(histories))
-			for k, v := range histories {
+			mu.Unlock()
+
+			// Snapshot server-level histories for the goroutine (read-only during run).
+			s.histMu.RLock()
+			histSnapshot := make(map[string][]models.ConversationTurn, len(s.histories))
+			for k, v := range s.histories {
 				histSnapshot[k] = v
 			}
-			mu.Unlock()
+			s.histMu.RUnlock()
 
 			if oldCancel != nil {
 				oldCancel()
@@ -203,8 +207,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				lastRun = rs
 				lastPrompt = prompt
-				histories = runner.AppendHistory(effectiveHistories, adapterIDs, rs, prompt)
 				mu.Unlock()
+
+				s.histMu.Lock()
+				s.histories = runner.AppendHistory(effectiveHistories, adapterIDs, rs, prompt)
+				if err := history.Save(s.histPath, s.histories); err != nil {
+					log.Printf("web: could not save history: %v", err)
+				}
+				s.histMu.Unlock()
 
 				send(wsServerMsg{Type: "complete", Responses: buildCompletePayload(rs)})
 			}(msg.Prompt, runCtx, cancel, msg.Verbose, toRun, histSnapshot)
@@ -306,11 +316,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if toCompact == nil {
 				toCompact = s.adapters
 			}
-			histsToCompact := make(map[string][]models.ConversationTurn, len(histories))
-			for k, v := range histories {
+			mu.Unlock()
+
+			s.histMu.RLock()
+			histsToCompact := make(map[string][]models.ConversationTurn, len(s.histories))
+			for k, v := range s.histories {
 				histsToCompact[k] = v
 			}
-			mu.Unlock()
+			s.histMu.RUnlock()
 
 			go func() {
 				updated := runner.CompactHistories(
@@ -319,11 +332,23 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 						send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
 					},
 				)
-				mu.Lock()
-				histories = updated
-				mu.Unlock()
+				s.histMu.Lock()
+				s.histories = updated
+				if err := history.Save(s.histPath, s.histories); err != nil {
+					log.Printf("web: could not save history: %v", err)
+				}
+				s.histMu.Unlock()
 				send(wsServerMsg{Type: "compact_complete"})
 			}()
+
+		case "clear_history":
+			s.histMu.Lock()
+			s.histories = nil
+			if err := history.Clear(s.histPath); err != nil {
+				log.Printf("web: could not clear history: %v", err)
+			}
+			s.histMu.Unlock()
+			send(wsServerMsg{Type: "history_cleared"})
 		}
 	}
 }
