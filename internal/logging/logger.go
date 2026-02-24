@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -73,7 +74,7 @@ type Logger struct {
 // NewLogger opens (or creates) a JSONL file at path for append-only writes.
 // The caller must call Close() when done.
 func NewLogger(path string) (*Logger, error) {
-	if err := os.MkdirAll(dirOf(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -190,18 +191,12 @@ func (a *loggingAdapter) RunAgent(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-func newRunID() string {
-	b := make([]byte, 8)
+// RandomHex returns a random n-byte hex-encoded string.
+func RandomHex(n int) string {
+	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
-// dirOf returns the directory component of a file path.
-func dirOf(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			return path[:i]
-		}
-	}
-	return "."
-}
+func newRunID() string { return RandomHex(8) }
+

@@ -26,7 +26,6 @@ func maxHistoryTurns() int {
 	return defaultMaxHistoryTurns
 }
 
-// Silly little comment to test prs
 // RunAll sends prompt to every adapter concurrently and returns all responses.
 // histories is a per-adapter map (keyed by adapter ID) of prior conversation turns;
 // nil or a missing key means a fresh conversation for that adapter.

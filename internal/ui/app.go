@@ -389,117 +389,133 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	lower := strings.ToLower(trimmed)
 
 	if lower == "/model" || strings.HasPrefix(lower, "/model ") {
-		args := strings.TrimSpace(trimmed[len("/model"):])
-		return a.handleModelCommand(args)
+		return a.handleModelCommand(strings.TrimSpace(trimmed[len("/model"):]))
 	}
-
 	switch lower {
 	case "/exit", "/quit":
 		return a, tea.Quit
 	case "/verbose":
-		a.verbose = !a.verbose
-		state := "off"
-		if a.verbose {
-			state = "on"
-		}
-		return a.withMessage(fmt.Sprintf("Verbose mode %s.", state)), nil
+		return a.handleVerboseCmd()
 	case "/models":
-		active := a.activeAdapters
-		if active == nil {
-			active = a.adapters
-		}
-		var ids []string
-		for _, ad := range active {
-			ids = append(ids, ad.ID())
-		}
-		suffix := ""
-		if a.activeAdapters != nil {
-			suffix = " (filtered)"
-		}
-		cfg := a.cfg
-		updated := a.withMessage("Active" + suffix + ": " + strings.Join(ids, ", ") + "\nFetching available models…")
-		return updated, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			return listModelsResultMsg{results: adapters.ListAvailableModels(ctx, cfg)}
-		}
+		return a.handleModelsListCmd()
 	case "/clear":
-		a.feed = nil
-		a.conversationHistories = nil
-		if err := history.Clear(a.histPath); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
-		}
-		a.feedVP.Width = a.width
-		a.feedVP.Height = a.feedVPHeight()
-		a.feedVP.SetContent("")
-		return a, nil
+		return a.handleClearCmd()
 	case "/compact":
-		toCompact := a.adapters
-		if a.activeAdapters != nil {
-			toCompact = a.activeAdapters
-		}
-		histories := a.conversationHistories
-		prog := a.prog
-		return a.withMessage("Compacting conversation history…"), func() tea.Msg {
-			updated := runner.CompactHistories(
-				context.Background(),
-				toCompact,
-				histories,
-				func(modelID string, e models.AgentEvent) {
-					prog.Send(agentEventMsg{modelID: modelID, event: e})
-				},
-			)
-			return compactCompleteMsg{histories: updated}
-		}
+		return a.handleCompactCmd()
 	case "/stats":
-		tally := preferences.Summarize(a.prefPath)
-		var sb strings.Builder
-		sb.WriteString("Stats:\n")
-		if len(tally) == 0 {
-			sb.WriteString("  No preference data yet.\n")
-		} else {
-			sb.WriteString("  Preference wins:\n")
-			type kv struct {
-				id   string
-				wins int
-			}
-			kvs := make([]kv, 0, len(tally))
-			for id, wins := range tally {
-				kvs = append(kvs, kv{id, wins})
-			}
-			sort.Slice(kvs, func(i, j int) bool { return kvs[i].wins > kvs[j].wins })
-			for _, e := range kvs {
-				plural := "s"
-				if e.wins == 1 {
-					plural = ""
-				}
-				sb.WriteString(fmt.Sprintf("    %s: %d win%s\n", e.id, e.wins, plural))
-			}
-		}
-		if len(a.sessionCostPerModel) > 0 {
-			sb.WriteString("  Session cost:\n")
-			ids := make([]string, 0, len(a.sessionCostPerModel))
-			for id := range a.sessionCostPerModel {
-				ids = append(ids, id)
-			}
-			sort.Slice(ids, func(i, j int) bool {
-				return a.sessionCostPerModel[ids[i]] > a.sessionCostPerModel[ids[j]]
-			})
-			for _, id := range ids {
-				sb.WriteString(fmt.Sprintf("    %s: $%.4f\n", id, a.sessionCostPerModel[id]))
-			}
-			sb.WriteString(fmt.Sprintf("  Total: $%.4f\n", a.totalCostUSD))
-		}
-		return a.withMessage(strings.TrimRight(sb.String(), "\n")), nil
-
+		return a.handleStatsCmd()
 	case "/totalcost":
 		return a.withMessage(fmt.Sprintf("Total session cost: $%.4f", a.totalCostUSD)), nil
-
 	case "/help":
 		return a.withMessage(helpText()), nil
 	}
+	return a.launchRun(trimmed)
+}
 
-	// Launch agents.
+func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) {
+	a.verbose = !a.verbose
+	state := "off"
+	if a.verbose {
+		state = "on"
+	}
+	return a.withMessage(fmt.Sprintf("Verbose mode %s.", state)), nil
+}
+
+func (a App) handleModelsListCmd() (tea.Model, tea.Cmd) {
+	active := a.activeAdapters
+	if active == nil {
+		active = a.adapters
+	}
+	var ids []string
+	for _, ad := range active {
+		ids = append(ids, ad.ID())
+	}
+	suffix := ""
+	if a.activeAdapters != nil {
+		suffix = " (filtered)"
+	}
+	cfg := a.cfg
+	updated := a.withMessage("Active" + suffix + ": " + strings.Join(ids, ", ") + "\nFetching available models…")
+	return updated, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return listModelsResultMsg{results: adapters.ListAvailableModels(ctx, cfg)}
+	}
+}
+
+func (a App) handleClearCmd() (tea.Model, tea.Cmd) {
+	a.feed = nil
+	a.conversationHistories = nil
+	if err := history.Clear(a.histPath); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
+	}
+	a.feedVP.Width = a.width
+	a.feedVP.Height = a.feedVPHeight()
+	a.feedVP.SetContent("")
+	return a, nil
+}
+
+func (a App) handleCompactCmd() (tea.Model, tea.Cmd) {
+	toCompact := a.adapters
+	if a.activeAdapters != nil {
+		toCompact = a.activeAdapters
+	}
+	histories := a.conversationHistories
+	prog := a.prog
+	return a.withMessage("Compacting conversation history…"), func() tea.Msg {
+		updated := runner.CompactHistories(
+			context.Background(), toCompact, histories,
+			func(modelID string, e models.AgentEvent) {
+				prog.Send(agentEventMsg{modelID: modelID, event: e})
+			},
+		)
+		return compactCompleteMsg{histories: updated}
+	}
+}
+
+func (a App) handleStatsCmd() (tea.Model, tea.Cmd) {
+	tally := preferences.Summarize(a.prefPath)
+	var sb strings.Builder
+	sb.WriteString("Stats:\n")
+	if len(tally) == 0 {
+		sb.WriteString("  No preference data yet.\n")
+	} else {
+		sb.WriteString("  Preference wins:\n")
+		type kv struct {
+			id   string
+			wins int
+		}
+		kvs := make([]kv, 0, len(tally))
+		for id, wins := range tally {
+			kvs = append(kvs, kv{id, wins})
+		}
+		sort.Slice(kvs, func(i, j int) bool { return kvs[i].wins > kvs[j].wins })
+		for _, e := range kvs {
+			plural := "s"
+			if e.wins == 1 {
+				plural = ""
+			}
+			sb.WriteString(fmt.Sprintf("    %s: %d win%s\n", e.id, e.wins, plural))
+		}
+	}
+	if len(a.sessionCostPerModel) > 0 {
+		sb.WriteString("  Session cost:\n")
+		ids := make([]string, 0, len(a.sessionCostPerModel))
+		for id := range a.sessionCostPerModel {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool {
+			return a.sessionCostPerModel[ids[i]] > a.sessionCostPerModel[ids[j]]
+		})
+		for _, id := range ids {
+			sb.WriteString(fmt.Sprintf("    %s: $%.4f\n", id, a.sessionCostPerModel[id]))
+		}
+		sb.WriteString(fmt.Sprintf("  Total: $%.4f\n", a.totalCostUSD))
+	}
+	return a.withMessage(strings.TrimRight(sb.String(), "\n")), nil
+}
+
+func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	toRun := a.adapters
 	if a.activeAdapters != nil {
 		toRun = a.activeAdapters
@@ -525,7 +541,7 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	})
 	a = a.withFeedRebuilt(true)
 
-	adapters := toRun
+	ads := toRun
 	verbose := a.verbose
 	prog := a.prog
 	histories := a.conversationHistories // read-only in goroutine; written only by main loop
@@ -533,7 +549,7 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	return a, func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
-		for _, ad := range adapters {
+		for _, ad := range ads {
 			if runner.ShouldAutoCompact(effectiveHistories, ad.ID()) {
 				prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
 					Type: "text", Data: "[auto-compacting history…]",
@@ -548,10 +564,7 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 			}
 		}
 		responses := runner.RunAll(
-			context.Background(),
-			adapters,
-			effectiveHistories,
-			trimmed,
+			context.Background(), ads, effectiveHistories, trimmed,
 			func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
 			},
@@ -765,20 +778,6 @@ func helpText() string {
 	return sb.String()
 }
 
-// providerQualifiedID returns the OpenRouter-style "provider/model" key used
-// for pricing lookups. OpenRouter and LiteLLM model IDs are returned as-is.
-func providerQualifiedID(provider, modelID string) string {
-	switch provider {
-	case "Anthropic":
-		return "anthropic/" + modelID
-	case "OpenAI":
-		return "openai/" + modelID
-	case "Gemini":
-		return "google/" + modelID
-	default:
-		return modelID
-	}
-}
 
 // fmtPrice formats a per-million-token USD price compactly: "$15" for whole
 // dollars, "$3.00" for fractional, "$0.075" for sub-cent values.
@@ -820,7 +819,7 @@ func formatAvailableModels(results []adapters.ProviderModels) string {
 			shown = r.Models[:cap]
 		}
 		for _, id := range shown {
-			qid := providerQualifiedID(r.Provider, id)
+			qid := pricing.ProviderQualifiedID(r.Provider, id)
 			if in, out, ok := pricing.PricingFor(qid); ok {
 				fmt.Fprintf(&sb, "\n  %s  (%s in / %s out /1M)", id, fmtPrice(in), fmtPrice(out))
 			} else {

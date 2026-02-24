@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +9,7 @@ import (
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/logging"
+	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/ui"
@@ -42,57 +41,52 @@ func main() {
 	}
 }
 
-func runREPL(cmd *cobra.Command, args []string) error {
-	cfg := config.Load()
+// setupAdapters loads config, pricing, and adapters, wires optional run
+// logging, and returns the ready-to-use adapter slice, a session ID, any
+// startup warnings, and a cleanup function the caller must defer.
+func setupAdapters(cfg config.Config) (ads []models.ModelAdapter, sessionID string, warnings []string, cleanup func()) {
 	pricing.LoadPricing(cfg.PricingCachePath)
-	adapters, warnings := adapters.ListAdapters(cfg)
-	if len(adapters) == 0 {
-		return fmt.Errorf("no models available — set at least one API key in .env")
-	}
-
-	sessionID := newSessionID()
+	ads, warnings = adapters.ListAdapters(cfg)
+	sessionID = logging.RandomHex(16)
+	cleanup = func() {}
 
 	if cfg.DebugLogPath != "" {
 		logger, err := logging.NewLogger(cfg.DebugLogPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not open log file %q: %v\n", cfg.DebugLogPath, err)
 		} else {
-			defer logger.Close()
-			adapters = logging.WrapAll(adapters, sessionID, logger)
+			cleanup = func() { logger.Close() }
+			ads = logging.WrapAll(ads, sessionID, logger)
 			fmt.Fprintf(os.Stderr, "logging runs to %s\n", cfg.DebugLogPath)
 		}
 	}
+	return
+}
 
-	return ui.Run(adapters, cfg.PreferencesPath, cfg.HistoryPath, sessionID, cfg, warnings)
+func runREPL(cmd *cobra.Command, args []string) error {
+	cfg := config.Load()
+	ads, sessionID, warnings, cleanup := setupAdapters(cfg)
+	defer cleanup()
+	if len(ads) == 0 {
+		return fmt.Errorf("no models available — set at least one API key in .env")
+	}
+	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, sessionID, cfg, warnings)
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
-	pricing.LoadPricing(cfg.PricingCachePath)
-	adapters, warnings := adapters.ListAdapters(cfg)
-	if len(adapters) == 0 {
+	ads, sessionID, warnings, cleanup := setupAdapters(cfg)
+	defer cleanup()
+	if len(ads) == 0 {
 		return fmt.Errorf("no models available — set at least one API key in .env")
 	}
 	for _, w := range warnings {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
-
-	sessionID := newSessionID()
-
-	if cfg.DebugLogPath != "" {
-		logger, err := logging.NewLogger(cfg.DebugLogPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not open log file %q: %v\n", cfg.DebugLogPath, err)
-		} else {
-			defer logger.Close()
-			adapters = logging.WrapAll(adapters, sessionID, logger)
-			fmt.Fprintf(os.Stderr, "logging runs to %s\n", cfg.DebugLogPath)
-		}
-	}
-
+	_ = sessionID // web server creates its own session ID per connection
 	addr := ":8080"
 	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
-	return web.New(adapters, cfg.PreferencesPath, cfg.HistoryPath, cfg).Start(addr)
+	return web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg).Start(addr)
 }
 
 func runStats(cmd *cobra.Command, args []string) error {
@@ -109,11 +103,4 @@ func runStats(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%-30s %6d\n", modelID, wins)
 	}
 	return nil
-}
-
-// newSessionID returns a random 16-byte hex string usable as a session ID.
-func newSessionID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }

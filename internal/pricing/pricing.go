@@ -107,12 +107,36 @@ func setDynamicPricing(m map[string]modelPricing) {
 //  3. bare portion after the first "/" in both tables (for native-adapter fallback)
 //
 // Returns 0 for unknown models — the UI omits the cost field in that case.
-func CostUSD(qualifiedID string, inputTokens, outputTokens int64) float64 {
-	p, ok := lookupPricing(qualifiedID)
-	if !ok && strings.Contains(qualifiedID, "/") {
-		bare := qualifiedID[strings.Index(qualifiedID, "/")+1:]
-		p, ok = lookupPricing(bare)
+// ProviderQualifiedID returns the OpenRouter-style "provider/model" key for a
+// model ID from a given provider. For OpenRouter and LiteLLM the model ID
+// already carries the required prefix and is returned as-is.
+func ProviderQualifiedID(provider, modelID string) string {
+	switch provider {
+	case "Anthropic":
+		return "anthropic/" + modelID
+	case "OpenAI":
+		return "openai/" + modelID
+	case "Gemini":
+		return "google/" + modelID
+	default: // OpenRouter ("provider/model"), LiteLLM ("litellm/X")
+		return modelID
 	}
+}
+
+// resolvePricing looks up pricing for qualifiedID, falling back to the bare
+// portion after the first "/" for native-adapter qualified IDs.
+func resolvePricing(qualifiedID string) (modelPricing, bool) {
+	if p, ok := lookupPricing(qualifiedID); ok {
+		return p, true
+	}
+	if strings.Contains(qualifiedID, "/") {
+		return lookupPricing(qualifiedID[strings.Index(qualifiedID, "/")+1:])
+	}
+	return modelPricing{}, false
+}
+
+func CostUSD(qualifiedID string, inputTokens, outputTokens int64) float64 {
+	p, ok := resolvePricing(qualifiedID)
 	if !ok {
 		return 0
 	}
@@ -188,11 +212,7 @@ func fetchOpenRouterPricing() (map[string]modelPricing, error) {
 // follows the same "provider/model" convention as CostUSD (e.g.
 // "anthropic/claude-sonnet-4-6"). Returns ok=false for unknown models.
 func PricingFor(qualifiedID string) (inputPMT, outputPMT float64, ok bool) {
-	p, found := lookupPricing(qualifiedID)
-	if !found && strings.Contains(qualifiedID, "/") {
-		bare := qualifiedID[strings.Index(qualifiedID, "/")+1:]
-		p, found = lookupPricing(bare)
-	}
+	p, found := resolvePricing(qualifiedID)
 	if !found {
 		return 0, 0, false
 	}
@@ -202,15 +222,9 @@ func PricingFor(qualifiedID string) (inputPMT, outputPMT float64, ok bool) {
 // ContextWindowTokens returns the known context window size in tokens for modelID, or 0
 // if the model is unknown. Uses the same qualified→bare lookup chain as CostUSD.
 func ContextWindowTokens(modelID string) int64 {
-	p, ok := lookupPricing(modelID)
+	p, ok := resolvePricing(modelID)
 	if ok && p.ContextWindow > 0 {
 		return p.ContextWindow
-	}
-	if strings.Contains(modelID, "/") {
-		bare := modelID[strings.LastIndex(modelID, "/")+1:]
-		if p, ok = lookupPricing(bare); ok && p.ContextWindow > 0 {
-			return p.ContextWindow
-		}
 	}
 	return 0
 }

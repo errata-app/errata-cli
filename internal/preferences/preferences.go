@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/suarezc/errata/internal/models"
@@ -78,7 +79,7 @@ func LoadAll(path string) []Entry {
 	}
 
 	var entries []Entry
-	for i, line := range splitLines(string(data)) {
+	for i, line := range strings.Split(string(data), "\n") {
 		if line == "" {
 			continue
 		}
@@ -103,17 +104,3 @@ func Summarize(path string) map[string]int {
 	return tally
 }
 
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
-}

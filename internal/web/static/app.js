@@ -21,7 +21,7 @@ function fmtStat(resp) {
 
 function saveHistory() {
   try {
-    localStorage.setItem('errata_history', JSON.stringify(history.slice(-50)));
+    localStorage.setItem('errata_history', JSON.stringify(history.slice(-HISTORY_DISPLAY_CAP)));
   } catch (e) {}
 }
 
@@ -72,7 +72,10 @@ let currentPanelsGrid = null;    // panels grid inside currentRunEl
 let modelsData       = null;     // cached /api/available-models response
 let activeModelFilter = null;    // null = all configured; string[] = per-connection filter
 
-const PANEL_CAP = 50;            // per-provider display limit when not filtering
+const PANEL_CAP           = 50;  // per-provider display limit when not filtering
+const HISTORY_DISPLAY_CAP = 50;  // localStorage history entry limit
+const PROMPT_PREVIEW_LEN  = 90;  // chars shown in run history prompt headers
+const ERROR_TRUNCATE_LEN  = 100; // max chars taken from error strings
 
 let slashCommands = []; // populated from /api/commands at init
 
@@ -354,7 +357,7 @@ function toRunning() {
   const promptEl = document.createElement('span');
   promptEl.className = 'run-prompt';
   const preview = currentRunPrompt.replace(/\n/g, ' ');
-  promptEl.textContent = preview.length > 90 ? preview.slice(0, 90) + '…' : preview;
+  promptEl.textContent = preview.length > PROMPT_PREVIEW_LEN ? preview.slice(0, PROMPT_PREVIEW_LEN) + '…' : preview;
 
   const statusEl = document.createElement('span');
   statusEl.className = 'running-status';
@@ -478,7 +481,7 @@ function renderRunEntry(entry) {
   const promptEl = document.createElement('span');
   promptEl.className = 'run-prompt';
   const preview = entry.prompt.replace(/\n/g, ' ');
-  promptEl.textContent = preview.length > 90 ? preview.slice(0, 90) + '…' : preview;
+  promptEl.textContent = preview.length > PROMPT_PREVIEW_LEN ? preview.slice(0, PROMPT_PREVIEW_LEN) + '…' : preview;
 
   header.appendChild(toggle);
   header.appendChild(promptEl);
@@ -521,7 +524,7 @@ function renderRunEntry(entry) {
       lbl.textContent = 'error';
       const dat = document.createElement('span');
       dat.className = 'panel-event-data';
-      dat.textContent = resp.error.split('\n')[0].slice(0, 100);
+      dat.textContent = resp.error.split('\n')[0].slice(0, ERROR_TRUNCATE_LEN);
       line.appendChild(lbl);
       line.appendChild(dat);
       body.appendChild(line);
@@ -652,7 +655,7 @@ function buildSelectingContent(responses, container) {
       if (resp.text) {
         const preview = document.createElement('div');
         preview.className = 'text-preview';
-        preview.textContent = resp.text.split('\n')[0].slice(0, 100);
+        preview.textContent = resp.text.split('\n')[0].slice(0, ERROR_TRUNCATE_LEN);
         section.appendChild(preview);
       }
     } else {
@@ -778,6 +781,16 @@ function hideSlashCompletions() {
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
+// handleLocalCommand completes a client-side slash command that produces a
+// simple text response: clears the input, records the message in history,
+// persists it, and appends it to the feed.
+function handleLocalCommand(text) {
+  inputEl.value = '';
+  history.push({ type: 'msg', text, cls: '' });
+  saveHistory();
+  appendHistoryMsg(text, '');
+}
+
 function handleSend() {
   if (appState !== 'idle') return;
   hideSlashCompletions();
@@ -786,24 +799,16 @@ function handleSend() {
 
   // Handle /help slash command client-side.
   if (/^\/help$/i.test(prompt)) {
-    inputEl.value = '';
     const lines = ['Commands:', ...slashCommands.map(c => `  ${c.name.padEnd(12)}  ${c.desc}`)];
-    const text = lines.join('\n');
-    history.push({ type: 'msg', text, cls: '' });
-    saveHistory();
-    appendHistoryMsg(text, '');
+    handleLocalCommand(lines.join('\n'));
     return;
   }
 
   // Handle /verbose slash command client-side.
   if (/^\/verbose$/i.test(prompt)) {
-    inputEl.value = '';
     verbose = !verbose;
     btnVerbose.classList.toggle('active', verbose);
-    const text = `Verbose mode ${verbose ? 'on' : 'off'}`;
-    history.push({ type: 'msg', text, cls: '' });
-    saveHistory();
-    appendHistoryMsg(text, '');
+    handleLocalCommand(`Verbose mode ${verbose ? 'on' : 'off'}`);
     return;
   }
 
@@ -822,7 +827,7 @@ function handleSend() {
     inputEl.value = '';
     const args = prompt.slice(6).trim();
     const ids = args ? args.split(/\s+/) : [];
-    wsSend({ type: 'set_models', model_ids: ids });
+    wsSend({ type: 'set_models', model_ids: ids.map(id => ({ id, provider: '' })) });
     return;
   }
 
@@ -850,11 +855,7 @@ function handleSend() {
 
   // Handle /totalcost slash command.
   if (/^\/totalcost$/i.test(prompt)) {
-    inputEl.value = '';
-    const text = `Total session cost: $${sessionCostUSD.toFixed(4)}`;
-    history.push({ type: 'msg', text, cls: '' });
-    saveHistory();
-    appendHistoryMsg(text, '');
+    handleLocalCommand(`Total session cost: $${sessionCostUSD.toFixed(4)}`);
     return;
   }
 

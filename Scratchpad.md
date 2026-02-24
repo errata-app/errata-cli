@@ -369,3 +369,77 @@ Zero imports — leaf package safe to import from both `ui` and `web`.
 ### Result
 `go build ./...` clean, `go test ./...` all green.
 Web gains `/help` and `/verbose`. All descriptions now come from a single source.
+
+---
+
+## 2026-02-24 — Full DRY & code smell remediation
+
+### Motivation
+A full audit of all packages (core engine, UI/web Go, support packages, frontend) surfaced two
+real bugs, several dead-code / stdlib-reimplementation issues, meaningful duplication across the
+two UI surfaces, and some oversized functions.
+
+### Batch 0 — Real Bugs
+
+**B0-1 (`internal/web/static/app.js`):** `/model` slash command was sending bare string IDs
+(`model_ids: ids`) instead of `ModelSpec` objects. Go's `json.Unmarshal` silently zero-valued
+the mismatched type, so the filter was never applied. Fixed:
+```js
+model_ids: ids.map(id => ({ id, provider: '' }))
+```
+Matches the `onopen` reconnect path that was already correct.
+
+**B0-2 (`internal/pricing/pricing.go`):** `ContextWindowTokens` used `strings.LastIndex` for
+the qualified→bare fallback while `CostUSD` and `PricingFor` used `strings.Index`. Fixed as a
+side-effect of extracting `resolvePricing`.
+
+### Batch 1 — Quick Hygiene
+
+- **`internal/runner/runner.go`**: Removed stale `// Silly little comment to test prs`
+- **`internal/ui/keys.go`**: Deleted — `keyMap`/`keys` were defined but never referenced
+- **`internal/logging/logger.go`**: Replaced hand-rolled `dirOf()` with `filepath.Dir()`; added `path/filepath` import
+- **`internal/preferences/preferences.go`**: Replaced hand-rolled `splitLines()` with `strings.Split(…, "\n")`; added `"strings"` import
+
+### Batch 2 — Shared Utility Extractions
+
+**B2-1 — `pricing.ProviderQualifiedID`:** Identical `providerQualifiedID()` function existed in
+both `ui/app.go` and `web/handlers.go`. Exported from `internal/pricing`; private copies deleted.
+
+**B2-2 — `resolvePricing`:** `CostUSD`, `PricingFor`, and `ContextWindowTokens` all duplicated
+the qualified→bare ID fallback. Extracted into a private `resolvePricing(qualifiedID)` helper in
+`pricing.go`. Also fixes B0-2.
+
+**B2-3 — `logging.RandomHex`:** `newSessionID()` (16 bytes, `cmd/errata/main.go`) and
+`newRunID()` (8 bytes, `logger.go`) both generated random hex. Exported `RandomHex(n int)` from
+`logging`; replaced both private functions.
+
+**B2-4 — `setupAdapters`:** `runREPL` and `runServe` shared 90% of setup code. Extracted into
+`setupAdapters(cfg) (ads, sessionID, warnings, cleanup)` in `main.go`.
+
+### Batch 3 — Function Decomposition
+
+**B3-1 — `handleWS` (284 lines → ~30-line dispatch):** Introduced `wsConn` per-connection struct
+with 6 extracted methods: `wsHandleRun`, `wsHandleSelect`, `wsHandleSetModels`, `wsHandleCancel`,
+`wsHandleCompact`, `wsHandleClearHistory`.
+
+**B3-2 — `handlePrompt` (176 lines → ~20-line dispatch):** Extracted per-command methods
+following the existing `handleModelCommand` pattern: `handleVerboseCmd`, `handleModelsListCmd`,
+`handleClearCmd`, `handleCompactCmd`, `handleStatsCmd`, `launchRun`.
+
+### Batch 4 — Frontend Cleanup
+
+**B4-1 — `handleLocalCommand(text)`:** All 3 local-command handlers in `app.js` repeated the
+same 4-line boilerplate (clear input, push to history, saveHistory, appendHistoryMsg). Extracted
+to a helper; saves ~12 lines.
+
+**B4-2 — Magic-number constants:** Added `HISTORY_DISPLAY_CAP = 50`, `PROMPT_PREVIEW_LEN = 90`,
+`ERROR_TRUNCATE_LEN = 100` near the top of `app.js`; replaced all 6 inline literals.
+
+### Batch 5 — Surface Parity
+
+**B5-1:** Web's `buildCompletePayload` now applies the same context-overflow hint that the TUI
+shows: when `runner.IsContextOverflowError(resp.Error)` is true, appends
+`" — use /clear or /compact to reset"` to the error text.
+
+### Result
+`go build ./...` clean, `go test ./...` all green.

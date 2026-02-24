@@ -88,6 +88,19 @@ type responseData struct {
 
 // ─── WebSocket handler ────────────────────────────────────────────────────────
 
+// wsConn holds the per-connection state for a single browser WebSocket session.
+type wsConn struct {
+	s    *Server
+	ctx  context.Context
+	send func(wsServerMsg)
+
+	mu             sync.Mutex
+	cancelRun      context.CancelFunc    // cancel for the most recent run; nil initially
+	lastRun        []models.ModelResponse // results of last completed run
+	lastPrompt     string
+	activeAdapters []models.ModelAdapter // nil = use all s.adapters
+}
+
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -116,261 +129,257 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	send := func(msg wsServerMsg) {
-		select {
-		case writeCh <- msg:
-		case <-ctx.Done():
-		}
+	wc := &wsConn{
+		s:   s,
+		ctx: ctx,
+		send: func(msg wsServerMsg) {
+			select {
+			case writeCh <- msg:
+			case <-ctx.Done():
+			}
+		},
 	}
-
-	var (
-		mu             sync.Mutex
-		cancelRun      context.CancelFunc     // cancel for the most recent run; nil initially
-		lastRun        []models.ModelResponse  // results of last completed run
-		lastPrompt     string
-		activeAdapters []models.ModelAdapter   // nil = use all s.adapters
-	)
 
 	for {
 		var msg wsClientMsg
 		if err := wsjson.Read(ctx, conn, &msg); err != nil {
 			break
 		}
-
 		switch msg.Type {
-
 		case "run":
-			if strings.TrimSpace(msg.Prompt) == "" {
-				send(wsServerMsg{Type: "error", Message: "prompt required"})
-				continue
-			}
-
-			// Cancel the previous run (if any) and start a new one.
-			toRun := activeAdapters
-			if toRun == nil {
-				toRun = s.adapters
-			}
-
-			// Snapshot per-connection run state.
-			mu.Lock()
-			oldCancel := cancelRun
-			runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			cancelRun = cancel
-			mu.Unlock()
-
-			// Snapshot server-level histories for the goroutine (read-only during run).
-			s.histMu.RLock()
-			histSnapshot := make(map[string][]models.ConversationTurn, len(s.histories))
-			for k, v := range s.histories {
-				histSnapshot[k] = v
-			}
-			s.histMu.RUnlock()
-
-			if oldCancel != nil {
-				oldCancel()
-			}
-
-			go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, adapters []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
-				defer cancel()
-
-				effectiveHistories := hists
-				for _, ad := range adapters {
-					if runner.ShouldAutoCompact(effectiveHistories, ad.ID()) {
-						send(wsServerMsg{Type: "agent_event", ModelID: ad.ID(), EventType: "text", Data: "[auto-compacting history…]"})
-						effectiveHistories = runner.CompactHistories(
-							runCtx, []models.ModelAdapter{ad},
-							effectiveHistories, func(modelID string, e models.AgentEvent) {
-								send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
-							},
-						)
-					}
-				}
-
-				rs := runner.RunAll(
-					runCtx,
-					adapters,
-					effectiveHistories,
-					prompt,
-					func(modelID string, e models.AgentEvent) {
-						send(wsServerMsg{
-							Type:      "agent_event",
-							ModelID:   modelID,
-							EventType: e.Type,
-							Data:      e.Data,
-						})
-					},
-					verbose,
-				)
-
-				// If the context was cancelled (user cancel or new run started), report
-				// and exit without overwriting lastRun.
-				if runCtx.Err() != nil {
-					send(wsServerMsg{Type: "cancelled"})
-					return
-				}
-
-				adapterIDs := make([]string, len(adapters))
-				for i, ad := range adapters {
-					adapterIDs[i] = ad.ID()
-				}
-				mu.Lock()
-				lastRun = rs
-				lastPrompt = prompt
-				mu.Unlock()
-
-				s.histMu.Lock()
-				s.histories = runner.AppendHistory(effectiveHistories, adapterIDs, rs, prompt)
-				if err := history.Save(s.histPath, s.histories); err != nil {
-					log.Printf("web: could not save history: %v", err)
-				}
-				s.histMu.Unlock()
-
-				send(wsServerMsg{Type: "complete", Responses: buildCompletePayload(rs)})
-			}(msg.Prompt, runCtx, cancel, msg.Verbose, toRun, histSnapshot)
-
+			wc.wsHandleRun(msg)
 		case "select":
-			mu.Lock()
-			rs := lastRun
-			prompt := lastPrompt
-			mu.Unlock()
-
-			if rs == nil {
-				send(wsServerMsg{Type: "error", Message: "no completed run to select from"})
-				continue
-			}
-
-			var selected *models.ModelResponse
-			for i := range rs {
-				if rs[i].ModelID == msg.ModelID {
-					selected = &rs[i]
-					break
-				}
-			}
-			if selected == nil {
-				send(wsServerMsg{Type: "error", Message: "model not found"})
-				continue
-			}
-
-			if err := tools.ApplyWrites(selected.ProposedWrites); err != nil {
-				send(wsServerMsg{Type: "error", Message: err.Error()})
-				continue
-			}
-
-			if err := preferences.Record(s.prefPath, prompt, msg.ModelID, s.sessionID, rs); err != nil {
-				log.Printf("web: could not record preference: %v", err)
-			}
-
-			// Clear lastRun so the user can't double-select.
-			mu.Lock()
-			lastRun = nil
-			mu.Unlock()
-
-			applied := make([]string, 0, len(selected.ProposedWrites))
-			for _, fw := range selected.ProposedWrites {
-				applied = append(applied, fw.Path)
-			}
-			send(wsServerMsg{Type: "applied", Applied: applied})
-
+			wc.wsHandleSelect(msg)
 		case "set_models":
-			if len(msg.ModelSpecs) == 0 {
-				// Reset to all models.
-				activeAdapters = nil
-				ids := make([]string, len(s.adapters))
-				for i, a := range s.adapters {
-					ids[i] = a.ID()
-				}
-				send(wsServerMsg{Type: "models_set", Models: ids})
-				continue
-			}
-			var selected []models.ModelAdapter
-			var errMsgs []string
-			for _, spec := range msg.ModelSpecs {
-				spec.ID = strings.TrimSpace(spec.ID)
-				if spec.ID == "" {
-					continue
-				}
-				// Prefer an already-configured adapter (reuses its logging wrapper etc.).
-				var found models.ModelAdapter
-				for _, a := range s.adapters {
-					if a.ID() == spec.ID {
-						found = a
-						break
-					}
-				}
-				// Fall back to on-demand creation using the provider hint so novel model
-				// names (e.g. "ricky") route correctly without relying on ID prefixes.
-				if found == nil {
-					a, err := adapters.NewAdapterForProvider(spec.ID, spec.Provider, s.cfg)
-					if err != nil {
-						errMsgs = append(errMsgs, "unknown model: "+spec.ID)
-						continue
-					}
-					found = a
-				}
-				selected = append(selected, found)
-			}
-			if len(errMsgs) > 0 {
-				send(wsServerMsg{Type: "error", Message: strings.Join(errMsgs, "; ")})
-				if len(selected) == 0 {
-					continue
-				}
-			}
-			activeAdapters = selected
-			ids := make([]string, len(selected))
-			for i, a := range selected {
-				ids[i] = a.ID()
-			}
-			send(wsServerMsg{Type: "models_set", Models: ids})
-
+			wc.wsHandleSetModels(msg)
 		case "cancel":
-			mu.Lock()
-			cancel := cancelRun
-			mu.Unlock()
-			if cancel != nil {
-				cancel()
-			}
-
+			wc.wsHandleCancel()
 		case "compact":
-			mu.Lock()
-			toCompact := activeAdapters
-			if toCompact == nil {
-				toCompact = s.adapters
-			}
-			mu.Unlock()
-
-			s.histMu.RLock()
-			histsToCompact := make(map[string][]models.ConversationTurn, len(s.histories))
-			for k, v := range s.histories {
-				histsToCompact[k] = v
-			}
-			s.histMu.RUnlock()
-
-			go func() {
-				updated := runner.CompactHistories(
-					ctx, toCompact, histsToCompact,
-					func(modelID string, e models.AgentEvent) {
-						send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
-					},
-				)
-				s.histMu.Lock()
-				s.histories = updated
-				if err := history.Save(s.histPath, s.histories); err != nil {
-					log.Printf("web: could not save history: %v", err)
-				}
-				s.histMu.Unlock()
-				send(wsServerMsg{Type: "compact_complete"})
-			}()
-
+			wc.wsHandleCompact()
 		case "clear_history":
-			s.histMu.Lock()
-			s.histories = nil
-			if err := history.Clear(s.histPath); err != nil {
-				log.Printf("web: could not clear history: %v", err)
-			}
-			s.histMu.Unlock()
-			send(wsServerMsg{Type: "history_cleared"})
+			wc.wsHandleClearHistory()
 		}
 	}
+}
+
+func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
+	if strings.TrimSpace(msg.Prompt) == "" {
+		wc.send(wsServerMsg{Type: "error", Message: "prompt required"})
+		return
+	}
+
+	toRun := wc.activeAdapters
+	if toRun == nil {
+		toRun = wc.s.adapters
+	}
+
+	wc.mu.Lock()
+	oldCancel := wc.cancelRun
+	runCtx, cancel := context.WithTimeout(wc.ctx, 5*time.Minute)
+	wc.cancelRun = cancel
+	wc.mu.Unlock()
+
+	wc.s.histMu.RLock()
+	histSnapshot := make(map[string][]models.ConversationTurn, len(wc.s.histories))
+	for k, v := range wc.s.histories {
+		histSnapshot[k] = v
+	}
+	wc.s.histMu.RUnlock()
+
+	if oldCancel != nil {
+		oldCancel()
+	}
+
+	go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, ads []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
+		defer cancel()
+
+		effectiveHistories := hists
+		for _, ad := range ads {
+			if runner.ShouldAutoCompact(effectiveHistories, ad.ID()) {
+				wc.send(wsServerMsg{Type: "agent_event", ModelID: ad.ID(), EventType: "text", Data: "[auto-compacting history…]"})
+				effectiveHistories = runner.CompactHistories(
+					runCtx, []models.ModelAdapter{ad},
+					effectiveHistories, func(modelID string, e models.AgentEvent) {
+						wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+					},
+				)
+			}
+		}
+
+		rs := runner.RunAll(
+			runCtx, ads, effectiveHistories, prompt,
+			func(modelID string, e models.AgentEvent) {
+				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+			},
+			verbose,
+		)
+
+		if runCtx.Err() != nil {
+			wc.send(wsServerMsg{Type: "cancelled"})
+			return
+		}
+
+		adapterIDs := make([]string, len(ads))
+		for i, ad := range ads {
+			adapterIDs[i] = ad.ID()
+		}
+		wc.mu.Lock()
+		wc.lastRun = rs
+		wc.lastPrompt = prompt
+		wc.mu.Unlock()
+
+		wc.s.histMu.Lock()
+		wc.s.histories = runner.AppendHistory(effectiveHistories, adapterIDs, rs, prompt)
+		if err := history.Save(wc.s.histPath, wc.s.histories); err != nil {
+			log.Printf("web: could not save history: %v", err)
+		}
+		wc.s.histMu.Unlock()
+
+		wc.send(wsServerMsg{Type: "complete", Responses: buildCompletePayload(rs)})
+	}(msg.Prompt, runCtx, cancel, msg.Verbose, toRun, histSnapshot)
+}
+
+func (wc *wsConn) wsHandleSelect(msg wsClientMsg) {
+	wc.mu.Lock()
+	rs := wc.lastRun
+	prompt := wc.lastPrompt
+	wc.mu.Unlock()
+
+	if rs == nil {
+		wc.send(wsServerMsg{Type: "error", Message: "no completed run to select from"})
+		return
+	}
+
+	var selected *models.ModelResponse
+	for i := range rs {
+		if rs[i].ModelID == msg.ModelID {
+			selected = &rs[i]
+			break
+		}
+	}
+	if selected == nil {
+		wc.send(wsServerMsg{Type: "error", Message: "model not found"})
+		return
+	}
+
+	if err := tools.ApplyWrites(selected.ProposedWrites); err != nil {
+		wc.send(wsServerMsg{Type: "error", Message: err.Error()})
+		return
+	}
+
+	if err := preferences.Record(wc.s.prefPath, prompt, msg.ModelID, wc.s.sessionID, rs); err != nil {
+		log.Printf("web: could not record preference: %v", err)
+	}
+
+	wc.mu.Lock()
+	wc.lastRun = nil
+	wc.mu.Unlock()
+
+	applied := make([]string, 0, len(selected.ProposedWrites))
+	for _, fw := range selected.ProposedWrites {
+		applied = append(applied, fw.Path)
+	}
+	wc.send(wsServerMsg{Type: "applied", Applied: applied})
+}
+
+func (wc *wsConn) wsHandleSetModels(msg wsClientMsg) {
+	if len(msg.ModelSpecs) == 0 {
+		wc.activeAdapters = nil
+		ids := make([]string, len(wc.s.adapters))
+		for i, a := range wc.s.adapters {
+			ids[i] = a.ID()
+		}
+		wc.send(wsServerMsg{Type: "models_set", Models: ids})
+		return
+	}
+
+	var selected []models.ModelAdapter
+	var errMsgs []string
+	for _, spec := range msg.ModelSpecs {
+		spec.ID = strings.TrimSpace(spec.ID)
+		if spec.ID == "" {
+			continue
+		}
+		var found models.ModelAdapter
+		for _, a := range wc.s.adapters {
+			if a.ID() == spec.ID {
+				found = a
+				break
+			}
+		}
+		if found == nil {
+			a, err := adapters.NewAdapterForProvider(spec.ID, spec.Provider, wc.s.cfg)
+			if err != nil {
+				errMsgs = append(errMsgs, "unknown model: "+spec.ID)
+				continue
+			}
+			found = a
+		}
+		selected = append(selected, found)
+	}
+	if len(errMsgs) > 0 {
+		wc.send(wsServerMsg{Type: "error", Message: strings.Join(errMsgs, "; ")})
+		if len(selected) == 0 {
+			return
+		}
+	}
+	wc.activeAdapters = selected
+	ids := make([]string, len(selected))
+	for i, a := range selected {
+		ids[i] = a.ID()
+	}
+	wc.send(wsServerMsg{Type: "models_set", Models: ids})
+}
+
+func (wc *wsConn) wsHandleCancel() {
+	wc.mu.Lock()
+	cancel := wc.cancelRun
+	wc.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (wc *wsConn) wsHandleCompact() {
+	wc.mu.Lock()
+	toCompact := wc.activeAdapters
+	if toCompact == nil {
+		toCompact = wc.s.adapters
+	}
+	wc.mu.Unlock()
+
+	wc.s.histMu.RLock()
+	histsToCompact := make(map[string][]models.ConversationTurn, len(wc.s.histories))
+	for k, v := range wc.s.histories {
+		histsToCompact[k] = v
+	}
+	wc.s.histMu.RUnlock()
+
+	go func() {
+		updated := runner.CompactHistories(
+			wc.ctx, toCompact, histsToCompact,
+			func(modelID string, e models.AgentEvent) {
+				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+			},
+		)
+		wc.s.histMu.Lock()
+		wc.s.histories = updated
+		if err := history.Save(wc.s.histPath, wc.s.histories); err != nil {
+			log.Printf("web: could not save history: %v", err)
+		}
+		wc.s.histMu.Unlock()
+		wc.send(wsServerMsg{Type: "compact_complete"})
+	}()
+}
+
+func (wc *wsConn) wsHandleClearHistory() {
+	wc.s.histMu.Lock()
+	wc.s.histories = nil
+	if err := history.Clear(wc.s.histPath); err != nil {
+		log.Printf("web: could not clear history: %v", err)
+	}
+	wc.s.histMu.Unlock()
+	wc.send(wsServerMsg{Type: "history_cleared"})
 }
 
 // ─── REST handlers ────────────────────────────────────────────────────────────
@@ -428,21 +437,6 @@ type providerModelsResult struct {
 	Error      string       `json:"error,omitempty"`
 }
 
-// providerQualifiedID returns the OpenRouter-style "provider/model" key for a
-// model ID returned by a given provider. For OpenRouter and LiteLLM, the model
-// ID already carries the required prefix and is returned as-is.
-func providerQualifiedID(provider, modelID string) string {
-	switch provider {
-	case "Anthropic":
-		return "anthropic/" + modelID
-	case "OpenAI":
-		return "openai/" + modelID
-	case "Gemini":
-		return "google/" + modelID
-	default: // OpenRouter ("provider/model"), LiteLLM ("litellm/X")
-		return modelID
-	}
-}
 
 func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -468,7 +462,7 @@ func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
 		entries := make([]modelEntry, len(ids))
 		for j, id := range ids {
 			e := modelEntry{ID: id}
-			qid := providerQualifiedID(p.Provider, id)
+			qid := pricing.ProviderQualifiedID(p.Provider, id)
 			if in, out, ok := pricing.PricingFor(qid); ok {
 				e.InputPMT, e.OutputPMT = in, out
 			}
@@ -510,6 +504,10 @@ func buildCompletePayload(responses []models.ModelResponse) []responseData {
 				},
 			}
 		}
+		errText := resp.Error
+		if runner.IsContextOverflowError(errText) {
+			errText += " — use /clear or /compact to reset"
+		}
 		result[i] = responseData{
 			ModelID:             resp.ModelID,
 			Text:                resp.Text,
@@ -518,7 +516,7 @@ func buildCompletePayload(responses []models.ModelResponse) []responseData {
 			OutputTokens:        resp.OutputTokens,
 			CostUSD:             resp.CostUSD,
 			ContextWindowTokens: pricing.ContextWindowTokens(resp.ModelID),
-			Error:               resp.Error,
+			Error:               errText,
 			ProposedWrites:      writes,
 		}
 	}
