@@ -229,6 +229,71 @@ func TestSearchCode_PathTraversal(t *testing.T) {
 	assert.Contains(t, out, "outside the working directory")
 }
 
+// --- ExecuteSearchFiles: ** glob patterns ---
+
+func TestSearchFiles_DoubleStarRootMatch(t *testing.T) {
+	// **/*.go should match a file at the root of base_path (** = zero segments)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(""), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	out := tools.ExecuteSearchFiles("**/*.go", ".")
+	assert.Contains(t, out, "main.go")
+}
+
+func TestSearchFiles_DoubleStarDeep(t *testing.T) {
+	// **/*.go should match files nested multiple levels deep
+	dir := t.TempDir()
+	deep := filepath.Join(dir, "internal", "tools")
+	require.NoError(t, os.MkdirAll(deep, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(deep, "tools.go"), []byte(""), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	out := tools.ExecuteSearchFiles("**/*.go", ".")
+	assert.Contains(t, out, "tools.go")
+	assert.NotContains(t, out, "[error:")
+}
+
+func TestSearchFiles_DoubleStarMidPattern(t *testing.T) {
+	// internal/**/*.go matches at zero and multiple depths under internal/
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "internal", "runner"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cmd"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "internal", "top.go"), []byte(""), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "internal", "runner", "runner.go"), []byte(""), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "cmd", "main.go"), []byte(""), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	out := tools.ExecuteSearchFiles("internal/**/*.go", ".")
+	assert.Contains(t, out, "top.go")
+	assert.Contains(t, out, "runner.go")
+	assert.NotContains(t, out, "cmd")
+}
+
+func TestSearchFiles_DoubleStarNoMatch(t *testing.T) {
+	// **/*.go should not match .txt files
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte(""), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	out := tools.ExecuteSearchFiles("**/*.go", ".")
+	assert.Equal(t, "(no matches)", out)
+}
+
+func TestSearchFiles_DoubleStarTestFiles(t *testing.T) {
+	// **/*_test.go should find only test files
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pkg", "foo.go"), []byte(""), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pkg", "foo_test.go"), []byte(""), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	out := tools.ExecuteSearchFiles("**/*_test.go", ".")
+	assert.Contains(t, out, "foo_test.go")
+	assert.NotContains(t, out, "foo.go\n")
+	assert.NotContains(t, out, "[error:")
+}
+
 func TestSearchCode_LineNumbers(t *testing.T) {
 	dir := t.TempDir()
 	content := "line one\nline two\nfind me\nline four\n"

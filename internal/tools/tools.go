@@ -258,7 +258,8 @@ func ExecuteSearchFiles(pattern, basePath string) string {
 			return nil // skip unreadable entries
 		}
 		rel, _ := filepath.Rel(absBase, fullPath)
-		matched, matchErr := filepath.Match(pattern, rel)
+		rel = filepath.ToSlash(rel)
+		matched, matchErr := matchGlob(pattern, rel)
 		if matchErr != nil {
 			return matchErr
 		}
@@ -277,6 +278,43 @@ func ExecuteSearchFiles(pattern, basePath string) string {
 		return "(no matches)"
 	}
 	return strings.Join(matches, "\n")
+}
+
+// matchGlob matches a slash-separated path against a glob pattern that may
+// contain ** to match zero or more path segments. Single-segment wildcards
+// (*, ?, [...]) use filepath.Match rules. ** must occupy a full path segment.
+func matchGlob(pattern, path string) (bool, error) {
+	p := filepath.ToSlash(pattern)
+	f := filepath.ToSlash(path)
+	return matchParts(strings.Split(p, "/"), strings.Split(f, "/"))
+}
+
+// matchParts is the recursive core of matchGlob.
+func matchParts(pat, fp []string) (bool, error) {
+	for len(pat) > 0 {
+		if pat[0] == "**" {
+			rest := pat[1:]
+			// ** matches zero or more segments: try every possible split point.
+			for i := 0; i <= len(fp); i++ {
+				if ok, err := matchParts(rest, fp[i:]); err != nil || ok {
+					return ok, err
+				}
+			}
+			return false, nil
+		}
+		if len(fp) == 0 {
+			return false, nil
+		}
+		ok, err := filepath.Match(pat[0], fp[0])
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+		pat, fp = pat[1:], fp[1:]
+	}
+	return len(fp) == 0, nil
 }
 
 // ExecuteSearchCode searches file contents for pattern using grep.
