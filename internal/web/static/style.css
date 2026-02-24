@@ -78,11 +78,41 @@ body {
 
 #input-area {
   display: flex;
-  gap: 10px;
-  padding: 12px 18px;
+  flex-direction: column;
+  padding: 0 18px 12px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
+
+.input-row {
+  display: flex;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+/* ── Slash command completions ─────────────────────────────── */
+
+#slash-completions {
+  display: none;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  background: var(--bg-panel);
+}
+#slash-completions.visible { display: block; }
+
+.slash-item {
+  display: flex;
+  gap: 16px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  align-items: baseline;
+  border-bottom: 1px solid var(--border);
+}
+.slash-item:last-child { border-bottom: none; }
+.slash-item:hover, .slash-item.active { background: var(--bg-input); }
+.slash-item-name { color: var(--accent-0); min-width: 90px; }
+.slash-item-desc { color: var(--text-dim); }
 
 #prompt-input {
   flex: 1;

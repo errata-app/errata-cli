@@ -59,7 +59,9 @@ function buildRunEntry(prompt, responses, selected) {
 // ─── State ───────────────────────────────────────────────────────────────────
 
 let appState         = 'idle';   // 'idle' | 'running' | 'selecting'
-let sessionCostUSD   = 0;        // cumulative inference cost this session
+let activeSlashIdx   = -1;       // index of highlighted item in slash-completions
+let sessionCostUSD        = 0;   // cumulative inference cost this session
+let sessionCostPerModel   = {};  // per-model cumulative cost this session
 let ws               = null;
 let verbose          = true;
 let currentResponses = null;
@@ -71,6 +73,8 @@ let modelsData       = null;     // cached /api/available-models response
 let activeModelFilter = null;    // null = all configured; string[] = per-connection filter
 
 const PANEL_CAP = 50;            // per-provider display limit when not filtering
+
+let slashCommands = []; // populated from /api/commands at init
 
 const history = [];              // [{type:'msg'|'run', ...}]
 const panels  = {};              // modelId → {el, eventsEl}
@@ -91,6 +95,16 @@ function connectWS() {
   ws = new WebSocket(proto + '//' + location.host + '/ws');
 
   ws.onopen = () => {
+    // Restore saved model filter from previous session.
+    try {
+      const saved = localStorage.getItem('errata_model_filter');
+      if (saved) {
+        const ids = JSON.parse(saved);
+        if (Array.isArray(ids) && ids.length > 0) {
+          wsSend({ type: 'set_models', model_ids: ids.map(id => ({ id, provider: '' })) });
+        }
+      }
+    } catch (e) { /* ignore malformed storage */ }
     if (appState === 'idle') {
       btnSend.disabled = false;
       inputEl.disabled = false;
@@ -133,7 +147,12 @@ function handleServerMessage(msg) {
 
     case 'complete':
       if (appState === 'running') {
-        msg.responses.forEach(r => { sessionCostUSD += r.cost_usd || 0; });
+        msg.responses.sort((a, b) => (a.latency_ms || 0) - (b.latency_ms || 0));
+        msg.responses.forEach(r => {
+          const c = r.cost_usd || 0;
+          sessionCostUSD += c;
+          sessionCostPerModel[r.model_id] = (sessionCostPerModel[r.model_id] || 0) + c;
+        });
         const hasWrites = msg.responses.some(r => r.proposed_writes && r.proposed_writes.length > 0);
         // Update live panel headers with the final latency/token/cost stats.
         msg.responses.forEach(resp => {
@@ -189,6 +208,11 @@ function handleServerMessage(msg) {
 
     case 'models_set': {
       activeModelFilter = (msg.models && msg.models.length > 0) ? [...msg.models] : null;
+      if (activeModelFilter) {
+        localStorage.setItem('errata_model_filter', JSON.stringify(activeModelFilter));
+      } else {
+        localStorage.removeItem('errata_model_filter');
+      }
       const active = activeModelFilter
         ? 'Active models: ' + activeModelFilter.join(', ')
         : 'Active models: all';
@@ -220,10 +244,63 @@ function handleServerMessage(msg) {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
+async function loadCommands() {
+  try {
+    const res = await fetch('/api/commands');
+    slashCommands = await res.json();
+  } catch (e) {
+    console.warn('Could not load commands:', e);
+  }
+}
+
 function init() {
+  loadCommands();
   loadHistory();
   btnSend.addEventListener('click', handleSend);
+  inputEl.addEventListener('input', updateSlashCompletions);
   inputEl.addEventListener('keydown', e => {
+    const completionsEl = document.getElementById('slash-completions');
+    const isOpen = completionsEl.classList.contains('visible');
+
+    if (isOpen) {
+      const typed = inputEl.value.split(' ')[0].toLowerCase();
+      const matches = slashCommands.filter(c => c.name.startsWith(typed));
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeSlashIdx = (activeSlashIdx <= 0 ? matches.length : activeSlashIdx) - 1;
+        updateSlashCompletions();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeSlashIdx = (activeSlashIdx + 1) % matches.length;
+        updateSlashCompletions();
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const idx = activeSlashIdx >= 0 ? activeSlashIdx : 0;
+        if (matches[idx]) {
+          inputEl.value = matches[idx].name + ' ';
+          inputEl.dispatchEvent(new Event('input'));
+        }
+        return;
+      }
+      if (e.key === 'Enter' && activeSlashIdx >= 0) {
+        e.preventDefault();
+        if (matches[activeSlashIdx]) {
+          inputEl.value = matches[activeSlashIdx].name + ' ';
+          inputEl.dispatchEvent(new Event('input'));
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        hideSlashCompletions();
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   });
   btnVerbose.classList.add('active');
@@ -650,12 +727,85 @@ function buildSelectingContent(responses, container) {
   container.appendChild(menu);
 }
 
+// ─── Slash completions ────────────────────────────────────────────────────────
+
+function updateSlashCompletions() {
+  const val = inputEl.value;
+  const completionsEl = document.getElementById('slash-completions');
+
+  if (appState !== 'idle' || !val.startsWith('/') || val.includes('\n')) {
+    completionsEl.classList.remove('visible');
+    completionsEl.innerHTML = '';
+    activeSlashIdx = -1;
+    return;
+  }
+
+  const typed = val.split(' ')[0].toLowerCase();
+  const matches = slashCommands.filter(c => c.name.startsWith(typed));
+
+  if (matches.length === 0) {
+    completionsEl.classList.remove('visible');
+    completionsEl.innerHTML = '';
+    activeSlashIdx = -1;
+    return;
+  }
+
+  activeSlashIdx = Math.min(activeSlashIdx, matches.length - 1);
+  completionsEl.innerHTML = '';
+  matches.forEach((cmd, i) => {
+    const row = document.createElement('div');
+    row.className = 'slash-item' + (i === activeSlashIdx ? ' active' : '');
+    row.innerHTML = `<span class="slash-item-name">${cmd.name}</span><span class="slash-item-desc">${cmd.desc}</span>`;
+    row.addEventListener('mousedown', e => {
+      e.preventDefault(); // don't blur textarea
+      inputEl.value = cmd.name + ' ';
+      inputEl.focus();
+      completionsEl.classList.remove('visible');
+      completionsEl.innerHTML = '';
+      activeSlashIdx = -1;
+    });
+    completionsEl.appendChild(row);
+  });
+  completionsEl.classList.add('visible');
+}
+
+function hideSlashCompletions() {
+  const completionsEl = document.getElementById('slash-completions');
+  completionsEl.classList.remove('visible');
+  completionsEl.innerHTML = '';
+  activeSlashIdx = -1;
+}
+
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
 function handleSend() {
   if (appState !== 'idle') return;
+  hideSlashCompletions();
   const prompt = inputEl.value.trim();
   if (!prompt) return;
+
+  // Handle /help slash command client-side.
+  if (/^\/help$/i.test(prompt)) {
+    inputEl.value = '';
+    const lines = ['Commands:', ...slashCommands.map(c => `  ${c.name.padEnd(12)}  ${c.desc}`)];
+    const text = lines.join('\n');
+    history.push({ type: 'msg', text, cls: '' });
+    saveHistory();
+    appendHistoryMsg(text, '');
+    return;
+  }
+
+  // Handle /verbose slash command client-side.
+  if (/^\/verbose$/i.test(prompt)) {
+    inputEl.value = '';
+    verbose = !verbose;
+    btnVerbose.classList.toggle('active', verbose);
+    const text = `Verbose mode ${verbose ? 'on' : 'off'}`;
+    history.push({ type: 'msg', text, cls: '' });
+    saveHistory();
+    appendHistoryMsg(text, '');
+    return;
+  }
 
   // Handle /clear slash command client-side.
   if (/^\/clear$/i.test(prompt)) {
@@ -691,6 +841,13 @@ function handleSend() {
     return;
   }
 
+  // Handle /stats slash command.
+  if (/^\/stats$/i.test(prompt)) {
+    inputEl.value = '';
+    showStats();
+    return;
+  }
+
   // Handle /totalcost slash command.
   if (/^\/totalcost$/i.test(prompt)) {
     inputEl.value = '';
@@ -722,10 +879,28 @@ async function showStats() {
   try {
     const res = await fetch('/api/stats');
     const { tally } = await res.json();
-    const entries = Object.entries(tally || {});
-    const text = entries.length === 0
-      ? 'Stats: no preference data yet.'
-      : 'Stats:\n' + entries.map(([m, n]) => `  ${m}: ${n} wins`).join('\n');
+    const tallyEntries = Object.entries(tally || {});
+    const lines = ['Stats:'];
+
+    if (tallyEntries.length === 0) {
+      lines.push('  No preference data yet.');
+    } else {
+      lines.push('  Preference wins:');
+      tallyEntries
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([m, n]) => lines.push(`    ${m}: ${n} win${n !== 1 ? 's' : ''}`));
+    }
+
+    const costEntries = Object.entries(sessionCostPerModel).filter(([, c]) => c > 0);
+    if (costEntries.length > 0) {
+      lines.push('  Session cost:');
+      costEntries
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([m, c]) => lines.push(`    ${m}: $${c.toFixed(4)}`));
+      lines.push(`  Total: $${sessionCostUSD.toFixed(4)}`);
+    }
+
+    const text = lines.join('\n');
     history.push({ type: 'msg', text, cls: '' });
     saveHistory();
     appendHistoryMsg(text, '');

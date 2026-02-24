@@ -228,3 +228,144 @@ where the previous connection left off.
 
 ### Result
 `go build ./...` clean, `go test ./...` all green.
+
+---
+
+## 2026-02-24 — Provider-tagged model routing + set_models protocol upgrade
+
+### Motivation
+Novel model IDs that don't match a known prefix (e.g. a newly released `ricky` from OpenAI)
+appeared in the web models panel but could not be activated — `NewAdapter` returned
+`"unknown model prefix for 'ricky'"`. The panel already knows which provider each model
+belongs to; that hint needed to reach the server.
+
+### Changes
+
+**`internal/adapters/registry.go`**
+- Added `NewAdapterForProvider(modelID, provider string, cfg) (ModelAdapter, error)` —
+  dispatches directly on the human-readable provider name ("Anthropic", "OpenAI", "Gemini"),
+  bypassing prefix guessing. Falls back to `NewAdapter` for OpenRouter/LiteLLM/unknown.
+
+**`internal/web/handlers.go`**
+- New `ModelSpec{ID, Provider string}` struct (JSON: `{id, provider}`)
+- `wsClientMsg.ModelSpecs []ModelSpec` replaces `ModelIDs []string` for `set_models`
+- `set_models` handler calls `adapters.NewAdapterForProvider(spec.ID, spec.Provider, s.cfg)`
+  when the model isn't already in `s.adapters`
+
+**`internal/web/static/app.js`**
+- `renderModelsPanel`: `cb.dataset.provider = p.name` stored on each checkbox
+- `applyModels`: collects `{id, provider}` objects instead of bare IDs
+
+**`internal/adapters/registry_test.go`** — `TestNewAdapterForProvider_*` (4 cases)
+**`internal/web/handlers_test.go`** — `TestHandleWS_SetModels_*` (4 cases)
+
+### Result
+`go build ./...` clean, `go test ./...` all green.
+
+---
+
+## 2026-02-24 — Stats enrichment: per-model session cost in `/stats` and web Stats button
+
+### Motivation
+The web Stats button showed only preference win counts from the preference JSONL.
+Session cost was only accessible via the separate `/totalcost` command.
+The TUI had no `/stats` slash command at all.
+
+### Changes
+
+**`internal/web/static/app.js`**
+- Added `let sessionCostPerModel = {}` state variable
+- `complete` handler now accumulates per-model cost alongside the existing `sessionCostUSD` total
+- Rewrote `showStats()`: two sections — "Preference wins" (sorted by count desc) and
+  "Session cost" (sorted by cost desc, with "Total" line; section omitted when all zero)
+- Added `/stats` slash command guard in `handleSend()` (was only wired to the Stats button)
+
+**`internal/ui/app.go`**
+- Added `sessionCostPerModel map[string]float64` to `App` struct; initialized in `New()`
+- `runCompleteMsg` accumulates `a.sessionCostPerModel[resp.ModelID] += resp.CostUSD`
+- Added `/stats` case: same two-section layout as web
+- Updated `helpText()` to document `/stats`
+
+### Result
+`go build ./...` clean, `go test ./...` all green.
+
+---
+
+## 2026-02-24 — Dynamic slash command suggestions
+
+### Motivation
+Users had to already know the available slash commands. Both surfaces should show a live
+filtered list of matching commands whenever the input starts with `/`, updating on every
+keystroke — matching the behaviour of Claude Code's slash command UI.
+
+### Changes
+
+**`internal/ui/app.go`**
+- Added `var slashCommands []struct{name, desc string}` with all 9 TUI commands
+- `View()` in `modeIdle`: after the textarea, renders matching commands (name in teal,
+  description in dim grey) whenever `a.input.Value()` starts with `/`; filtered live
+- `handleIdleKey()`: intercepts `tea.KeyTab` — completes the first matching command via
+  `a.input.SetValue(c.name + " ")` + `a.input.CursorEnd()`
+
+**`internal/web/static/index.html`**
+- Restructured `#input-area` footer: flex-column with `<div id="slash-completions">` above
+  a new `.input-row` wrapper (textarea + send button)
+
+**`internal/web/static/style.css`**
+- `#input-area` → `flex-direction: column; padding: 0 18px 12px`
+- New `.input-row` mirrors old row layout
+- New `#slash-completions` (hidden by default, `.visible` class to show),
+  `.slash-item`, `.slash-item-name`, `.slash-item-desc` styles
+
+**`internal/web/static/app.js`**
+- Added `const SLASH_COMMANDS` array (6 web commands + descriptions)
+- Added `let activeSlashIdx = -1` state
+- Added `updateSlashCompletions()` — filters, renders rows, wires mousedown handlers
+- Added `hideSlashCompletions()` — clears and hides the panel
+- `inputEl.addEventListener('input', updateSlashCompletions)` — fires on every keystroke
+- `keydown` handler extended: ArrowUp/Down navigate list, Tab completes first/active match,
+  Enter completes when an item is active, Escape dismisses
+- `handleSend()` calls `hideSlashCompletions()` at top
+
+### Result
+`go build ./...` clean, `go test ./...` all green.
+
+---
+
+## 2026-02-24 — Canonical slash command registry (`internal/commands`)
+
+### Motivation
+Slash command metadata (name + description) was duplicated: `var slashCommands` in
+`internal/ui/app.go` and `const SLASH_COMMANDS` in `app.js`. Descriptions had drifted.
+Web was missing `/verbose` and `/help`. Any future addition required three separate edits.
+
+### New package: `internal/commands/commands.go`
+
+```go
+type Command struct { Name, Desc string; TUIOnly bool }
+var All = []Command{...}   // 9 commands, /exit marked TUIOnly
+func Web() []Command        // filters out TUIOnly entries
+```
+
+Zero imports — leaf package safe to import from both `ui` and `web`.
+
+### Changes
+
+**`internal/ui/app.go`**
+- Removed `var slashCommands` (local duplicate)
+- `View()` modeIdle suggestion rendering → `commands.All`
+- `handleIdleKey()` Tab completion → `commands.All`
+- `helpText()` now generates from `commands.All`
+
+**`internal/web/handlers.go`** — new `handleCommands`: serves `commands.Web()` as JSON
+
+**`internal/web/server.go`** — registered `GET /api/commands`
+
+**`internal/web/static/app.js`**
+- Removed hardcoded `const SLASH_COMMANDS`; replaced with `let slashCommands = []`
+- `loadCommands()` fetches `/api/commands` at init
+- Added `/help` and `/verbose` handlers in `handleSend()`
+
+### Result
+`go build ./...` clean, `go test ./...` all green.
+Web gains `/help` and `/verbose`. All descriptions now come from a single source.

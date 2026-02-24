@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/pricing"
+	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
@@ -103,7 +105,8 @@ type App struct {
 	histPath              string
 
 	// cumulative cost across all runs this session
-	totalCostUSD float64
+	totalCostUSD       float64
+	sessionCostPerModel map[string]float64 // per-model cumulative cost this session
 }
 
 // New creates the App model.
@@ -130,6 +133,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, sessionID string, c
 		feedVP:                viewport.New(80, 20),
 		panelIdx:              make(map[string]int),
 		conversationHistories: h,
+		sessionCostPerModel:   make(map[string]float64),
 		cfg:                   cfg,
 	}
 }
@@ -275,6 +279,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.outputTokens = resp.OutputTokens
 			p.costUSD = resp.CostUSD
 			a.totalCostUSD += resp.CostUSD
+			a.sessionCostPerModel[resp.ModelID] += resp.CostUSD
 			if resp.Error != "" {
 				p.errMsg = resp.Error
 				if runner.IsContextOverflowError(resp.Error) {
@@ -298,6 +303,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err := history.Save(a.histPath, a.conversationHistories); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
 		}
+
+		// Sort by latency ascending (fastest first) for display. Must happen after
+		// panel-stat assignment and AppendHistory, which rely on the original index order.
+		sort.SliceStable(msg.responses, func(i, j int) bool {
+			return msg.responses[i].LatencyMS < msg.responses[j].LatencyMS
+		})
 
 		// Store responses on the last feed item so renderFeedContent renders the diff.
 		if len(a.feed) > 0 {
@@ -353,6 +364,19 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		return a.handlePrompt(prompt)
+
+	case tea.KeyTab:
+		val := a.input.Value()
+		if len(val) > 0 && val[0] == '/' {
+			prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
+			for _, c := range commands.All {
+				if strings.HasPrefix(c.Name, prefix) {
+					a.input.SetValue(c.Name + " ")
+					a.input.CursorEnd()
+					return a, nil
+				}
+			}
+		}
 	}
 
 	var cmd tea.Cmd
@@ -427,6 +451,47 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 			)
 			return compactCompleteMsg{histories: updated}
 		}
+	case "/stats":
+		tally := preferences.Summarize(a.prefPath)
+		var sb strings.Builder
+		sb.WriteString("Stats:\n")
+		if len(tally) == 0 {
+			sb.WriteString("  No preference data yet.\n")
+		} else {
+			sb.WriteString("  Preference wins:\n")
+			type kv struct {
+				id   string
+				wins int
+			}
+			kvs := make([]kv, 0, len(tally))
+			for id, wins := range tally {
+				kvs = append(kvs, kv{id, wins})
+			}
+			sort.Slice(kvs, func(i, j int) bool { return kvs[i].wins > kvs[j].wins })
+			for _, e := range kvs {
+				plural := "s"
+				if e.wins == 1 {
+					plural = ""
+				}
+				sb.WriteString(fmt.Sprintf("    %s: %d win%s\n", e.id, e.wins, plural))
+			}
+		}
+		if len(a.sessionCostPerModel) > 0 {
+			sb.WriteString("  Session cost:\n")
+			ids := make([]string, 0, len(a.sessionCostPerModel))
+			for id := range a.sessionCostPerModel {
+				ids = append(ids, id)
+			}
+			sort.Slice(ids, func(i, j int) bool {
+				return a.sessionCostPerModel[ids[i]] > a.sessionCostPerModel[ids[j]]
+			})
+			for _, id := range ids {
+				sb.WriteString(fmt.Sprintf("    %s: $%.4f\n", id, a.sessionCostPerModel[id]))
+			}
+			sb.WriteString(fmt.Sprintf("  Total: $%.4f\n", a.totalCostUSD))
+		}
+		return a.withMessage(strings.TrimRight(sb.String(), "\n")), nil
+
 	case "/totalcost":
 		return a.withMessage(fmt.Sprintf("Total session cost: $%.4f", a.totalCostUSD)), nil
 
@@ -626,6 +691,18 @@ func (a App) View() string {
 			sb.WriteByte('\n')
 		}
 		sb.WriteString(a.input.View())
+		if val := a.input.Value(); len(val) > 0 && val[0] == '/' {
+			prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
+			nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AFAF"))
+			descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+			for _, c := range commands.All {
+				if strings.HasPrefix(c.Name, prefix) {
+					sb.WriteByte('\n')
+					sb.WriteString(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)))
+					sb.WriteString(descStyle.Render("  " + c.Desc))
+				}
+			}
+		}
 	}
 
 	return sb.String()
@@ -676,15 +753,16 @@ func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {
 }
 
 func helpText() string {
-	return `Commands:
-  /help              Show this message
-  /clear             Clear display history and conversation memory
-  /compact           Summarise conversation history to free up context
-  /verbose           Toggle verbose mode
-  /models            List active and all available models by provider
-  /model [id...]     Restrict to model(s); bare /model resets to all
-  /totalcost         Show total inference cost for this session
-  /exit              Exit`
+	var sb strings.Builder
+	sb.WriteString("Commands:")
+	for _, c := range commands.All {
+		name := c.Name
+		if c.Name == "/model" {
+			name = "/model [id...]"
+		}
+		fmt.Fprintf(&sb, "\n  %-20s%s", name, c.Desc)
+	}
+	return sb.String()
 }
 
 // providerQualifiedID returns the OpenRouter-style "provider/model" key used

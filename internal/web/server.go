@@ -66,6 +66,7 @@ func (s *Server) Start(addr string) error {
 	// Stateless REST endpoints
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/models", s.handleModels)
+	mux.HandleFunc("GET /api/commands", s.handleCommands)
 	mux.HandleFunc("GET /api/available-models", s.handleAvailableModels)
 
 	return http.ListenAndServe(addr, mux)

@@ -39,7 +39,7 @@ errata/
 │   ├── models/
 │   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
 │   ├── adapters/
-│   │   ├── registry.go      # NewAdapter(), ListAdapters() — prefix/slash routing
+│   │   ├── registry.go      # NewAdapter(), NewAdapterForProvider(), ListAdapters() — routing
 │   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildSuccessResponse — shared helpers
 │   │   ├── list.go          # ListAvailableModels(), ProviderModels — per-provider model catalogue fetch
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
@@ -104,6 +104,7 @@ Both the TUI and the web textarea accept slash commands.
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/compact` | Summarize conversation history to free up context window |
 | `/models` | Query each configured provider for all available models; shows per-model pricing ($X in / $Y out /1M tokens); for OpenAI and Gemini shows only chat-capable models with a "N of M, chat only" count; caps display at 10 per provider with "… and N more" notice |
+| `/stats` | Show preference win counts and per-model session cost |
 | `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
 | `/model` | Reset model filter back to all configured models |
@@ -181,7 +182,12 @@ available IDs. No changes take effect if any ID in the list is invalid.
 **Implementation:** `App.activeAdapters` (TUI) and `activeAdapters` local var (web, per
 connection). Both pass the filtered slice to `runner.RunAll`; only filtered panels are
 created. The server-side WebSocket message type is `set_models`; client sends
-`{type: "set_models", model_ids: [...]}`, server replies `{type: "models_set", models: [...]}`.
+`{type: "set_models", model_ids: [{id, provider}, ...]}` (elements are `ModelSpec` objects),
+server replies `{type: "models_set", models: [...]}`. The `provider` field lets the server
+route novel model IDs that don't match a known prefix via `adapters.NewAdapterForProvider`.
+
+**Web persistence:** The web client saves the active model filter to `localStorage` under
+`errata_model_filter` and restores it on reconnect by re-sending `set_models`.
 
 ---
 
@@ -256,7 +262,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 | `run` | `prompt`, `verbose` | Start a new agent run |
 | `select` | `model_id` | Apply a model's proposed writes |
 | `cancel` | — | Cancel the running agents |
-| `set_models` | `model_ids` | Set model filter (empty = reset to all) |
+| `set_models` | `model_ids` | Set model filter (empty = reset to all); elements are `{id, provider}` objects (`ModelSpec`); `provider` enables routing of novel IDs via `NewAdapterForProvider` |
 | `compact` | — | Summarize conversation history to free context window |
 | `clear_history` | — | Wipe server-side conversation history and delete `data/history.json` |
 

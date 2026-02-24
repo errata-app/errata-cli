@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/suarezc/errata/internal/adapters"
+	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/diff"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
@@ -390,6 +391,20 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"models": ids})
+}
+
+func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
+	type entry struct {
+		Name string `json:"name"`
+		Desc string `json:"desc"`
+	}
+	cmds := commands.Web()
+	out := make([]entry, len(cmds))
+	for i, c := range cmds {
+		out[i] = entry{c.Name, c.Desc}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
 }
 
 // ─── Available models handler ─────────────────────────────────────────────────

@@ -158,6 +158,7 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/compact` | Summarize conversation history to free up context window |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/models` | List all available models from each configured provider with per-model pricing; OpenAI and Gemini show only chat-capable models ("N of M, chat only"); up to 10 per provider with "… and N more" if truncated |
+| `/stats` | Show preference win counts and per-model session cost |
 | `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict subsequent runs to specific model(s) |
 | `/model` | Reset model filter — all configured models run again |
@@ -199,6 +200,13 @@ ERRATA_ACTIVE_MODELS=claude-sonnet-4-6,anthropic/claude-opus-4-6
 ```
 
 The env var sets the starting set of active models; `/model` overrides it for the session.
+
+The web UI saves your active filter in `localStorage` and restores it automatically on
+reconnect, so your model selection persists across page reloads and server restarts.
+
+**Novel model names:** The web model panel includes provider information with each model ID.
+When you activate a model whose name doesn't match a known prefix (e.g. a newly released
+OpenAI model), Errata uses the provider hint to route it to the correct adapter automatically.
 
 ---
 
