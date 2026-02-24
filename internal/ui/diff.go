@@ -59,6 +59,16 @@ func RenderDiffs(responses []models.ModelResponse) string {
 			fd := diff.Compute(fw.Path, fw.Content)
 			sb.WriteString(renderFileDiff(fd))
 		}
+		if resp.Text != "" {
+			sb.WriteString(contextStyle.Render("  ── reasoning ──"))
+			sb.WriteByte('\n')
+			for _, line := range strings.Split(resp.Text, "\n") {
+				if line != "" {
+					sb.WriteString(contextStyle.Render("  " + line))
+					sb.WriteByte('\n')
+				}
+			}
+		}
 		sb.WriteByte('\n')
 	}
 	return sb.String()

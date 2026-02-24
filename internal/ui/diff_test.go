@@ -72,6 +72,23 @@ func TestRenderDiffs_TextPreviewWhenNoWrites(t *testing.T) {
 	assert.Contains(t, out, "Here is my analysis of the code.")
 }
 
+func TestRenderDiffs_TextShownAlongsideWrites(t *testing.T) {
+	responses := []models.ModelResponse{
+		{
+			ModelID:   "claude-sonnet-4-6",
+			LatencyMS: 500,
+			Text:      "I changed the function signature.",
+			ProposedWrites: []tools.FileWrite{
+				{Path: "main.go", Content: "package main\nfunc Foo() {}\n"},
+			},
+		},
+	}
+	out := ui.RenderDiffs(responses)
+	assert.Contains(t, out, "main.go")
+	assert.Contains(t, out, "I changed the function signature.")
+	assert.Contains(t, out, "reasoning")
+}
+
 func TestRenderDiffs_MultipleResponses(t *testing.T) {
 	responses := []models.ModelResponse{
 		{ModelID: "model-a", LatencyMS: 100},

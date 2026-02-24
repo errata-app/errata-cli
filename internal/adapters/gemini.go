@@ -101,8 +101,12 @@ func buildGeminiTools(ctx context.Context) []*genai.Tool {
 	for _, def := range tools.ActiveToolsFromContext(ctx) {
 		props := map[string]*genai.Schema{}
 		for name, p := range def.Properties {
+			schemaType := genai.TypeString
+			if p.Type == "integer" {
+				schemaType = genai.TypeInteger
+			}
 			props[name] = &genai.Schema{
-				Type:        genai.TypeString,
+				Type:        schemaType,
 				Description: p.Description,
 			}
 		}

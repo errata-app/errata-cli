@@ -231,6 +231,9 @@ func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) {
 	// /tools reset — re-enable all tools
 	if lower == "reset" {
 		a.disabledTools = nil
+		if err := tools.SaveDisabledTools(a.toolStatePath, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save tool state: %v\n", err)
+		}
 		return a.withMessage("All tools enabled."), nil
 	}
 
@@ -278,6 +281,9 @@ func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) {
 		} else {
 			delete(a.disabledTools, n)
 		}
+	}
+	if err := tools.SaveDisabledTools(a.toolStatePath, a.disabledTools); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save tool state: %v\n", err)
 	}
 	// Return the updated list.
 	return a.handleToolsCommand("")

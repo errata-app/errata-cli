@@ -18,6 +18,7 @@ import (
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 // ---- message types ----
@@ -70,6 +71,7 @@ type App struct {
 	activeAdapters []models.ModelAdapter // nil = use all adapters
 	disabledTools  map[string]bool       // tools excluded from runs; nil = all enabled
 	prefPath       string
+	toolStatePath  string // path to .errata_tools persistence file; "" = no persistence
 	sessionID      string
 	cfg            config.Config
 
@@ -117,7 +119,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config) *App {
+func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID, toolStatePath string, cfg config.Config) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -136,11 +138,17 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		fmt.Fprintf(os.Stderr, "warning: could not load prompt history: %v\n", err)
 	}
 
+	disabled, err := tools.LoadDisabledTools(toolStatePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load tool state: %v\n", err)
+	}
+
 	return &App{
 		adapters:              adapters,
 		prefPath:              prefPath,
 		histPath:              histPath,
 		promptHistPath:        promptHistPath,
+		toolStatePath:         toolStatePath,
 		promptHistory:         ph,
 		historyIdx:            -1,
 		sessionID:             sessionID,
@@ -148,6 +156,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		feedVP:                viewport.New(80, 20),
 		panelIdx:              make(map[string]int),
 		conversationHistories: h,
+		disabledTools:         disabled,
 		sessionCostPerModel:   make(map[string]float64),
 		cfg:                   cfg,
 	}
@@ -433,7 +442,7 @@ func (a App) View() string {
 
 // Run starts the bubbletea program and blocks until exit.
 func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config, warnings []string) error {
-	app := New(adapters, prefPath, histPath, promptHistPath, sessionID, cfg)
+	app := New(adapters, prefPath, histPath, promptHistPath, sessionID, ".errata_tools", cfg)
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	app.SetProgram(p)

@@ -1,1 +1,4 @@
 "One time is enough"
+"Introduce yourself briefly"
+"Let's write a simple go routine to a new file called tool_test.go"
+"Go ahead and read poem_test.txt, grab a new poem from https://www.poetryfoundation.org/poetrymagazine/poems/1740165/zora-in-beaufort-1940 and then emit the number of lines in the file."

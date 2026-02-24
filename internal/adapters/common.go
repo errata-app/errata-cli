@@ -43,13 +43,34 @@ func DispatchTool(
 	switch name {
 	case tools.ReadToolName:
 		path := args["path"]
+		offset, limit := 0, 0
+		if v := args["offset"]; v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				offset = n
+			}
+		}
+		if v := args["limit"]; v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				limit = n
+			}
+		}
 		onEvent(models.AgentEvent{Type: "reading", Data: path})
-		return tools.ExecuteRead(path), true
+		return tools.ExecuteRead(path, offset, limit), true
 
 	case tools.WriteToolName:
 		path := args["path"]
 		onEvent(models.AgentEvent{Type: "writing", Data: path})
 		*proposed = append(*proposed, tools.FileWrite{Path: path, Content: args["content"]})
+		return writeAck, true
+
+	case tools.EditToolName:
+		path := args["path"]
+		onEvent(models.AgentEvent{Type: "writing", Data: path})
+		newContent, errMsg := tools.ExecuteEditFile(path, args["old_string"], args["new_string"])
+		if errMsg != "" {
+			return errMsg, true
+		}
+		*proposed = append(*proposed, tools.FileWrite{Path: path, Content: newContent})
 		return writeAck, true
 
 	case tools.ListDirToolName:
@@ -73,8 +94,14 @@ func DispatchTool(
 		pattern := args["pattern"]
 		path := args["path"]
 		fileGlob := args["file_glob"]
+		contextLines := 0
+		if v := args["context_lines"]; v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				contextLines = n
+			}
+		}
 		onEvent(models.AgentEvent{Type: "reading", Data: pattern})
-		return tools.ExecuteSearchCode(pattern, path, fileGlob), true
+		return tools.ExecuteSearchCode(pattern, path, fileGlob, contextLines), true
 
 	case tools.BashToolName:
 		command := args["command"]
@@ -84,6 +111,11 @@ func DispatchTool(
 		}
 		onEvent(models.AgentEvent{Type: "bash", Data: desc})
 		return tools.ExecuteBash(command), true
+
+	case tools.WebFetchToolName:
+		rawURL := args["url"]
+		onEvent(models.AgentEvent{Type: "reading", Data: rawURL})
+		return tools.ExecuteWebFetch(rawURL), true
 	}
 	return "", false
 }

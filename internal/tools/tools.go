@@ -4,22 +4,41 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/net/html"
+	"golang.org/x/sync/singleflight"
 )
 
+// webFetchGroup deduplicates concurrent web_fetch calls for the same URL.
+// When two models request the same URL simultaneously, only one HTTP request
+// is made and both receive the identical result, preventing rate-limiting and
+// ensuring consistent content across models.
+var webFetchGroup singleflight.Group
+
 const (
-	ReadToolName    = "read_file"
-	WriteToolName   = "write_file"
-	ListDirToolName = "list_directory"
-	SearchFilesName = "search_files"
-	SearchCodeName  = "search_code"
-	BashToolName    = "bash"
+	ReadToolName     = "read_file"
+	WriteToolName    = "write_file"
+	EditToolName     = "edit_file"
+	ListDirToolName  = "list_directory"
+	SearchFilesName  = "search_files"
+	SearchCodeName   = "search_code"
+	BashToolName     = "bash"
+	WebFetchToolName = "web_fetch"
 )
+
+// maxReadLines is the hard cap on lines returned by ExecuteRead.
+const maxReadLines = 2000
 
 // searchCommandTimeout is the maximum time allowed for search_code subprocess execution.
 const searchCommandTimeout = 30 * time.Second
@@ -67,22 +86,40 @@ type ToolDef struct {
 // Definitions is the canonical set of tools available to all agents.
 var Definitions = []ToolDef{
 	{
-		Name:        ReadToolName,
-		Description: "Read the contents of a file relative to the current working directory.",
+		Name: ReadToolName,
+		Description: "Read the contents of a file relative to the current working directory. " +
+			"Use offset and limit to read a specific line range for large files. " +
+			"Returns a truncation notice when there are more lines to read.",
 		Properties: map[string]ToolParam{
-			"path": {Type: "string", Description: "Relative path to the file"},
+			"path":   {Type: "string", Description: "Relative path to the file"},
+			"offset": {Type: "integer", Description: "First line to return, 1-indexed (default 1)"},
+			"limit":  {Type: "integer", Description: "Maximum lines to return (default and max 2000)"},
 		},
 		Required: []string{"path"},
 	},
 	{
 		Name: WriteToolName,
 		Description: "Propose writing content to a file relative to the current working directory. " +
+			"Use only for new files or complete rewrites — use edit_file for targeted changes to existing files. " +
 			"The write will be applied only if the user selects this model's response.",
 		Properties: map[string]ToolParam{
 			"path":    {Type: "string", Description: "Relative path to the file"},
 			"content": {Type: "string", Description: "Full file content to write"},
 		},
 		Required: []string{"path", "content"},
+	},
+	{
+		Name: EditToolName,
+		Description: "Propose a targeted edit to an existing file by replacing an exact string. " +
+			"old_string must appear exactly once in the file — add enough surrounding context to make it unique. " +
+			"More efficient than write_file for small changes. " +
+			"The edit is queued and applied only if the user selects this model's response.",
+		Properties: map[string]ToolParam{
+			"path":       {Type: "string", Description: "Relative path to the file to edit"},
+			"old_string": {Type: "string", Description: "The exact string to replace (must appear exactly once)"},
+			"new_string": {Type: "string", Description: "The replacement string"},
+		},
+		Required: []string{"path", "old_string", "new_string"},
 	},
 	{
 		Name: ListDirToolName,
@@ -108,11 +145,13 @@ var Definitions = []ToolDef{
 	{
 		Name: SearchCodeName,
 		Description: "Search file contents for a regex pattern. Returns matching file paths, " +
-			"line numbers, and the matching lines. Use file_glob to filter by file type.",
+			"line numbers, and the matching lines. Use file_glob to filter by file type. " +
+			"Use context_lines to include surrounding lines for context.",
 		Properties: map[string]ToolParam{
-			"pattern":   {Type: "string", Description: "Regex pattern to search for"},
-			"path":      {Type: "string", Description: "File or directory to search, relative to cwd (default '.')"},
-			"file_glob": {Type: "string", Description: "Optional filename filter, e.g. '*.go'"},
+			"pattern":       {Type: "string", Description: "Regex pattern to search for"},
+			"path":          {Type: "string", Description: "File or directory to search, relative to cwd (default '.')"},
+			"file_glob":     {Type: "string", Description: "Optional filename filter, e.g. '*.go'"},
+			"context_lines": {Type: "integer", Description: "Lines of context before and after each match (default 0)"},
 		},
 		Required: []string{"pattern"},
 	},
@@ -126,6 +165,16 @@ var Definitions = []ToolDef{
 			"description": {Type: "string", Description: "One-line summary of what this command does"},
 		},
 		Required: []string{"command", "description"},
+	},
+	{
+		Name: WebFetchToolName,
+		Description: "Fetch the content of a public URL and return its text. " +
+			"HTML pages are stripped to plain text. Use for reading documentation, " +
+			"GitHub issues, READMEs, or any publicly accessible web page.",
+		Properties: map[string]ToolParam{
+			"url": {Type: "string", Description: "The http:// or https:// URL to fetch"},
+		},
+		Required: []string{"url"},
 	},
 }
 
@@ -170,16 +219,20 @@ Tool use guidance:
 - Use list_directory to explore the project structure before reading specific files.
 - Use search_files to find files by name pattern (e.g. search_files("**/*.go")).
 - Use search_code to find where a function, type, or string is defined or used.
-- Use read_file only after you know which file you need.
+- Use read_file only after you know which file you need. For large files, use offset and limit to page through content.
+- Use edit_file for targeted changes to existing files (replaces an exact string). Use write_file only for new files or complete rewrites.
 - Use bash to run tests, builds, or any shell command; always provide a clear description.
-- write_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
+- Use web_fetch to read documentation, GitHub issues, package READMEs, or any public URL.
+- write_file and edit_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
 `
 }
 
 // ExecuteRead reads a file relative to cwd.
+// offset is 1-indexed (0 or 1 both mean "start at line 1").
+// limit is the max lines to return (0 means use maxReadLines).
 // Returns the file content, or an error string the model can see.
 // Refuses paths that escape the working directory.
-func ExecuteRead(path string) string {
+func ExecuteRead(path string, offset, limit int) string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Sprintf("[error: cannot determine working directory: %v]", err)
@@ -204,7 +257,82 @@ func ExecuteRead(path string) string {
 		}
 		return fmt.Sprintf("[error: %v]", err)
 	}
-	return string(data)
+
+	// Normalize offset and limit.
+	if offset <= 0 {
+		offset = 1
+	}
+	if limit <= 0 || limit > maxReadLines {
+		limit = maxReadLines
+	}
+
+	lines := strings.Split(string(data), "\n")
+	total := len(lines)
+
+	start := offset - 1 // convert to 0-indexed
+	if start >= total {
+		return fmt.Sprintf("[error: offset %d exceeds file length (%d lines)]", offset, total)
+	}
+
+	end := start + limit
+	if end > total {
+		end = total
+	}
+
+	result := strings.Join(lines[start:end], "\n")
+
+	// Count remaining real lines (ignore the trailing empty element produced by a
+	// trailing newline when strings.Split is applied to it).
+	remaining := total - end
+	if remaining > 0 && lines[total-1] == "" {
+		remaining--
+	}
+	if remaining > 0 {
+		result += fmt.Sprintf("\n[... %d lines omitted. Use offset=%d to continue reading.]", remaining, end+1)
+	}
+
+	return result
+}
+
+// ExecuteEditFile reads path, replaces exactly one occurrence of oldString with newString,
+// and returns (newContent, ""). Returns ("", errorMessage) on failure.
+// The caller is responsible for queuing the result as a ProposedWrite.
+// Refuses paths that escape the working directory.
+func ExecuteEditFile(path, oldString, newString string) (string, string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Sprintf("[error: cannot determine working directory: %v]", err)
+	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Sprintf("[error: invalid path %q: %v]", path, err)
+	}
+
+	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
+	absClean := filepath.Clean(abs)
+	if !strings.HasPrefix(absClean+string(filepath.Separator), cwdClean) {
+		return "", fmt.Sprintf("[error: path %q is outside the working directory]", path)
+	}
+
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Sprintf("[error: file not found: %q]", path)
+		}
+		return "", fmt.Sprintf("[error: %v]", err)
+	}
+
+	content := string(data)
+	count := strings.Count(content, oldString)
+	switch count {
+	case 0:
+		return "", fmt.Sprintf("[error: old_string not found in %q]", path)
+	case 1:
+		return strings.Replace(content, oldString, newString, 1), ""
+	default:
+		return "", fmt.Sprintf("[error: old_string is ambiguous (%d matches) in %q — add more surrounding context]", count, path)
+	}
 }
 
 // ApplyWrites writes each FileWrite to disk, creating parent directories as needed.
@@ -223,6 +351,7 @@ func ApplyWrites(writes []FileWrite) error {
 // ExecuteListDirectory lists a directory tree up to depth levels deep.
 // path is relative to cwd. Returns an indented tree string, or an error message.
 // Directories are suffixed with /. depth is clamped to [1, 5].
+// File entries include a human-readable size hint (e.g. "handlers.go  (12 KB)").
 //
 // DERIVED: BFS indented-tree design from codex list_dir.rs
 func ExecuteListDirectory(path string, depth int) string {
@@ -269,6 +398,7 @@ func ExecuteListDirectory(path string, depth int) string {
 }
 
 // collectDirEntries recursively collects directory entries into lines.
+// File entries include a size hint; directory entries do not.
 func collectDirEntries(dir string, currentDepth, maxDepth int, lines *[]string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -283,9 +413,27 @@ func collectDirEntries(dir string, currentDepth, maxDepth int, lines *[]string) 
 				collectDirEntries(filepath.Join(dir, name), currentDepth+1, maxDepth, lines)
 			}
 		} else {
-			*lines = append(*lines, indent+name)
+			info, infoErr := entry.Info()
+			if infoErr == nil {
+				*lines = append(*lines, indent+name+"  ("+formatFileSize(info.Size())+")")
+			} else {
+				*lines = append(*lines, indent+name)
+			}
 		}
 	}
+}
+
+// formatFileSize returns a compact human-readable file size string.
+func formatFileSize(bytes int64) string {
+	if bytes < 1024 {
+		return "< 1 KB"
+	}
+	kb := (bytes + 512) / 1024 // round to nearest KB
+	if kb < 1024 {
+		return fmt.Sprintf("%d KB", kb)
+	}
+	mb := (bytes + 512*1024) / (1024 * 1024)
+	return fmt.Sprintf("%d MB", mb)
 }
 
 // ExecuteSearchFiles finds files matching a glob pattern relative to basePath.
@@ -387,6 +535,174 @@ func capOutput(s string) string {
 		fmt.Sprintf("\n[truncated: output exceeded %d bytes]", bashOutputLimit)
 }
 
+// webFetchOutputLimit is the maximum bytes returned from a web_fetch call.
+const webFetchOutputLimit = 50_000
+
+// webFetchTimeout is the HTTP request timeout for web_fetch.
+const webFetchTimeout = 30 * time.Second
+
+// webFetchUserAgent mimics a real browser to avoid bot-detection pages that
+// serve stripped-down content to non-browser user agents.
+const webFetchUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+// ExecuteWebFetch fetches a URL and returns cleaned text content.
+// HTML pages are stripped to plain text. Output is capped at webFetchOutputLimit bytes.
+// Concurrent calls for the same URL are deduplicated via singleflight — only one
+// HTTP request goes out, and all callers receive the identical result.
+func ExecuteWebFetch(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Sprintf("[error: invalid URL: %v]", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Sprintf("[error: only http/https URLs are supported, got %q]", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		if os.Getenv("ERRATA_ALLOW_LOCAL_FETCH") != "true" {
+			return "[error: fetching localhost URLs is disabled; set ERRATA_ALLOW_LOCAL_FETCH=true to enable]"
+		}
+	}
+
+	result, _, _ := webFetchGroup.Do(rawURL, func() (any, error) {
+		return doWebFetch(rawURL), nil
+	})
+	return result.(string)
+}
+
+// doWebFetch performs the actual HTTP fetch. Called via singleflight so
+// only one in-flight request per URL exists at any given time.
+func doWebFetch(rawURL string) string {
+	client := &http.Client{Timeout: webFetchTimeout}
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return fmt.Sprintf("[error: could not create request: %v]", err)
+	}
+	req.Header.Set("User-Agent", webFetchUserAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("[error: fetch failed: %v]", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Sprintf("[error: HTTP %d from %s]", resp.StatusCode, rawURL)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(webFetchOutputLimit*4)))
+	if err != nil {
+		return fmt.Sprintf("[error: reading response: %v]", err)
+	}
+
+	var text string
+	ct := resp.Header.Get("Content-Type")
+	if strings.Contains(ct, "text/html") {
+		text = htmlToText(string(body))
+	} else {
+		text = string(body)
+	}
+
+	text = strings.TrimSpace(text)
+	if len(text) > webFetchOutputLimit {
+		text = text[:webFetchOutputLimit] + fmt.Sprintf("\n[truncated: output exceeded %d bytes]", webFetchOutputLimit)
+	}
+	if text == "" {
+		return "(empty response)"
+	}
+	return text
+}
+
+// htmlToText converts HTML to plain text by stripping tags and skipping
+// script/style/head elements. Consecutive whitespace is collapsed.
+func htmlToText(htmlContent string) string {
+	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
+	var sb strings.Builder
+	skip := false
+	for {
+		tt := tokenizer.Next()
+		switch tt {
+		case html.ErrorToken:
+			return sb.String()
+		case html.StartTagToken, html.SelfClosingTagToken:
+			tn, _ := tokenizer.TagName()
+			switch string(tn) {
+			case "script", "style", "head":
+				skip = true
+			}
+		case html.EndTagToken:
+			tn, _ := tokenizer.TagName()
+			switch string(tn) {
+			case "script", "style", "head":
+				skip = false
+			}
+		case html.TextToken:
+			if !skip {
+				text := strings.TrimSpace(string(tokenizer.Text()))
+				if text != "" {
+					sb.WriteString(text)
+					sb.WriteByte('\n')
+				}
+			}
+		}
+	}
+}
+
+// LoadDisabledTools reads the disabled-tool set from path.
+// Returns nil, nil if path is empty or the file does not exist (all tools enabled).
+func LoadDisabledTools(path string) (map[string]bool, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Disabled []string `json:"disabled"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	if len(payload.Disabled) == 0 {
+		return nil, nil
+	}
+	m := make(map[string]bool, len(payload.Disabled))
+	for _, name := range payload.Disabled {
+		m[name] = true
+	}
+	return m, nil
+}
+
+// SaveDisabledTools persists the disabled-tool set to path.
+// If path is empty, disabled is nil, or disabled is empty, any existing file is removed.
+func SaveDisabledTools(path string, disabled map[string]bool) error {
+	if path == "" {
+		return nil
+	}
+	if len(disabled) == 0 {
+		_ = os.Remove(path)
+		return nil
+	}
+	names := make([]string, 0, len(disabled))
+	for name := range disabled {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	type payload struct {
+		Disabled []string `json:"disabled"`
+	}
+	data, err := json.Marshal(payload{Disabled: names})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
 // matchGlob matches a slash-separated path against a glob pattern that may
 // contain ** to match zero or more path segments. Single-segment wildcards
 // (*, ?, [...]) use filepath.Match rules. ** must occupy a full path segment.
@@ -426,10 +742,11 @@ func matchParts(pat, fp []string) (bool, error) {
 
 // ExecuteSearchCode searches file contents for pattern using grep.
 // path and fileGlob are optional; path defaults to ".".
+// contextLines adds N lines of context before and after each match (grep -C N).
 // Returns grep output (path:line:content format) or an error message.
 //
 // DERIVED: subprocess + 30s timeout pattern from codex grep_files.rs
-func ExecuteSearchCode(pattern, path, fileGlob string) string {
+func ExecuteSearchCode(pattern, path, fileGlob string, contextLines int) string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Sprintf("[error: cannot determine working directory: %v]", err)
@@ -449,10 +766,14 @@ func ExecuteSearchCode(pattern, path, fileGlob string) string {
 		return fmt.Sprintf("[error: path %q is outside the working directory]", path)
 	}
 
-	args := []string{"-rn", "--", pattern, absPath}
+	args := []string{"-rn"}
 	if fileGlob != "" {
-		args = []string{"-rn", "--include=" + fileGlob, "--", pattern, absPath}
+		args = append(args, "--include="+fileGlob)
 	}
+	if contextLines > 0 {
+		args = append(args, fmt.Sprintf("-C%d", contextLines))
+	}
+	args = append(args, "--", pattern, absPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), searchCommandTimeout)
 	defer cancel()

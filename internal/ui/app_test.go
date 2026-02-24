@@ -22,7 +22,7 @@ func (s uiStub) RunAgent(_ context.Context, _ []models.ConversationTurn, _ strin
 
 func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 	t.Helper()
-	a := New(ads, t.TempDir()+"/pref.jsonl", t.TempDir()+"/hist.json", t.TempDir()+"/prompt_hist.jsonl", "session", config.Config{})
+	a := New(ads, t.TempDir()+"/pref.jsonl", t.TempDir()+"/hist.json", t.TempDir()+"/prompt_hist.jsonl", "session", "", config.Config{})
 	return *a
 }
 
@@ -395,5 +395,117 @@ func TestCurrentSearchResult_EmptyWhenOutOfBounds(t *testing.T) {
 	result := a.currentSearchResult()
 	if result != "" {
 		t.Errorf("expected empty string for out-of-bounds idx, got %q", result)
+	}
+}
+
+// ─── handleToolsCommand ───────────────────────────────────────────────────────
+
+func TestHandleToolsCommand_BareListsAllTools(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, cmd := a.handleToolsCommand("")
+	if cmd != nil {
+		t.Error("expected nil cmd")
+	}
+	app := result.(App)
+	if len(app.feed) == 0 {
+		t.Fatal("expected feed message")
+	}
+	msg := app.feed[len(app.feed)-1].text
+	if !strings.Contains(msg, "bash") {
+		t.Errorf("expected 'bash' in tool listing, got: %s", msg)
+	}
+	if !strings.Contains(msg, "read_file") {
+		t.Errorf("expected 'read_file' in tool listing, got: %s", msg)
+	}
+}
+
+func TestHandleToolsCommand_OffDisablesTool(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, _ := a.handleToolsCommand("off bash")
+	app := result.(App)
+	if !app.disabledTools["bash"] {
+		t.Error("expected bash to be disabled")
+	}
+}
+
+func TestHandleToolsCommand_OnReenablesTool(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.disabledTools = map[string]bool{"bash": true}
+	result, _ := a.handleToolsCommand("on bash")
+	app := result.(App)
+	if app.disabledTools["bash"] {
+		t.Error("expected bash to be re-enabled after 'on bash'")
+	}
+}
+
+func TestHandleToolsCommand_ResetEnablesAll(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.disabledTools = map[string]bool{"bash": true, "write_file": true}
+	result, _ := a.handleToolsCommand("reset")
+	app := result.(App)
+	if len(app.disabledTools) != 0 {
+		t.Errorf("expected all tools enabled after reset, got %v", app.disabledTools)
+	}
+}
+
+func TestHandleToolsCommand_UnknownToolShowsError(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, _ := a.handleToolsCommand("off nonexistent_tool")
+	app := result.(App)
+	if len(app.feed) == 0 {
+		t.Fatal("expected error message in feed")
+	}
+	msg := app.feed[len(app.feed)-1].text
+	if !strings.Contains(msg, "nonexistent_tool") {
+		t.Errorf("expected error to mention bad tool name, got: %s", msg)
+	}
+}
+
+func TestHandleToolsCommand_OffShowsUpdatedList(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, _ := a.handleToolsCommand("off bash")
+	app := result.(App)
+	if len(app.feed) == 0 {
+		t.Fatal("expected feed message after /tools off")
+	}
+	msg := app.feed[len(app.feed)-1].text
+	if !strings.Contains(msg, "[off]") {
+		t.Errorf("expected '[off]' in tool listing after disabling bash, got: %s", msg)
+	}
+}
+
+// ─── handleStatsCmd ───────────────────────────────────────────────────────────
+
+func TestHandleStatsCmd_NoData(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, cmd := a.handleStatsCmd()
+	if cmd != nil {
+		t.Error("expected nil cmd")
+	}
+	app := result.(App)
+	if len(app.feed) == 0 {
+		t.Fatal("expected message in feed")
+	}
+	msg := app.feed[len(app.feed)-1].text
+	if !strings.Contains(msg, "Stats") {
+		t.Errorf("expected 'Stats' in output, got: %s", msg)
+	}
+}
+
+func TestHandleStatsCmd_WithSessionCost(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.sessionCostPerModel = map[string]float64{"claude-sonnet-4-6": 0.0042}
+	a.totalCostUSD = 0.0042
+	result, _ := a.handleStatsCmd()
+	app := result.(App)
+	if len(app.feed) == 0 {
+		t.Fatal("expected message in feed")
+	}
+	msg := app.feed[len(app.feed)-1].text
+	if !strings.Contains(msg, "claude-sonnet-4-6") {
+		t.Errorf("expected model name in stats output, got: %s", msg)
+	}
+	if !strings.Contains(msg, "0.0042") {
+		t.Errorf("expected cost in stats output, got: %s", msg)
 	}
 }

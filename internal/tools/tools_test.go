@@ -2,6 +2,8 @@ package tools_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,21 +20,21 @@ func TestExecuteRead_FileFound(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte("hello world"), 0o644))
 
 	t.Chdir(dir)
-	got := tools.ExecuteRead("hello.txt")
+	got := tools.ExecuteRead("hello.txt", 0, 0)
 	assert.Equal(t, "hello world", got)
 }
 
 func TestExecuteRead_FileNotFound(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	got := tools.ExecuteRead("nonexistent.txt")
+	got := tools.ExecuteRead("nonexistent.txt", 0, 0)
 	assert.Contains(t, got, "[error:")
 }
 
 func TestExecuteRead_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	got := tools.ExecuteRead("../../etc/passwd")
+	got := tools.ExecuteRead("../../etc/passwd", 0, 0)
 	assert.Contains(t, got, "[error:")
 	assert.Contains(t, got, "outside the working directory")
 }
@@ -45,8 +47,70 @@ func TestExecuteRead_Nested(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte("nested"), 0o644))
 
 	t.Chdir(dir)
-	got := tools.ExecuteRead("sub/data.txt")
+	got := tools.ExecuteRead("sub/data.txt", 0, 0)
 	assert.Equal(t, "nested", got)
+}
+
+func TestExecuteRead_OffsetSkipsLines(t *testing.T) {
+	dir := t.TempDir()
+	content := "line1\nline2\nline3\nline4\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644))
+	t.Chdir(dir)
+
+	got := tools.ExecuteRead("f.txt", 3, 0)
+	assert.True(t, strings.HasPrefix(got, "line3"), "offset=3 should start at line3, got: %q", got)
+	assert.NotContains(t, got, "line1")
+	assert.NotContains(t, got, "line2")
+}
+
+func TestExecuteRead_LimitCapsLines(t *testing.T) {
+	dir := t.TempDir()
+	content := "a\nb\nc\nd\ne\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644))
+	t.Chdir(dir)
+
+	got := tools.ExecuteRead("f.txt", 1, 2)
+	// First 2 lines should be present; remainder should not.
+	assert.True(t, strings.HasPrefix(got, "a\nb"), "expected first 2 lines, got: %q", got)
+	assert.NotContains(t, got, "c\n")
+	assert.NotContains(t, got, "d\n")
+}
+
+func TestExecuteRead_TruncationNotice(t *testing.T) {
+	dir := t.TempDir()
+	// 5 lines; read with limit=2 from offset=1 → 3 lines omitted
+	content := "a\nb\nc\nd\ne\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644))
+	t.Chdir(dir)
+
+	got := tools.ExecuteRead("f.txt", 1, 2)
+	assert.Contains(t, got, "lines omitted")
+	assert.Contains(t, got, "offset=3")
+}
+
+func TestExecuteRead_OffsetBeyondEnd(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte("only one line"), 0o644))
+	t.Chdir(dir)
+
+	got := tools.ExecuteRead("f.txt", 999, 0)
+	assert.Contains(t, got, "[error:")
+	assert.Contains(t, got, "offset")
+}
+
+// TestExecuteRead_HardCap verifies that files exceeding maxReadLines are truncated.
+func TestExecuteRead_HardCap(t *testing.T) {
+	dir := t.TempDir()
+	var sb strings.Builder
+	for i := 0; i < 2005; i++ {
+		sb.WriteString("line\n")
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "big.txt"), []byte(sb.String()), 0o644))
+	t.Chdir(dir)
+
+	got := tools.ExecuteRead("big.txt", 0, 0)
+	assert.Contains(t, got, "lines omitted")
+	assert.Contains(t, got, "offset=2001")
 }
 
 func TestApplyWrites(t *testing.T) {
@@ -187,7 +251,7 @@ func TestSearchCode_BasicMatch(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "foo.go"), []byte("package foo\nfunc Hello() {}\n"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("Hello", ".", "")
+	out := tools.ExecuteSearchCode("Hello", ".", "", 0)
 	assert.Contains(t, out, "Hello")
 	assert.Contains(t, out, "foo.go")
 }
@@ -197,7 +261,7 @@ func TestSearchCode_NoMatches(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "foo.go"), []byte("package foo\n"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("NoSuchPattern12345", ".", "")
+	out := tools.ExecuteSearchCode("NoSuchPattern12345", ".", "", 0)
 	assert.Equal(t, "(no matches)", out)
 }
 
@@ -207,7 +271,7 @@ func TestSearchCode_FileGlobFilter(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "bar.txt"), []byte("needle here\n"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("needle", ".", "*.go")
+	out := tools.ExecuteSearchCode("needle", ".", "*.go", 0)
 	assert.Contains(t, out, "foo.go")
 	assert.NotContains(t, out, "bar.txt")
 }
@@ -218,16 +282,28 @@ func TestSearchCode_DefaultPath(t *testing.T) {
 	t.Chdir(dir)
 
 	// empty path defaults to "."
-	out := tools.ExecuteSearchCode("findme", "", "")
+	out := tools.ExecuteSearchCode("findme", "", "", 0)
 	assert.Contains(t, out, "findme")
 }
 
 func TestSearchCode_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	out := tools.ExecuteSearchCode("root", "../../etc", "")
+	out := tools.ExecuteSearchCode("root", "../../etc", "", 0)
 	assert.Contains(t, out, "[error:")
 	assert.Contains(t, out, "outside the working directory")
+}
+
+func TestSearchCode_WithContextLines(t *testing.T) {
+	dir := t.TempDir()
+	content := "before\ntarget\nafter\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ctx.txt"), []byte(content), 0o644))
+	t.Chdir(dir)
+
+	out := tools.ExecuteSearchCode("target", ".", "", 1)
+	assert.Contains(t, out, "target")
+	assert.Contains(t, out, "before")
+	assert.Contains(t, out, "after")
 }
 
 // --- ExecuteSearchFiles: ** glob patterns ---
@@ -301,7 +377,7 @@ func TestSearchCode_LineNumbers(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte(content), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("find me", ".", "")
+	out := tools.ExecuteSearchCode("find me", ".", "", 0)
 	// grep -n output format: filename:linenum:content
 	assert.True(t, strings.Contains(out, ":3:") || strings.Contains(out, "find me"),
 		"expected line number or match content in output: %q", out)
@@ -451,4 +527,224 @@ func TestExecuteBash_Timeout(t *testing.T) {
 	out := tools.ExecuteBash("sleep 60")
 	assert.Contains(t, out, "[error:")
 	assert.Contains(t, out, "timed out")
+}
+
+// ─── ExecuteEditFile ──────────────────────────────────────────────────────────
+
+func TestExecuteEditFile_Success(t *testing.T) {
+	dir := t.TempDir()
+	original := "package main\n\nfunc hello() {\n\treturn \"old\"\n}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(original), 0o644))
+	t.Chdir(dir)
+
+	newContent, errMsg := tools.ExecuteEditFile("main.go", `return "old"`, `return "new"`)
+	require.Empty(t, errMsg)
+	assert.Contains(t, newContent, `return "new"`)
+	assert.NotContains(t, newContent, `return "old"`)
+	// Surrounding content must be preserved
+	assert.Contains(t, newContent, "func hello()")
+}
+
+func TestExecuteEditFile_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.go"), []byte("package main\n"), 0o644))
+	t.Chdir(dir)
+
+	_, errMsg := tools.ExecuteEditFile("f.go", "nonexistent string xyz", "replacement")
+	assert.Contains(t, errMsg, "[error:")
+	assert.Contains(t, errMsg, "not found")
+}
+
+func TestExecuteEditFile_Ambiguous(t *testing.T) {
+	dir := t.TempDir()
+	content := "duplicate\nduplicate\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.go"), []byte(content), 0o644))
+	t.Chdir(dir)
+
+	_, errMsg := tools.ExecuteEditFile("f.go", "duplicate", "replacement")
+	assert.Contains(t, errMsg, "[error:")
+	assert.Contains(t, errMsg, "ambiguous")
+	assert.Contains(t, errMsg, "2 matches")
+}
+
+func TestExecuteEditFile_FileNotFound(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	_, errMsg := tools.ExecuteEditFile("nosuchfile.go", "old", "new")
+	assert.Contains(t, errMsg, "[error:")
+	assert.Contains(t, errMsg, "not found")
+}
+
+func TestExecuteEditFile_PathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	_, errMsg := tools.ExecuteEditFile("../../etc/passwd", "root", "toor")
+	assert.Contains(t, errMsg, "[error:")
+	assert.Contains(t, errMsg, "outside the working directory")
+}
+
+// ─── list_directory file size hints ──────────────────────────────────────────
+
+func TestListDirectory_ShowsFileSizes(t *testing.T) {
+	dir := t.TempDir()
+	// Write a file with known content so its size is predictable.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "small.txt"), []byte("hi"), 0o644))
+	t.Chdir(dir)
+
+	out := tools.ExecuteListDirectory(".", 1)
+	assert.Contains(t, out, "small.txt")
+	// Size hint should be present in some form (KB bracket).
+	assert.Contains(t, out, "(")
+	assert.Contains(t, out, "KB")
+}
+
+func TestListDirectory_DirectoriesHaveNoSizeHint(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "subdir"), 0o755))
+	t.Chdir(dir)
+
+	out := tools.ExecuteListDirectory(".", 1)
+	// The directory line should be "subdir/" with no "(N KB)" attached.
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "subdir/") {
+			assert.NotContains(t, line, "KB", "directory entry should not have a size hint")
+		}
+	}
+}
+
+// ─── LoadDisabledTools / SaveDisabledTools ────────────────────────────────────
+
+func TestLoadDisabledTools_EmptyPath(t *testing.T) {
+	m, err := tools.LoadDisabledTools("")
+	assert.NoError(t, err)
+	assert.Nil(t, m)
+}
+
+func TestLoadDisabledTools_NonExistentFile(t *testing.T) {
+	m, err := tools.LoadDisabledTools(t.TempDir() + "/nope.json")
+	assert.NoError(t, err)
+	assert.Nil(t, m)
+}
+
+func TestSaveAndLoadDisabledTools_RoundTrip(t *testing.T) {
+	path := t.TempDir() + "/tools.json"
+	disabled := map[string]bool{"bash": true, "write_file": true}
+	require.NoError(t, tools.SaveDisabledTools(path, disabled))
+	loaded, err := tools.LoadDisabledTools(path)
+	require.NoError(t, err)
+	assert.Equal(t, disabled, loaded)
+}
+
+func TestSaveDisabledTools_EmptyPathIsNoop(t *testing.T) {
+	// Saving with empty path should not error and not create any file.
+	err := tools.SaveDisabledTools("", map[string]bool{"bash": true})
+	assert.NoError(t, err)
+}
+
+func TestSaveDisabledTools_NilRemovesFile(t *testing.T) {
+	path := t.TempDir() + "/tools.json"
+	require.NoError(t, tools.SaveDisabledTools(path, map[string]bool{"bash": true}))
+	// Now save nil — file should be removed.
+	require.NoError(t, tools.SaveDisabledTools(path, nil))
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err), "file should be removed when disabled set is nil")
+}
+
+func TestSaveDisabledTools_EmptyMapRemovesFile(t *testing.T) {
+	path := t.TempDir() + "/tools.json"
+	require.NoError(t, tools.SaveDisabledTools(path, map[string]bool{"bash": true}))
+	require.NoError(t, tools.SaveDisabledTools(path, map[string]bool{}))
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err), "file should be removed when disabled set is empty")
+}
+
+// ─── ExecuteWebFetch ──────────────────────────────────────────────────────────
+
+func TestExecuteWebFetch_PlainText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("hello world"))
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_ALLOW_LOCAL_FETCH", "true")
+
+	out := tools.ExecuteWebFetch(srv.URL)
+	assert.Equal(t, "hello world", out)
+}
+
+func TestExecuteWebFetch_HTMLStripped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><head><title>T</title></head><body><p>visible text</p><script>alert(1)</script></body></html>`))
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_ALLOW_LOCAL_FETCH", "true")
+
+	out := tools.ExecuteWebFetch(srv.URL)
+	assert.Contains(t, out, "visible text")
+	assert.NotContains(t, out, "<p>")
+	assert.NotContains(t, out, "alert(1)")
+}
+
+func TestExecuteWebFetch_HTTP4xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_ALLOW_LOCAL_FETCH", "true")
+
+	out := tools.ExecuteWebFetch(srv.URL)
+	assert.Contains(t, out, "[error:")
+	assert.Contains(t, out, "404")
+}
+
+func TestExecuteWebFetch_InvalidScheme(t *testing.T) {
+	out := tools.ExecuteWebFetch("file:///etc/passwd")
+	assert.Contains(t, out, "[error:")
+	assert.Contains(t, out, "http")
+}
+
+func TestExecuteWebFetch_LocalhostBlocked(t *testing.T) {
+	out := tools.ExecuteWebFetch("http://localhost:9999/test")
+	assert.Contains(t, out, "[error:")
+	assert.Contains(t, out, "localhost")
+}
+
+func TestExecuteWebFetch_InvalidURL(t *testing.T) {
+	out := tools.ExecuteWebFetch("not a url at all ://")
+	assert.Contains(t, out, "[error:")
+}
+
+func TestExecuteWebFetch_ConcurrentSameURLDeduplicates(t *testing.T) {
+	// Verify that two concurrent requests for the same URL result in exactly
+	// one HTTP request (singleflight deduplication).
+	var requestCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("poem content"))
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_ALLOW_LOCAL_FETCH", "true")
+
+	results := make([]string, 2)
+	done := make(chan struct{}, 2)
+	for i := range results {
+		i := i
+		go func() {
+			results[i] = tools.ExecuteWebFetch(srv.URL)
+			done <- struct{}{}
+		}()
+	}
+	<-done
+	<-done
+
+	// Both must have gotten the same content.
+	assert.Equal(t, "poem content", results[0])
+	assert.Equal(t, results[0], results[1])
+	// Only one HTTP request should have been made.
+	assert.Equal(t, 1, requestCount, "singleflight should deduplicate concurrent requests")
 }
