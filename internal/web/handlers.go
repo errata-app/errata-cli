@@ -376,15 +376,39 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 // ─── Available models handler ─────────────────────────────────────────────────
 
+// modelEntry is a single model in the /api/available-models response.
+// InputPMT / OutputPMT are USD per million tokens; omitted when unknown.
+type modelEntry struct {
+	ID        string  `json:"id"`
+	InputPMT  float64 `json:"input_pmt,omitempty"`
+	OutputPMT float64 `json:"output_pmt,omitempty"`
+}
+
 // providerModelsResult is the per-provider payload returned by /api/available-models.
 // TotalCount is the raw API count before any chat filter; Count is the filtered count.
 // When TotalCount > Count the provider filtered non-chat models (OpenAI, Gemini).
 type providerModelsResult struct {
-	Name       string   `json:"name"`
-	Models     []string `json:"models"`
-	Count      int      `json:"count"`
-	TotalCount int      `json:"total_count"`
-	Error      string   `json:"error,omitempty"`
+	Name       string       `json:"name"`
+	Models     []modelEntry `json:"models"`
+	Count      int          `json:"count"`
+	TotalCount int          `json:"total_count"`
+	Error      string       `json:"error,omitempty"`
+}
+
+// providerQualifiedID returns the OpenRouter-style "provider/model" key for a
+// model ID returned by a given provider. For OpenRouter and LiteLLM, the model
+// ID already carries the required prefix and is returned as-is.
+func providerQualifiedID(provider, modelID string) string {
+	switch provider {
+	case "Anthropic":
+		return "anthropic/" + modelID
+	case "OpenAI":
+		return "openai/" + modelID
+	case "Gemini":
+		return "google/" + modelID
+	default: // OpenRouter ("provider/model"), LiteLLM ("litellm/X")
+		return modelID
+	}
 }
 
 func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
@@ -401,7 +425,6 @@ func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
 	for i, p := range raw {
 		entry := providerModelsResult{
 			Name:       p.Provider,
-			Models:     p.Models,
 			Count:      len(p.Models),
 			TotalCount: p.TotalCount,
 		}
@@ -409,8 +432,17 @@ func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
 			entry.Error = p.Err.Error()
 		}
 		// Omit the full list for large providers to keep the response lean.
-		if entry.Count > adapters.ModelListCap {
-			entry.Models = nil
+		if entry.Count <= adapters.ModelListCap {
+			entries := make([]modelEntry, len(p.Models))
+			for j, id := range p.Models {
+				e := modelEntry{ID: id}
+				qid := providerQualifiedID(p.Provider, id)
+				if in, out, ok := pricing.PricingFor(qid); ok {
+					e.InputPMT, e.OutputPMT = in, out
+				}
+				entries[j] = e
+			}
+			entry.Models = entries
 		}
 		providers[i] = entry
 	}

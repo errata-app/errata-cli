@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
@@ -674,11 +675,36 @@ func helpText() string {
   /exit              Exit`
 }
 
+// providerQualifiedID returns the OpenRouter-style "provider/model" key used
+// for pricing lookups. OpenRouter and LiteLLM model IDs are returned as-is.
+func providerQualifiedID(provider, modelID string) string {
+	switch provider {
+	case "Anthropic":
+		return "anthropic/" + modelID
+	case "OpenAI":
+		return "openai/" + modelID
+	case "Gemini":
+		return "google/" + modelID
+	default:
+		return modelID
+	}
+}
+
+// fmtPrice formats a per-million-token USD price compactly: "$15" for whole
+// dollars, "$3.00" for fractional, "$0.075" for sub-cent values.
+func fmtPrice(v float64) string {
+	if v >= 1 {
+		return fmt.Sprintf("$%.2f", v)
+	}
+	return fmt.Sprintf("$%g", v)
+}
+
 // formatAvailableModels formats a ListAvailableModels result for display.
 // Providers with more than ModelListCap models are summarised as a count
 // to avoid flooding the feed (e.g. OpenRouter with 1000+ models).
 // When a provider filters its catalogue (OpenAI, Gemini), the header shows
 // "N of M (chat only)" so users understand why the count is lower than expected.
+// Each model is listed on its own line with pricing when known.
 func formatAvailableModels(results []adapters.ProviderModels) string {
 	if len(results) == 0 {
 		return "No provider API keys configured."
@@ -701,7 +727,15 @@ func formatAvailableModels(results []adapters.ProviderModels) string {
 		if n > adapters.ModelListCap {
 			fmt.Fprintf(&sb, "%s — set ERRATA_ACTIVE_MODELS=<id> to use one", header)
 		} else {
-			fmt.Fprintf(&sb, "%s:\n  %s", header, strings.Join(r.Models, ", "))
+			sb.WriteString(header + ":")
+			for _, id := range r.Models {
+				qid := providerQualifiedID(r.Provider, id)
+				if in, out, ok := pricing.PricingFor(qid); ok {
+					fmt.Fprintf(&sb, "\n  %s  (%s in / %s out /1M)", id, fmtPrice(in), fmtPrice(out))
+				} else {
+					fmt.Fprintf(&sb, "\n  %s", id)
+				}
+			}
 		}
 	}
 	return sb.String()

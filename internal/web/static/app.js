@@ -700,6 +700,11 @@ async function showStats() {
 
 const MODEL_LIST_CAP = 50;
 
+function fmtPrice(v) {
+  if (!v) return null;
+  return '$' + (v >= 1 ? v.toFixed(2) : parseFloat(v.toPrecision(3)));
+}
+
 async function showModels() {
   try {
     const res = await fetch('/api/available-models');
@@ -718,7 +723,11 @@ async function showModels() {
       if (p.count > MODEL_LIST_CAP) {
         parts.push(`${header} — set ERRATA_ACTIVE_MODELS=<id> to use one`);
       } else {
-        parts.push(`${header}:\n  ${(p.models || []).join(', ')}`);
+        const lines = (p.models || []).map(m => {
+          const inP = fmtPrice(m.input_pmt), outP = fmtPrice(m.output_pmt);
+          return inP ? `  ${m.id}  (${inP} in / ${outP} out /1M)` : `  ${m.id}`;
+        });
+        parts.push(`${header}:\n${lines.join('\n')}`);
       }
     }
 
