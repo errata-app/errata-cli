@@ -224,6 +224,9 @@ body {
 .diff-line.context { color: var(--diff-ctx); }
 .diff-line.hunk  { color: var(--diff-hunk); }
 
+.diff-word-add    { background: var(--diff-add);    color: #000; }
+.diff-word-remove { background: var(--diff-remove); color: #fff; }
+
 .diff-truncated {
   color: var(--text-dim);
   font-style: italic;

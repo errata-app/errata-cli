@@ -10,10 +10,12 @@ import (
 )
 
 var (
-	addStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF00"))
-	removeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000"))
-	contextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	hunkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#0087AF"))
+	addStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF00"))
+	removeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000"))
+	contextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	hunkStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#0087AF"))
+	addHighlight    = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(lipgloss.Color("#00AF00"))
+	removeHighlight = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Background(lipgloss.Color("#AF0000"))
 )
 
 // RenderDiffs returns a multi-line string showing diffs for all responses, including errors.
@@ -89,9 +91,31 @@ func renderFileDiff(fd diff.FileDiff) string {
 	for _, line := range fd.Lines {
 		switch line.Kind {
 		case diff.Add:
-			sb.WriteString(addStyle.Render("    + " + line.Content))
+			if len(line.Spans) > 0 {
+				sb.WriteString(addStyle.Render("    + " + string(line.Content[0])))
+				for _, sp := range line.Spans {
+					if sp.Changed {
+						sb.WriteString(addHighlight.Render(sp.Text))
+					} else {
+						sb.WriteString(addStyle.Render(sp.Text))
+					}
+				}
+			} else {
+				sb.WriteString(addStyle.Render("    + " + line.Content))
+			}
 		case diff.Remove:
-			sb.WriteString(removeStyle.Render("    - " + line.Content))
+			if len(line.Spans) > 0 {
+				sb.WriteString(removeStyle.Render("    - " + string(line.Content[0])))
+				for _, sp := range line.Spans {
+					if sp.Changed {
+						sb.WriteString(removeHighlight.Render(sp.Text))
+					} else {
+						sb.WriteString(removeStyle.Render(sp.Text))
+					}
+				}
+			} else {
+				sb.WriteString(removeStyle.Render("    - " + line.Content))
+			}
 		case diff.Hunk:
 			sb.WriteString(hunkStyle.Render("    " + line.Content))
 		default:

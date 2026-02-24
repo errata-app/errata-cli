@@ -685,7 +685,22 @@ function buildSelectingContent(responses, container) {
         (pw.diff.lines || []).forEach(line => {
           const span = document.createElement('span');
           span.className = 'diff-line ' + line.kind;
-          span.textContent = line.content;
+          if (line.spans && line.spans.length > 0) {
+            // Word-level highlighting: prefix char + highlighted spans.
+            span.appendChild(document.createTextNode(line.content.charAt(0)));
+            line.spans.forEach(ws => {
+              if (ws.changed) {
+                const hl = document.createElement('span');
+                hl.className = line.kind === 'add' ? 'diff-word-add' : 'diff-word-remove';
+                hl.textContent = ws.text;
+                span.appendChild(hl);
+              } else {
+                span.appendChild(document.createTextNode(ws.text));
+              }
+            });
+          } else {
+            span.textContent = line.content;
+          }
           linesEl.appendChild(span);
           linesEl.appendChild(document.createElement('br'));
         });
