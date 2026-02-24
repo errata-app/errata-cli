@@ -103,7 +103,8 @@ Both the TUI and the web textarea accept slash commands.
 | `/help` | Show available commands |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/compact` | Summarize conversation history to free up context window |
-| `/models` | List active models and query each configured provider for all available models |
+| `/models` | Query each configured provider for all available models; shows per-model pricing ($X in / $Y out /1M tokens); for OpenAI and Gemini shows only chat-capable models with a "N of M, chat only" count; caps display at 10 per provider with "… and N more" notice |
+| `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
 | `/model` | Reset model filter back to all configured models |
 | `/exit` or `/quit` | Exit (TUI only) |
@@ -152,11 +153,16 @@ to `CostUSD` (e.g. `CostUSD("anthropic/"+modelID, ...)`). If the qualified key i
 not found, `CostUSD` falls back to the bare portion after `/` for hardcoded-table
 compatibility. OpenRouter and LiteLLM adapters pass their model ID as-is.
 
+**`pricing.PricingFor(qualifiedID)`** returns `(inputPMT, outputPMT float64, ok bool)` using the
+same qualified→bare fallback chain as `CostUSD`. Used by `/models` listing to display rates
+alongside each model ID.
+
 These are surfaced in:
 - **TUI panels** — `done  1234ms  ·  8.4k tok  ·  $0.0083` in the panel status line
 - **TUI diff headers** — same stats in the `── model-id  …` section separator
 - **TUI selection menu** — `(1234ms  $0.0083)` next to each option
 - **Web diff headers and selection buttons** — same format
+- **`/models` listing** — `$X in / $Y out /1M` per model (both TUI and web)
 
 ---
 
@@ -239,7 +245,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 |--------|------|-------------|
 | `GET` | `/api/stats` | Preference tally JSON |
 | `GET` | `/api/models` | Active model IDs JSON |
-| `GET` | `/api/available-models` | Active models + all models from each configured provider (concurrent fetch, 15 s timeout); providers with >50 models omit the list and return only the count |
+| `GET` | `/api/available-models` | Active models + all models from each configured provider (concurrent fetch, 15 s timeout); each provider entry includes `name`, `count`, `total_count` (pre-filter API count), `truncated` (models omitted past cap), and `models[]` — each entry has `id`, `input_pmt`, `output_pmt` (per-million-token USD, omitted when unknown); display capped at `ModelListCap=10` per provider |
 
 ### WebSocket message protocol
 
@@ -274,6 +280,11 @@ idle → running → selecting → idle
                     ↓
                  (skip)
 ```
+
+**Connection lifecycle:** The textarea and Send button start `disabled` with placeholder
+"Connecting…" in the HTML. `ws.onopen` enables them and restores the normal placeholder.
+`ws.onclose` disables them again with "Reconnecting…". `toIdle()` only re-enables inputs
+when `ws.readyState === WebSocket.OPEN`, preventing the hang-on-reconnect race condition.
 
 **Display history** is persisted to `localStorage` (capped at 50 entries). Completed runs
 are stored as typed `{type:'run'}` entries that render as collapsible panels in the history view.
@@ -496,7 +507,7 @@ Append-only. Corrupt lines are skipped with `log.Printf` (never crash on bad dat
 - If a model's API key is missing, skip it with a warning; never crash on missing keys
 - Context cancellation (`ctx.Done()`) propagates through all adapter API calls automatically
 - Each adapter has a compile-time interface check: `var _ ModelAdapter = (*XAdapter)(nil)`
-- `pricing.go` rates are hardcoded and must be updated manually — no runtime fetch
+- `pricingTable` in `pricing.go` is the last-resort hardcoded fallback; the runtime source is the OpenRouter fetch cached at `data/pricing_cache.json`
 
 ---
 

@@ -23,9 +23,10 @@ type ProviderModels struct {
 	Err        error
 }
 
-// ModelListCap is the maximum number of models to enumerate for a provider.
-// Providers exceeding this are summarised as a count-only entry in the UI.
-const ModelListCap = 50
+// ModelListCap is the maximum number of models shown per provider in the /models
+// listing. When a provider has more, the first ModelListCap are shown followed by
+// a "… and N more" notice.
+const ModelListCap = 10
 
 // ListAvailableModels concurrently queries each configured provider for its
 // available model IDs. Results are returned in a consistent provider order

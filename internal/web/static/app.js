@@ -59,6 +59,7 @@ function buildRunEntry(prompt, responses, selected) {
 // ─── State ───────────────────────────────────────────────────────────────────
 
 let appState         = 'idle';   // 'idle' | 'running' | 'selecting'
+let sessionCostUSD   = 0;        // cumulative inference cost this session
 let ws               = null;
 let verbose          = true;
 let currentResponses = null;
@@ -85,10 +86,22 @@ function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(proto + '//' + location.host + '/ws');
 
+  ws.onopen = () => {
+    if (appState === 'idle') {
+      btnSend.disabled = false;
+      inputEl.disabled = false;
+      inputEl.placeholder = 'Enter a prompt… (Shift+Enter for newline)';
+      inputEl.focus();
+    }
+  };
+
   ws.onmessage = e => handleServerMessage(JSON.parse(e.data));
 
   ws.onclose = () => {
     ws = null;
+    btnSend.disabled = true;
+    inputEl.disabled = true;
+    inputEl.placeholder = 'Reconnecting…';
     if (appState === 'running') {
       toIdle('Error: lost connection to server.', 'error');
     }
@@ -116,6 +129,7 @@ function handleServerMessage(msg) {
 
     case 'complete':
       if (appState === 'running') {
+        msg.responses.forEach(r => { sessionCostUSD += r.cost_usd || 0; });
         const hasWrites = msg.responses.some(r => r.proposed_writes && r.proposed_writes.length > 0);
         // Update live panel headers with the final latency/token/cost stats.
         msg.responses.forEach(resp => {
@@ -325,8 +339,9 @@ function toSelecting(responses) {
 function toIdle(msg, cls) {
   appState         = 'idle';
   currentResponses = null;
-  btnSend.disabled = false;
-  inputEl.disabled = false;
+  const connected = ws && ws.readyState === WebSocket.OPEN;
+  btnSend.disabled = !connected;
+  inputEl.disabled = !connected;
 
   // Collapse and clean up the live run entry if present.
   if (currentRunEl) {
@@ -665,6 +680,16 @@ function handleSend() {
     return;
   }
 
+  // Handle /totalcost slash command.
+  if (/^\/totalcost$/i.test(prompt)) {
+    inputEl.value = '';
+    const text = `Total session cost: $${sessionCostUSD.toFixed(4)}`;
+    history.push({ type: 'msg', text, cls: '' });
+    saveHistory();
+    appendHistoryMsg(text, '');
+    return;
+  }
+
   currentRunPrompt = prompt;
   inputEl.value = '';
   toRunning();
@@ -698,8 +723,6 @@ async function showStats() {
   }
 }
 
-const MODEL_LIST_CAP = 50;
-
 function fmtPrice(v) {
   if (!v) return null;
   return '$' + (v >= 1 ? v.toFixed(2) : parseFloat(v.toPrecision(3)));
@@ -720,15 +743,12 @@ async function showModels() {
       const header = (p.total_count > p.count)
         ? `${p.name} (${p.count} of ${p.total_count}, chat only)`
         : `${p.name} (${p.count})`;
-      if (p.count > MODEL_LIST_CAP) {
-        parts.push(`${header} — set ERRATA_ACTIVE_MODELS=<id> to use one`);
-      } else {
-        const lines = (p.models || []).map(m => {
-          const inP = fmtPrice(m.input_pmt), outP = fmtPrice(m.output_pmt);
-          return inP ? `  ${m.id}  (${inP} in / ${outP} out /1M)` : `  ${m.id}`;
-        });
-        parts.push(`${header}:\n${lines.join('\n')}`);
-      }
+      const lines = (p.models || []).map(m => {
+        const inP = fmtPrice(m.input_pmt), outP = fmtPrice(m.output_pmt);
+        return inP ? `  ${m.id}  (${inP} in / ${outP} out /1M)` : `  ${m.id}`;
+      });
+      if (p.truncated > 0) lines.push(`  … and ${p.truncated} more`);
+      parts.push(`${header}:\n${lines.join('\n')}`);
     }
 
     const text = parts.join('\n\n');

@@ -44,24 +44,33 @@ func TestFormatAvailableModels_SmallProviderListsModels(t *testing.T) {
 	}
 }
 
-func TestFormatAvailableModels_LargeProviderShowsCountOnly(t *testing.T) {
-	ms := make([]string, adapters.ModelListCap+1)
+func TestFormatAvailableModels_TruncatesAtCap(t *testing.T) {
+	total := adapters.ModelListCap + 5
+	ms := make([]string, total)
 	for i := range ms {
-		ms[i] = fmt.Sprintf("model/%d", i)
+		ms[i] = fmt.Sprintf("model-%d", i)
 	}
 	results := []adapters.ProviderModels{
-		{Provider: "OpenRouter", Models: ms, TotalCount: len(ms)},
+		{Provider: "OpenRouter", Models: ms, TotalCount: total},
 	}
 	out := formatAvailableModels(results)
-	wantCount := fmt.Sprintf("OpenRouter (%d)", len(ms))
+
+	// Header should reflect the full count.
+	wantCount := fmt.Sprintf("OpenRouter (%d)", total)
 	if !strings.Contains(out, wantCount) {
 		t.Errorf("expected %q in output, got:\n%s", wantCount, out)
 	}
-	if strings.Contains(out, "model/0") {
-		t.Errorf("large provider should not list individual models, got:\n%s", out)
+	// First model should appear; one beyond the cap should not.
+	if !strings.Contains(out, "model-0") {
+		t.Errorf("first model should be listed, got:\n%s", out)
 	}
-	if !strings.Contains(out, "ERRATA_ACTIVE_MODELS") {
-		t.Errorf("expected ERRATA_ACTIVE_MODELS hint, got:\n%s", out)
+	if strings.Contains(out, fmt.Sprintf("model-%d", adapters.ModelListCap)) {
+		t.Errorf("model beyond cap should not be listed, got:\n%s", out)
+	}
+	// Truncation notice should mention the omitted count.
+	wantMore := fmt.Sprintf("… and %d more", 5)
+	if !strings.Contains(out, wantMore) {
+		t.Errorf("expected %q in output, got:\n%s", wantMore, out)
 	}
 }
 
@@ -116,7 +125,7 @@ func TestFormatAvailableModels_ExactlyAtCap(t *testing.T) {
 		{Provider: "OpenAI", Models: ms},
 	}
 	out := formatAvailableModels(results)
-	// At exactly the cap, should list models (not show count-only)
+	// At exactly the cap, all models are listed and there is no truncation notice.
 	if !strings.Contains(out, "m-0") {
 		t.Errorf("at cap boundary should still list models, got:\n%s", out)
 	}

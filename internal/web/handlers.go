@@ -385,13 +385,15 @@ type modelEntry struct {
 }
 
 // providerModelsResult is the per-provider payload returned by /api/available-models.
-// TotalCount is the raw API count before any chat filter; Count is the filtered count.
-// When TotalCount > Count the provider filtered non-chat models (OpenAI, Gemini).
+// Count is the filtered model count; TotalCount is the raw API count before any
+// chat filter. Models holds the first ModelListCap entries; Truncated is how many
+// were omitted (0 when the full list fits).
 type providerModelsResult struct {
 	Name       string       `json:"name"`
 	Models     []modelEntry `json:"models"`
 	Count      int          `json:"count"`
 	TotalCount int          `json:"total_count"`
+	Truncated  int          `json:"truncated,omitempty"`
 	Error      string       `json:"error,omitempty"`
 }
 
@@ -431,19 +433,21 @@ func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
 		if p.Err != nil {
 			entry.Error = p.Err.Error()
 		}
-		// Omit the full list for large providers to keep the response lean.
-		if entry.Count <= adapters.ModelListCap {
-			entries := make([]modelEntry, len(p.Models))
-			for j, id := range p.Models {
-				e := modelEntry{ID: id}
-				qid := providerQualifiedID(p.Provider, id)
-				if in, out, ok := pricing.PricingFor(qid); ok {
-					e.InputPMT, e.OutputPMT = in, out
-				}
-				entries[j] = e
-			}
-			entry.Models = entries
+		ids := p.Models
+		if len(ids) > adapters.ModelListCap {
+			entry.Truncated = len(ids) - adapters.ModelListCap
+			ids = ids[:adapters.ModelListCap]
 		}
+		entries := make([]modelEntry, len(ids))
+		for j, id := range ids {
+			e := modelEntry{ID: id}
+			qid := providerQualifiedID(p.Provider, id)
+			if in, out, ok := pricing.PricingFor(qid); ok {
+				e.InputPMT, e.OutputPMT = in, out
+			}
+			entries[j] = e
+		}
+		entry.Models = entries
 		providers[i] = entry
 	}
 

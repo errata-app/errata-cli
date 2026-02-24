@@ -101,6 +101,9 @@ type App struct {
 	// per-model conversation history; keyed by adapter ID
 	conversationHistories map[string][]models.ConversationTurn
 	histPath              string
+
+	// cumulative cost across all runs this session
+	totalCostUSD float64
 }
 
 // New creates the App model.
@@ -271,6 +274,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.inputTokens = resp.InputTokens
 			p.outputTokens = resp.OutputTokens
 			p.costUSD = resp.CostUSD
+			a.totalCostUSD += resp.CostUSD
 			if resp.Error != "" {
 				p.errMsg = resp.Error
 				if runner.IsContextOverflowError(resp.Error) {
@@ -423,6 +427,9 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 			)
 			return compactCompleteMsg{histories: updated}
 		}
+	case "/totalcost":
+		return a.withMessage(fmt.Sprintf("Total session cost: $%.4f", a.totalCostUSD)), nil
+
 	case "/help":
 		return a.withMessage(helpText()), nil
 	}
@@ -672,6 +679,7 @@ func helpText() string {
   /verbose           Toggle verbose mode
   /models            List active and all available models by provider
   /model [id...]     Restrict to model(s); bare /model resets to all
+  /totalcost         Show total inference cost for this session
   /exit              Exit`
 }
 
@@ -700,11 +708,10 @@ func fmtPrice(v float64) string {
 }
 
 // formatAvailableModels formats a ListAvailableModels result for display.
-// Providers with more than ModelListCap models are summarised as a count
-// to avoid flooding the feed (e.g. OpenRouter with 1000+ models).
+// Each provider lists up to ModelListCap models, one per line with pricing when
+// known. When a provider has more, a "… and N more" notice is appended.
 // When a provider filters its catalogue (OpenAI, Gemini), the header shows
 // "N of M (chat only)" so users understand why the count is lower than expected.
-// Each model is listed on its own line with pricing when known.
 func formatAvailableModels(results []adapters.ProviderModels) string {
 	if len(results) == 0 {
 		return "No provider API keys configured."
@@ -724,18 +731,22 @@ func formatAvailableModels(results []adapters.ProviderModels) string {
 		} else {
 			header = fmt.Sprintf("%s (%d)", r.Provider, n)
 		}
-		if n > adapters.ModelListCap {
-			fmt.Fprintf(&sb, "%s — set ERRATA_ACTIVE_MODELS=<id> to use one", header)
-		} else {
-			sb.WriteString(header + ":")
-			for _, id := range r.Models {
-				qid := providerQualifiedID(r.Provider, id)
-				if in, out, ok := pricing.PricingFor(qid); ok {
-					fmt.Fprintf(&sb, "\n  %s  (%s in / %s out /1M)", id, fmtPrice(in), fmtPrice(out))
-				} else {
-					fmt.Fprintf(&sb, "\n  %s", id)
-				}
+		sb.WriteString(header + ":")
+		cap := adapters.ModelListCap
+		shown := r.Models
+		if n > cap {
+			shown = r.Models[:cap]
+		}
+		for _, id := range shown {
+			qid := providerQualifiedID(r.Provider, id)
+			if in, out, ok := pricing.PricingFor(qid); ok {
+				fmt.Fprintf(&sb, "\n  %s  (%s in / %s out /1M)", id, fmtPrice(in), fmtPrice(out))
+			} else {
+				fmt.Fprintf(&sb, "\n  %s", id)
 			}
+		}
+		if n > cap {
+			fmt.Fprintf(&sb, "\n  … and %d more", n-cap)
 		}
 	}
 	return sb.String()

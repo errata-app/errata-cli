@@ -157,7 +157,8 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/clear` | Clear display history and wipe conversation context |
 | `/compact` | Summarize conversation history to free up context window |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
-| `/models` | List active models and all available models from each configured provider |
+| `/models` | List all available models from each configured provider with per-model pricing; OpenAI and Gemini show only chat-capable models ("N of M, chat only"); up to 10 per provider with "… and N more" if truncated |
+| `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict subsequent runs to specific model(s) |
 | `/model` | Reset model filter — all configured models run again |
 | `/exit` or `/quit` | Exit |
