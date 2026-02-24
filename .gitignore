@@ -1,6 +1,7 @@
 .env
 data/preferences.jsonl
 data/log.jsonl
+agent_research/
 __pycache__/
 *.pyc
 *.pyo

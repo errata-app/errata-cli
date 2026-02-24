@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,9 +30,9 @@ func join(parts []string) string {
 	return strings.Join(parts, "")
 }
 
-// DispatchTool executes a read_file or write_file tool call.
-// It emits the appropriate AgentEvent, executes the read or queues the write,
-// and returns the result string for the adapter to feed back to the model.
+// DispatchTool executes a tool call by name.
+// It emits the appropriate AgentEvent, executes the tool, and returns the result
+// string for the adapter to feed back to the model.
 // Returns ("", false) for unrecognised tool names.
 func DispatchTool(
 	name string,
@@ -50,6 +51,30 @@ func DispatchTool(
 		onEvent(models.AgentEvent{Type: "writing", Data: path})
 		*proposed = append(*proposed, tools.FileWrite{Path: path, Content: args["content"]})
 		return writeAck, true
+
+	case tools.ListDirToolName:
+		path := args["path"]
+		depth := 2
+		if d := args["depth"]; d != "" {
+			if n, err := strconv.Atoi(d); err == nil {
+				depth = n
+			}
+		}
+		onEvent(models.AgentEvent{Type: "reading", Data: path})
+		return tools.ExecuteListDirectory(path, depth), true
+
+	case tools.SearchFilesName:
+		pattern := args["pattern"]
+		basePath := args["base_path"]
+		onEvent(models.AgentEvent{Type: "reading", Data: pattern})
+		return tools.ExecuteSearchFiles(pattern, basePath), true
+
+	case tools.SearchCodeName:
+		pattern := args["pattern"]
+		path := args["path"]
+		fileGlob := args["file_glob"]
+		onEvent(models.AgentEvent{Type: "reading", Data: pattern})
+		return tools.ExecuteSearchCode(pattern, path, fileGlob), true
 	}
 	return "", false
 }

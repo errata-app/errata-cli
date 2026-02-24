@@ -53,6 +53,7 @@ func (a *AnthropicAdapter) RunAgent(
 		resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 			Model:     anthropic.Model(a.modelID),
 			MaxTokens: 8096,
+			System:    []anthropic.TextBlockParam{{Text: tools.SystemPromptSuffix()}},
 			Tools:     toolParams,
 			Messages:  messages,
 		})

@@ -34,7 +34,8 @@ func (a *OpenAIAdapter) RunAgent(
 	client := openai.NewClient(option.WithAPIKey(a.apiKey))
 
 	toolParams := buildOpenAITools()
-	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+1)
+	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
+	messages = append(messages, openai.SystemMessage(tools.SystemPromptSuffix()))
 	for _, turn := range history {
 		switch turn.Role {
 		case "user":

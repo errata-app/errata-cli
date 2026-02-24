@@ -36,7 +36,8 @@ func (a *GeminiAdapter) RunAgent(
 	}
 
 	config := &genai.GenerateContentConfig{
-		Tools: buildGeminiTools(),
+		Tools:             buildGeminiTools(),
+		SystemInstruction: genai.NewContentFromText(tools.SystemPromptSuffix(), ""),
 	}
 	contents := make([]*genai.Content, 0, len(history)+1)
 	for _, turn := range history {
