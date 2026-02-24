@@ -15,12 +15,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/suarezc/errata/internal/adapters"
-	"github.com/suarezc/errata/internal/config"
-	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/commands"
+	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
+	"github.com/suarezc/errata/internal/pricing"
+	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -104,13 +105,24 @@ type App struct {
 	conversationHistories map[string][]models.ConversationTurn
 	histPath              string
 
+	// prompt history (Up-arrow cycling and Ctrl-R search)
+	promptHistory   []string // newest-first; loaded from disk + this session
+	historyIdx      int      // -1 = not navigating; 0..N-1 = position in promptHistory
+	historyInputBuf string   // typed text saved when navigation starts
+	promptHistPath  string
+
+	// ctrl-r reverse search
+	searchActive    bool
+	searchQuery     string
+	searchResultIdx int
+
 	// cumulative cost across all runs this session
-	totalCostUSD       float64
+	totalCostUSD        float64
 	sessionCostPerModel map[string]float64 // per-model cumulative cost this session
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, histPath, sessionID string, cfg config.Config) *App {
+func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -124,10 +136,18 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, sessionID string, c
 		fmt.Fprintf(os.Stderr, "warning: could not load history: %v\n", err)
 	}
 
+	ph, err := prompthistory.Load(promptHistPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load prompt history: %v\n", err)
+	}
+
 	return &App{
 		adapters:              adapters,
 		prefPath:              prefPath,
 		histPath:              histPath,
+		promptHistPath:        promptHistPath,
+		promptHistory:         ph,
+		historyIdx:            -1,
 		sessionID:             sessionID,
 		input:                 ta,
 		feedVP:                viewport.New(80, 20),
@@ -149,6 +169,9 @@ func (a App) feedVPHeight() int {
 	switch a.mode {
 	case modeIdle:
 		footerLines = 3 // textarea SetHeight(3)
+		if a.searchActive {
+			footerLines++ // search bar line
+		}
 	case modeRunning:
 		footerLines = 1 // "  running…"
 	case modeSelecting:
@@ -345,11 +368,36 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Search mode captures all keystrokes.
+	if a.searchActive {
+		return a.handleSearchKey(msg)
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
 		return a, tea.Quit
 
-	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
+	case tea.KeyCtrlR:
+		a.searchActive = true
+		a.searchQuery = ""
+		a.searchResultIdx = 0
+		return a.withFeedRebuilt(false), nil
+
+	case tea.KeyUp:
+		if a.input.Line() == 0 {
+			return a.historyBack()
+		}
+		// cursor on line > 0: fall through to textarea (cursor up in multiline)
+
+	case tea.KeyDown:
+		if a.historyIdx >= 0 {
+			return a.historyForward()
+		}
+		var cmd tea.Cmd
+		a.feedVP, cmd = a.feedVP.Update(msg)
+		return a, cmd
+
+	case tea.KeyPgUp, tea.KeyPgDown:
 		var cmd tea.Cmd
 		a.feedVP, cmd = a.feedVP.Update(msg)
 		return a, cmd
@@ -360,6 +408,8 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		prompt := strings.TrimSpace(a.input.Value())
 		a.input.Reset()
+		a.historyIdx = -1
+		a.historyInputBuf = ""
 		if prompt == "" {
 			return a, nil
 		}
@@ -379,9 +429,134 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// For any other key: if currently navigating history, exit navigation
+	// (user is editing — standard shell behaviour).
+	if a.historyIdx >= 0 {
+		a.historyIdx = -1
+		a.historyInputBuf = ""
+	}
+
 	var cmd tea.Cmd
 	a.input, cmd = a.input.Update(msg)
 	return a, cmd
+}
+
+// historyBack moves one step backward (older) through prompt history.
+func (a App) historyBack() (tea.Model, tea.Cmd) {
+	if len(a.promptHistory) == 0 {
+		return a, nil
+	}
+	if a.historyIdx == -1 {
+		a.historyInputBuf = a.input.Value()
+		a.historyIdx = 0
+	} else if a.historyIdx < len(a.promptHistory)-1 {
+		a.historyIdx++
+	} else {
+		return a, nil // already at oldest entry
+	}
+	a.input.SetValue(a.promptHistory[a.historyIdx])
+	a.input.CursorEnd()
+	return a, nil
+}
+
+// historyForward moves one step forward (newer) through prompt history,
+// restoring the saved input buffer when the end is reached.
+func (a App) historyForward() (tea.Model, tea.Cmd) {
+	if a.historyIdx == -1 {
+		return a, nil
+	}
+	if a.historyIdx == 0 {
+		a.historyIdx = -1
+		a.input.SetValue(a.historyInputBuf)
+		a.input.CursorEnd()
+		a.historyInputBuf = ""
+	} else {
+		a.historyIdx--
+		a.input.SetValue(a.promptHistory[a.historyIdx])
+		a.input.CursorEnd()
+	}
+	return a, nil
+}
+
+// searchResults returns prompts matching searchQuery, newest-first.
+// An empty query returns the full history.
+func (a App) searchResults() []string {
+	if a.searchQuery == "" {
+		return a.promptHistory
+	}
+	q := strings.ToLower(a.searchQuery)
+	var out []string
+	for _, p := range a.promptHistory {
+		if strings.Contains(strings.ToLower(p), q) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// currentSearchResult returns the entry at searchResultIdx, or "" if none.
+func (a App) currentSearchResult() string {
+	r := a.searchResults()
+	if len(r) == 0 || a.searchResultIdx >= len(r) {
+		return ""
+	}
+	return r[a.searchResultIdx]
+}
+
+// handleSearchKey processes keypresses while Ctrl-R search is active.
+func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		a.searchActive = false
+		a.searchQuery = ""
+		a.searchResultIdx = 0
+		return a.withFeedRebuilt(false), nil
+
+	case tea.KeyCtrlR:
+		// Cycle to next (older) match.
+		results := a.searchResults()
+		if a.searchResultIdx < len(results)-1 {
+			a.searchResultIdx++
+		}
+		if r := a.currentSearchResult(); r != "" {
+			a.input.SetValue(r)
+			a.input.CursorEnd()
+		}
+		return a, nil
+
+	case tea.KeyEnter:
+		result := a.currentSearchResult()
+		a.searchActive = false
+		a.searchQuery = ""
+		a.searchResultIdx = 0
+		if result != "" {
+			a.input.SetValue(result)
+			a.input.CursorEnd()
+		}
+		return a.withFeedRebuilt(false), nil
+
+	case tea.KeyBackspace:
+		if len(a.searchQuery) > 0 {
+			runes := []rune(a.searchQuery)
+			a.searchQuery = string(runes[:len(runes)-1])
+			a.searchResultIdx = 0
+		}
+		if r := a.currentSearchResult(); r != "" {
+			a.input.SetValue(r)
+			a.input.CursorEnd()
+		}
+		return a, nil
+
+	case tea.KeyRunes:
+		a.searchQuery += string(msg.Runes)
+		a.searchResultIdx = 0
+		if r := a.currentSearchResult(); r != "" {
+			a.input.SetValue(r)
+			a.input.CursorEnd()
+		}
+		return a, nil
+	}
+	return a, nil
 }
 
 func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
@@ -519,6 +694,16 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	toRun := a.adapters
 	if a.activeAdapters != nil {
 		toRun = a.activeAdapters
+	}
+
+	// Record in prompt history (deduplicate consecutive identical entries).
+	a.historyIdx = -1
+	a.historyInputBuf = ""
+	if len(a.promptHistory) == 0 || a.promptHistory[0] != trimmed {
+		a.promptHistory = append([]string{trimmed}, a.promptHistory...)
+		if err := prompthistory.Append(a.promptHistPath, trimmed); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save prompt history: %v\n", err)
+		}
 	}
 
 	a.lastPrompt = trimmed
@@ -699,8 +884,23 @@ func (a App) View() string {
 	case modeIdle:
 		if !a.feedVP.AtBottom() {
 			hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).
-				Render(fmt.Sprintf("  ↑↓/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
+				Render(fmt.Sprintf("  ↑/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
 			sb.WriteString(hint)
+			sb.WriteByte('\n')
+		}
+		if a.searchActive {
+			query := a.searchQuery
+			result := a.currentSearchResult()
+			preview := "(no match)"
+			if result != "" {
+				preview = result
+				if runes := []rune(preview); len(runes) > 60 {
+					preview = string(runes[:60]) + "…"
+				}
+			}
+			searchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AFAF"))
+			sb.WriteString(searchStyle.Render(
+				fmt.Sprintf("  (reverse-i-search: %q): %s", query, preview)))
 			sb.WriteByte('\n')
 		}
 		sb.WriteString(a.input.View())
@@ -834,8 +1034,8 @@ func formatAvailableModels(results []adapters.ProviderModels) string {
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, histPath, sessionID string, cfg config.Config, warnings []string) error {
-	app := New(adapters, prefPath, histPath, sessionID, cfg)
+func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config, warnings []string) error {
+	app := New(adapters, prefPath, histPath, promptHistPath, sessionID, cfg)
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	app.SetProgram(p)

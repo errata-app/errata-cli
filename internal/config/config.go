@@ -34,6 +34,7 @@ type Config struct {
 	PreferencesPath  string
 	PricingCachePath string
 	HistoryPath      string
+	PromptHistoryPath string
 
 	// DebugLogPath is the path for the append-only JSONL debug log.
 	// Empty (default) disables debug logging entirely.
@@ -52,6 +53,7 @@ func Load() Config {
 		PreferencesPath:       "data/preferences.jsonl",
 		PricingCachePath:      "data/pricing_cache.json",
 		HistoryPath:           "data/history.json",
+		PromptHistoryPath:     "data/prompt_history.jsonl",
 	}
 
 	cfg.DebugLogPath = os.Getenv("ERRATA_DEBUG_LOG")

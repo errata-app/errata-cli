@@ -70,7 +70,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	if len(ads) == 0 {
 		return fmt.Errorf("no models available — set at least one API key in .env")
 	}
-	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, sessionID, cfg, warnings)
+	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg.PromptHistoryPath, sessionID, cfg, warnings)
 }
 
 func runServe(cmd *cobra.Command, args []string) error {

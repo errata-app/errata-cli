@@ -372,6 +372,64 @@ Web gains `/help` and `/verbose`. All descriptions now come from a single source
 
 ---
 
+## 2026-02-24 — Prompt history: Up-arrow cycling & Ctrl-R search
+
+### Motivation
+TUI had no way to recall previous prompts. Users had to retype or copy them.
+
+### New package: `internal/prompthistory/prompthistory.go`
+
+Append-only JSONL at `data/prompt_history.jsonl`. One JSON-encoded string per line,
+oldest-first on disk. Two functions:
+
+```go
+func Load(path string) ([]string, error)  // returns newest-first; nil on missing file
+func Append(path string, prompt string) error
+```
+
+Corrupt lines silently skipped. Accompanies `prompthistory_test.go` (4 test cases).
+
+### Changes
+
+**`internal/config/config.go`** — `PromptHistoryPath: "data/prompt_history.jsonl"`
+
+**`internal/ui/app.go`**
+- New fields: `promptHistory []string`, `historyIdx int` (-1 = not navigating),
+  `historyInputBuf string`, `promptHistPath string`, `searchActive bool`,
+  `searchQuery string`, `searchResultIdx int`
+- `New()` / `Run()` accept `promptHistPath`; load history from disk at startup
+- `feedVPHeight()`: +1 footer line when `searchActive`
+- `launchRun()`: prepends prompt to `promptHistory` (deduplicates consecutive
+  identical entries), appends to disk; resets `historyIdx = -1`
+- `handleIdleKey()`:
+  - Ctrl-R → activates search overlay
+  - Up on line 0 → `historyBack()` (cycle to older prompt)
+  - Down when `historyIdx >= 0` → `historyForward()` (cycle to newer / restore input)
+  - Down when not navigating → scroll feed (unchanged)
+  - PgUp/PgDn → scroll feed (unchanged)
+  - Any other key while navigating → exits navigation, passes key to textarea
+- New methods: `historyBack()`, `historyForward()`, `searchResults()`,
+  `currentSearchResult()`, `handleSearchKey()`
+- `View()` modeIdle: renders `(reverse-i-search: "query"): <preview>` above
+  textarea when `searchActive`; updated scroll hint `↑/pgup/pgdn`
+
+**`cmd/errata/main.go`** — passes `cfg.PromptHistoryPath` to `ui.Run`
+
+**`internal/ui/app_test.go`** — updated `New()` call with new `promptHistPath` arg
+
+### Key behaviours
+- Up on the first line of the textarea always navigates history backward
+- Down while navigating moves forward; at newest entry restores pre-navigation text
+- Ctrl-R opens incremental search; typing filters history; Ctrl-R again cycles to
+  next (older) match; Enter loads into textarea; Escape dismisses
+- History persists across binary restarts via `data/prompt_history.jsonl`
+- Only real AI prompts are stored (not slash commands)
+
+### Result
+`go build ./...` clean, `go test ./...` all green.
+
+---
+
 ## 2026-02-24 — Full DRY & code smell remediation
 
 ### Motivation

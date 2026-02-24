@@ -165,6 +165,16 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/exit` or `/quit` | Exit |
 | `Ctrl-D` | Exit |
 
+**TUI input shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `↑` (line 0) | Recall previous prompt (cycle backward through history) |
+| `↓` (while navigating) | Cycle forward; at newest restores original typed input |
+| `Ctrl-R` | Open reverse-i-search: type a substring to filter history; `Ctrl-R` again for next match; `Enter` to select; `Escape` to cancel |
+| `Tab` | Complete the current `/command` prefix |
+| `PgUp` / `PgDn` | Scroll the conversation feed |
+
 ---
 
 ## Model filtering
@@ -309,11 +319,14 @@ errata/
 │   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
 │   ├── preferences/
 │   │   └── preferences.go   # Record(), LoadAll(), Summarize()
+│   ├── commands/
+│   │   └── commands.go      # canonical slash command registry (TUI + web)
+│   ├── prompthistory/
+│   │   └── prompthistory.go # prompt history persistence (Up-arrow / Ctrl-R)
 │   ├── ui/
 │   │   ├── app.go           # bubbletea program, mode state machine
 │   │   ├── panels.go        # agent panel rendering (lipgloss)
-│   │   ├── diff.go          # diff + selection menu rendering
-│   │   └── keys.go          # key bindings
+│   │   └── diff.go          # diff + selection menu rendering
 │   └── web/
 │       ├── server.go        # Server struct, route registration, embedded static assets
 │       ├── handlers.go      # WebSocket handler, REST handlers (/api/stats, /api/models)

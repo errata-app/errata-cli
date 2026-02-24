@@ -61,14 +61,17 @@ errata/
 │   │   └── history.go       # Load(), Save(), Clear() — conversation history persistence
 │   ├── logging/
 │   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
+│   ├── commands/
+│   │   └── commands.go      # Command{Name,Desc,TUIOnly}; All, Web() — canonical slash command registry
+│   ├── prompthistory/
+│   │   └── prompthistory.go # Load(), Append() — prompt history JSONL persistence
 │   ├── ui/
 │   │   ├── app.go           # bubbletea program, mode state machine
 │   │   ├── panels.go        # live agent panel rendering + fmtTokens()
-│   │   ├── diff.go          # diff + selection menu rendering
-│   │   └── keys.go          # key bindings
+│   │   └── diff.go          # diff + selection menu rendering
 │   └── web/
 │       ├── server.go        # Server struct, route registration, embedded static assets
-│       ├── handlers.go      # WebSocket handler, REST handlers (/api/stats, /api/models)
+│       ├── handlers.go      # WebSocket handler, wsConn per-connection struct, REST handlers
 │       └── static/
 │           ├── index.html
 │           ├── style.css
@@ -113,6 +116,17 @@ Both the TUI and the web textarea accept slash commands.
 
 **Verbose mode** defaults to **off** in the TUI and **on** in the web UI (since the web is
 designed for discussion and text responses are useful there).
+
+**TUI prompt history** (Up-arrow cycling and Ctrl-R search):
+- `↑` on the first textarea line → cycle backward through previous prompts
+- `↓` while navigating → cycle forward; at newest, restores the original typed text
+- `Ctrl-R` → opens `(reverse-i-search: "query"): <preview>` overlay above the textarea; typing narrows the match; `Ctrl-R` again cycles to the next older match; `Enter` loads the result; `Escape` dismisses
+- Prompt history is persisted to `data/prompt_history.jsonl` so it survives restarts
+- Only real AI prompts (not slash commands) are recorded
+
+The canonical command list is defined in `internal/commands/commands.go` (`commands.All`).
+Both surfaces derive their lists from this single source; web commands are served via
+`GET /api/commands` and fetched at page load.
 
 ---
 
@@ -251,6 +265,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 |--------|------|-------------|
 | `GET` | `/api/stats` | Preference tally JSON |
 | `GET` | `/api/models` | Active model IDs JSON |
+| `GET` | `/api/commands` | Web-applicable slash commands JSON (`commands.Web()`); fetched by the browser at page load to populate the slash-completion dropdown |
 | `GET` | `/api/available-models` | Active models + all models from each configured provider (concurrent fetch, 15 s timeout); each provider entry includes `name`, `count`, `total_count` (pre-filter API count), `truncated` (models omitted past cap), and `models[]` — each entry has `id`, `input_pmt`, `output_pmt` (per-million-token USD, omitted when unknown); display capped at `ModelListCap=10` per provider |
 
 ### WebSocket message protocol
@@ -306,19 +321,21 @@ the display history (localStorage) and the conversation history (disk).
 ## Package Import Graph
 
 ```
-tools       ← stdlib only
-pricing     ← stdlib only
-models      ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
-config      ← stdlib only
-adapters    ← models, pricing, tools, config, provider SDKs
-runner      ← models, pricing
-diff        ← os, strings, sergi/go-diff
-history     ← models, encoding/json, os
-logging     ← models (ModelAdapter, ModelResponse), stdlib
-preferences ← models (for ModelResponse latency/ID), encoding/json, os
-ui          ← models, pricing, tools, runner, diff, history, adapters, config, bubbletea, lipgloss
-web         ← models, runner, tools, diff, preferences, logging, history, adapters, config, coder/websocket
-cmd/errata  ← config, adapters, pricing, logging, ui, web
+tools          ← stdlib only
+pricing        ← stdlib only
+models         ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
+config         ← stdlib only
+commands       ← stdlib only
+prompthistory  ← stdlib only
+adapters       ← models, pricing, tools, config, provider SDKs
+runner         ← models, pricing
+diff           ← os, strings, sergi/go-diff
+history        ← models, encoding/json, os
+logging        ← models (ModelAdapter, ModelResponse), stdlib
+preferences    ← models (for ModelResponse latency/ID), encoding/json, os
+ui             ← models, pricing, tools, runner, diff, history, adapters, config, commands, prompthistory, bubbletea, lipgloss
+web            ← models, runner, tools, diff, preferences, logging, history, adapters, config, commands, coder/websocket
+cmd/errata     ← config, adapters, pricing, logging, ui, web
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -544,4 +561,5 @@ Table-driven tests preferred for config, preferences, and diff packages.
 - `data/preferences.jsonl` (contains prompt history)
 - `data/log.jsonl` (contains full prompt + response content)
 - `data/history.json` (contains full conversation context)
+- `data/prompt_history.jsonl` (contains submitted prompts for Up-arrow / Ctrl-R recall)
 - `dist/` (compiled binaries from `make build-all`)
