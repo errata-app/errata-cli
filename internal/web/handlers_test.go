@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/models"
 )
@@ -195,5 +197,127 @@ func TestHandleAvailableModels_ContentType(t *testing.T) {
 	s.handleAvailableModels(w, httptest.NewRequest("GET", "/api/available-models", nil))
 	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+}
+
+// ─── handleWS set_models ──────────────────────────────────────────────────────
+
+func wsConnect(t *testing.T, s *Server) (context.Context, *websocket.Conn) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(s.handleWS))
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("websocket dial: %v", err)
+	}
+	t.Cleanup(func() { conn.CloseNow() })
+	return ctx, conn
+}
+
+func wsSetModels(t *testing.T, ctx context.Context, conn *websocket.Conn, specs []ModelSpec) wsServerMsg {
+	t.Helper()
+	if err := wsjson.Write(ctx, conn, wsClientMsg{Type: "set_models", ModelSpecs: specs}); err != nil {
+		t.Fatalf("write set_models: %v", err)
+	}
+	var msg wsServerMsg
+	if err := wsjson.Read(ctx, conn, &msg); err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return msg
+}
+
+// TestHandleWS_SetModels_ProviderTaggedNovelID verifies that a model ID with no
+// recognised prefix routes to the correct adapter when a provider hint is given.
+func TestHandleWS_SetModels_ProviderTaggedNovelID(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{OpenAIAPIKey: "sk-test"})
+	ctx, conn := wsConnect(t, s)
+
+	msg := wsSetModels(t, ctx, conn, []ModelSpec{{ID: "ricky", Provider: "OpenAI"}})
+	if msg.Type != "models_set" {
+		t.Fatalf("type = %q, want models_set", msg.Type)
+	}
+	if len(msg.Models) != 1 || msg.Models[0] != "ricky" {
+		t.Errorf("models = %v, want [ricky]", msg.Models)
+	}
+}
+
+// TestHandleWS_SetModels_EmptyResetsToAll verifies that an empty model_ids list
+// resets the filter and returns all configured adapter IDs.
+func TestHandleWS_SetModels_EmptyResetsToAll(t *testing.T) {
+	ads := []models.ModelAdapter{stubAdapter{"alpha"}, stubAdapter{"beta"}}
+	s := newTestServer(t, ads, config.Config{})
+	ctx, conn := wsConnect(t, s)
+
+	msg := wsSetModels(t, ctx, conn, nil)
+	if msg.Type != "models_set" {
+		t.Fatalf("type = %q, want models_set", msg.Type)
+	}
+	if len(msg.Models) != 2 {
+		t.Errorf("models = %v, want [alpha beta]", msg.Models)
+	}
+}
+
+// TestHandleWS_SetModels_PreferConfiguredAdapter verifies that a model already
+// in s.adapters is reused rather than created on demand.
+func TestHandleWS_SetModels_PreferConfiguredAdapter(t *testing.T) {
+	ads := []models.ModelAdapter{stubAdapter{"alpha"}}
+	s := newTestServer(t, ads, config.Config{})
+	ctx, conn := wsConnect(t, s)
+
+	msg := wsSetModels(t, ctx, conn, []ModelSpec{{ID: "alpha"}})
+	if msg.Type != "models_set" {
+		t.Fatalf("type = %q, want models_set", msg.Type)
+	}
+	if len(msg.Models) != 1 || msg.Models[0] != "alpha" {
+		t.Errorf("models = %v, want [alpha]", msg.Models)
+	}
+}
+
+// TestHandleWS_SetModels_UnknownModelSendsError verifies that a model with no
+// provider hint and no recognised prefix produces an error message.
+func TestHandleWS_SetModels_UnknownModelSendsError(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	ctx, conn := wsConnect(t, s)
+
+	msg := wsSetModels(t, ctx, conn, []ModelSpec{{ID: "ricky"}})
+	if msg.Type != "error" {
+		t.Fatalf("type = %q, want error", msg.Type)
+	}
+	if !strings.Contains(msg.Message, "ricky") {
+		t.Errorf("message = %q, want mention of 'ricky'", msg.Message)
+	}
+}
+
+func TestHandleAvailableModels_ReturnsAllModelsNoCap(t *testing.T) {
+	// Build a provider with more than the old ModelListCap (10) models to ensure
+	// the REST handler does not truncate — display capping is the client's job.
+	ids := make([]string, 15)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("litellm/model-%02d", i)
+	}
+	mock := mockLiteLLMServer(t, ids)
+	defer mock.Close()
+
+	cfg := config.Config{LiteLLMBaseURL: mock.URL + "/v1"}
+	s := newTestServer(t, nil, cfg)
+	w := httptest.NewRecorder()
+	s.handleAvailableModels(w, httptest.NewRequest("GET", "/api/available-models", nil))
+
+	body := decodeJSON(t, w)
+	providers, ok := body["providers"].([]any)
+	if !ok || len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %v", body["providers"])
+	}
+	p := providers[0].(map[string]any)
+	models, ok := p["models"].([]any)
+	if !ok {
+		t.Fatalf("models field missing or wrong type")
+	}
+	if len(models) != 15 {
+		t.Errorf("got %d models, want 15 (no cap should be applied by server)", len(models))
+	}
+	if _, hasTruncated := p["truncated"]; hasTruncated {
+		t.Errorf("truncated field should not be present in response")
 	}
 }

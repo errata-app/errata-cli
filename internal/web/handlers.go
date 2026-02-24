@@ -23,13 +23,20 @@ import (
 
 // ─── WebSocket message types ──────────────────────────────────────────────────
 
+// ModelSpec pairs a model ID with its originating provider name,
+// allowing the server to route to the correct adapter regardless of ID prefix.
+type ModelSpec struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider,omitempty"`
+}
+
 // wsClientMsg is a message sent from the browser to the server.
 type wsClientMsg struct {
-	Type     string   `json:"type"`              // "run" | "select" | "cancel" | "set_models"
-	Prompt   string   `json:"prompt,omitempty"`
-	ModelID  string   `json:"model_id,omitempty"`
-	ModelIDs []string `json:"model_ids,omitempty"`
-	Verbose  bool     `json:"verbose,omitempty"`
+	Type       string      `json:"type"`              // "run" | "select" | "cancel" | "set_models"
+	Prompt     string      `json:"prompt,omitempty"`
+	ModelID    string      `json:"model_id,omitempty"`
+	ModelSpecs []ModelSpec `json:"model_ids,omitempty"`
+	Verbose    bool        `json:"verbose,omitempty"`
 }
 
 // wsServerMsg is a message sent from the server to the browser.
@@ -264,7 +271,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			send(wsServerMsg{Type: "applied", Applied: applied})
 
 		case "set_models":
-			if len(msg.ModelIDs) == 0 {
+			if len(msg.ModelSpecs) == 0 {
 				// Reset to all models.
 				activeAdapters = nil
 				ids := make([]string, len(s.adapters))
@@ -275,26 +282,37 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			var selected []models.ModelAdapter
-			for _, id := range msg.ModelIDs {
+			var errMsgs []string
+			for _, spec := range msg.ModelSpecs {
+				spec.ID = strings.TrimSpace(spec.ID)
+				if spec.ID == "" {
+					continue
+				}
+				// Prefer an already-configured adapter (reuses its logging wrapper etc.).
 				var found models.ModelAdapter
 				for _, a := range s.adapters {
-					if a.ID() == id {
+					if a.ID() == spec.ID {
 						found = a
 						break
 					}
 				}
+				// Fall back to on-demand creation using the provider hint so novel model
+				// names (e.g. "ricky") route correctly without relying on ID prefixes.
 				if found == nil {
-					available := make([]string, len(s.adapters))
-					for i, a := range s.adapters {
-						available[i] = a.ID()
+					a, err := adapters.NewAdapterForProvider(spec.ID, spec.Provider, s.cfg)
+					if err != nil {
+						errMsgs = append(errMsgs, "unknown model: "+spec.ID)
+						continue
 					}
-					send(wsServerMsg{
-						Type:    "error",
-						Message: "unknown model: " + id + ". Available: " + strings.Join(available, ", "),
-					})
-					continue
+					found = a
 				}
 				selected = append(selected, found)
+			}
+			if len(errMsgs) > 0 {
+				send(wsServerMsg{Type: "error", Message: strings.Join(errMsgs, "; ")})
+				if len(selected) == 0 {
+					continue
+				}
 			}
 			activeAdapters = selected
 			ids := make([]string, len(selected))
@@ -385,15 +403,13 @@ type modelEntry struct {
 }
 
 // providerModelsResult is the per-provider payload returned by /api/available-models.
-// Count is the filtered model count; TotalCount is the raw API count before any
-// chat filter. Models holds the first ModelListCap entries; Truncated is how many
-// were omitted (0 when the full list fits).
+// Count is the filtered model count (after chat-only filter for OpenAI/Gemini);
+// TotalCount is the raw API count before filtering.
 type providerModelsResult struct {
 	Name       string       `json:"name"`
 	Models     []modelEntry `json:"models"`
 	Count      int          `json:"count"`
 	TotalCount int          `json:"total_count"`
-	Truncated  int          `json:"truncated,omitempty"`
 	Error      string       `json:"error,omitempty"`
 }
 
@@ -434,10 +450,6 @@ func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
 			entry.Error = p.Err.Error()
 		}
 		ids := p.Models
-		if len(ids) > adapters.ModelListCap {
-			entry.Truncated = len(ids) - adapters.ModelListCap
-			ids = ids[:adapters.ModelListCap]
-		}
 		entries := make([]modelEntry, len(ids))
 		for j, id := range ids {
 			e := modelEntry{ID: id}

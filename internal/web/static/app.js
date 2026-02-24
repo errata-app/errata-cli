@@ -67,6 +67,10 @@ let currentRunPrompt = '';
 let savedRunData     = null;     // {prompt, responses, selected} — awaiting 'applied'
 let currentRunEl     = null;     // live DOM element for the ongoing run
 let currentPanelsGrid = null;    // panels grid inside currentRunEl
+let modelsData       = null;     // cached /api/available-models response
+let activeModelFilter = null;    // null = all configured; string[] = per-connection filter
+
+const PANEL_CAP = 50;            // per-provider display limit when not filtering
 
 const history = [];              // [{type:'msg'|'run', ...}]
 const panels  = {};              // modelId → {el, eventsEl}
@@ -184,8 +188,9 @@ function handleServerMessage(msg) {
       break;
 
     case 'models_set': {
-      const active = msg.models && msg.models.length > 0
-        ? 'Active models: ' + msg.models.join(', ')
+      activeModelFilter = (msg.models && msg.models.length > 0) ? [...msg.models] : null;
+      const active = activeModelFilter
+        ? 'Active models: ' + activeModelFilter.join(', ')
         : 'Active models: all';
       history.push({ type: 'msg', text: active, cls: '' });
       saveHistory();
@@ -227,7 +232,13 @@ function init() {
     btnVerbose.classList.toggle('active', verbose);
   });
   btnStats.addEventListener('click', showStats);
-  btnModels.addEventListener('click', showModels);
+  btnModels.addEventListener('click', openModelsPanel);
+  document.getElementById('btn-models-close').addEventListener('click', closeModelsPanel);
+  document.getElementById('models-backdrop').addEventListener('click', closeModelsPanel);
+  document.getElementById('btn-models-apply').addEventListener('click', applyModels);
+  document.getElementById('models-search').addEventListener('input', e => {
+    if (modelsData) renderModelsPanel(e.target.value.trim().toLowerCase());
+  });
   connectWS();
   renderIdle();
 }
@@ -676,7 +687,7 @@ function handleSend() {
   // Handle /models slash command.
   if (/^\/models$/i.test(prompt)) {
     inputEl.value = '';
-    showModels();
+    openModelsPanel();
     return;
   }
 
@@ -728,36 +739,114 @@ function fmtPrice(v) {
   return '$' + (v >= 1 ? v.toFixed(2) : parseFloat(v.toPrecision(3)));
 }
 
-async function showModels() {
-  try {
-    const res = await fetch('/api/available-models');
-    const data = await res.json();
+function openModelsPanel() {
+  modelsData = null;
+  document.getElementById('models-backdrop').classList.add('open');
+  document.getElementById('models-panel').classList.add('open');
+  document.getElementById('models-search').value = '';
+  document.getElementById('models-panel-body').textContent = 'Loading…';
+  fetch('/api/available-models')
+    .then(r => r.json())
+    .then(data => { modelsData = data; renderModelsPanel(''); })
+    .catch(() => { document.getElementById('models-panel-body').textContent = 'Error loading models.'; });
+}
 
-    const parts = ['Active: ' + (data.active || []).join(', ')];
+function closeModelsPanel() {
+  document.getElementById('models-backdrop').classList.remove('open');
+  document.getElementById('models-panel').classList.remove('open');
+}
 
-    for (const p of (data.providers || [])) {
-      if (p.error) {
-        parts.push(`${p.name} — error: ${p.error}`);
-        continue;
-      }
-      const header = (p.total_count > p.count)
-        ? `${p.name} (${p.count} of ${p.total_count}, chat only)`
-        : `${p.name} (${p.count})`;
-      const lines = (p.models || []).map(m => {
-        const inP = fmtPrice(m.input_pmt), outP = fmtPrice(m.output_pmt);
-        return inP ? `  ${m.id}  (${inP} in / ${outP} out /1M)` : `  ${m.id}`;
-      });
-      if (p.truncated > 0) lines.push(`  … and ${p.truncated} more`);
-      parts.push(`${header}:\n${lines.join('\n')}`);
+function renderModelsPanel(filter) {
+  const body = document.getElementById('models-panel-body');
+  body.innerHTML = '';
+  if (!modelsData) return;
+
+  const activeSet = new Set(
+    activeModelFilter !== null ? activeModelFilter : (modelsData.active || [])
+  );
+
+  let anyVisible = false;
+  for (const p of (modelsData.providers || [])) {
+    const section = document.createElement('div');
+
+    const hdr = document.createElement('div');
+    hdr.className = 'models-provider-header';
+
+    if (p.error) {
+      hdr.textContent = p.name + ' — error';
+      section.appendChild(hdr);
+      body.appendChild(section);
+      anyVisible = true;
+      continue;
     }
 
-    const text = parts.join('\n\n');
-    history.push({ type: 'msg', text, cls: '' });
-    saveHistory();
-    appendHistoryMsg(text, '');
-  } catch (err) {
-    console.error('models:', err);
+    hdr.textContent = (p.total_count > p.count)
+      ? `${p.name} (${p.count} of ${p.total_count}, chat only)`
+      : `${p.name} (${p.count})`;
+
+    const models = p.models || [];
+    const visible = filter ? models.filter(m => m.id.toLowerCase().includes(filter)) : models;
+    if (visible.length === 0 && filter) continue;
+
+    const over = !filter && visible.length > PANEL_CAP;
+    const shown = over ? visible.slice(0, PANEL_CAP) : visible;
+
+    section.appendChild(hdr);
+
+    for (const m of shown) {
+      const item = document.createElement('div');
+      item.className = 'models-item';
+
+      const lbl = document.createElement('label');
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = m.id;
+      cb.dataset.provider = p.name;
+      cb.checked = activeSet.has(m.id);
+
+      const idSpan = document.createElement('span');
+      idSpan.className = 'models-item-id';
+      idSpan.textContent = m.id;
+
+      lbl.appendChild(cb);
+      lbl.appendChild(idSpan);
+
+      if (m.input_pmt) {
+        const priceSpan = document.createElement('span');
+        priceSpan.className = 'models-item-price';
+        priceSpan.textContent = `${fmtPrice(m.input_pmt)} in / ${fmtPrice(m.output_pmt)} out /1M`;
+        lbl.appendChild(priceSpan);
+      }
+
+      item.appendChild(lbl);
+      section.appendChild(item);
+    }
+
+    if (over) {
+      const more = document.createElement('div');
+      more.className = 'models-more';
+      more.textContent = `… and ${visible.length - PANEL_CAP} more (type to filter)`;
+      section.appendChild(more);
+    }
+
+    body.appendChild(section);
+    anyVisible = true;
   }
+
+  if (!anyVisible && filter) {
+    const none = document.createElement('div');
+    none.className = 'models-more';
+    none.textContent = `No models match "${filter}"`;
+    body.appendChild(none);
+  }
+}
+
+function applyModels() {
+  const specs = [...document.querySelectorAll('#models-panel-body input[type=checkbox]:checked')]
+    .map(cb => ({ id: cb.value, provider: cb.dataset.provider || '' }));
+  wsSend({ type: 'set_models', model_ids: specs });
+  closeModelsPanel();
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────

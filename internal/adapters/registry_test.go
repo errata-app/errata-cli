@@ -92,7 +92,7 @@ func TestNewAdapter_OpenAIMissingKey(t *testing.T) {
 
 func TestNewAdapter_OpenAIPrefixes(t *testing.T) {
 	cfg := openAICfg()
-	tests := []string{"gpt-4o", "gpt-3.5-turbo", "o1", "o3"}
+	tests := []string{"gpt-4o", "gpt-3.5-turbo", "chatgpt-4o", "o1", "o2", "o3", "o3-mini", "o4", "o5"}
 	for _, modelID := range tests {
 		t.Run(modelID, func(t *testing.T) {
 			a, err := adapters.NewAdapter(modelID, cfg)
@@ -183,6 +183,49 @@ func TestNewAdapter_LiteLLMTakesPrecedenceOverOpenRouter(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := a.(*adapters.LiteLLMAdapter)
 	assert.True(t, ok, "litellm/ prefix must route to LiteLLMAdapter, not OpenRouterAdapter")
+}
+
+// --- NewAdapterForProvider ---
+
+func TestNewAdapterForProvider_KnownProviders(t *testing.T) {
+	cfg := config.Config{
+		AnthropicAPIKey: "sk-ant-test",
+		OpenAIAPIKey:    "sk-oai-test",
+		GoogleAPIKey:    "AIza-test",
+	}
+	tests := []struct {
+		provider string
+		modelID  string
+		wantType string
+	}{
+		{"Anthropic", "ricky", "*adapters.AnthropicAdapter"},
+		{"OpenAI", "ricky", "*adapters.OpenAIAdapter"},
+		{"Gemini", "ricky", "*adapters.GeminiAdapter"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.provider+"/"+tc.modelID, func(t *testing.T) {
+			a, err := adapters.NewAdapterForProvider(tc.modelID, tc.provider, cfg)
+			require.NoError(t, err)
+			assert.NotNil(t, a)
+			assert.Equal(t, tc.modelID, a.ID())
+		})
+	}
+}
+
+func TestNewAdapterForProvider_UnknownProviderFallsBackToPrefix(t *testing.T) {
+	cfg := openAICfg()
+	// Empty provider string → falls back to NewAdapter prefix routing.
+	a, err := adapters.NewAdapterForProvider("gpt-4o", "", cfg)
+	require.NoError(t, err)
+	_, ok := a.(*adapters.OpenAIAdapter)
+	assert.True(t, ok, "expected *OpenAIAdapter via prefix fallback")
+}
+
+func TestNewAdapterForProvider_MissingKey(t *testing.T) {
+	cfg := config.Config{} // no keys
+	_, err := adapters.NewAdapterForProvider("ricky", "OpenAI", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OPENAI_API_KEY")
 }
 
 // --- ListAdapters ---

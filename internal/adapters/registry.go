@@ -37,8 +37,8 @@ func NewAdapter(modelID string, cfg config.Config) (models.ModelAdapter, error) 
 		return NewAnthropicAdapter(modelID, cfg.AnthropicAPIKey), nil
 
 	case strings.HasPrefix(modelID, "gpt-"),
-		strings.HasPrefix(modelID, "o1"),
-		strings.HasPrefix(modelID, "o3"):
+		strings.HasPrefix(modelID, "chatgpt-"),
+		len(modelID) >= 2 && modelID[0] == 'o' && modelID[1] >= '0' && modelID[1] <= '9':
 		if cfg.OpenAIAPIKey == "" {
 			return nil, fmt.Errorf("OPENAI_API_KEY not set")
 		}
@@ -52,6 +52,31 @@ func NewAdapter(modelID string, cfg config.Config) (models.ModelAdapter, error) 
 
 	default:
 		return nil, fmt.Errorf("unknown model prefix for %q", modelID)
+	}
+}
+
+// NewAdapterForProvider creates an adapter using an explicit provider name
+// (e.g. "Anthropic", "OpenAI", "Gemini") rather than inferring from the model ID prefix.
+// Falls back to NewAdapter for unrecognised providers (OpenRouter, LiteLLM, custom).
+func NewAdapterForProvider(modelID, provider string, cfg config.Config) (models.ModelAdapter, error) {
+	switch provider {
+	case "Anthropic":
+		if cfg.AnthropicAPIKey == "" {
+			return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
+		}
+		return NewAnthropicAdapter(modelID, cfg.AnthropicAPIKey), nil
+	case "OpenAI":
+		if cfg.OpenAIAPIKey == "" {
+			return nil, fmt.Errorf("OPENAI_API_KEY not set")
+		}
+		return NewOpenAIAdapter(modelID, cfg.OpenAIAPIKey), nil
+	case "Gemini":
+		if cfg.GoogleAPIKey == "" {
+			return nil, fmt.Errorf("GOOGLE_API_KEY not set")
+		}
+		return NewGeminiAdapter(modelID, cfg.GoogleAPIKey), nil
+	default: // OpenRouter, LiteLLM, unknown → prefix routing
+		return NewAdapter(modelID, cfg)
 	}
 }
 

@@ -652,13 +652,17 @@ func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {
 			}
 		}
 		if found == nil {
-			var available []string
-			for _, ad := range a.adapters {
-				available = append(available, ad.ID())
+			newAdapter, err := adapters.NewAdapter(id, a.cfg)
+			if err != nil {
+				var available []string
+				for _, ad := range a.adapters {
+					available = append(available, ad.ID())
+				}
+				return a.withMessage(fmt.Sprintf(
+					"Unknown model %q. Available: %s", id, strings.Join(available, ", "),
+				)), nil
 			}
-			return a.withMessage(fmt.Sprintf(
-				"Unknown model %q. Available: %s", id, strings.Join(available, ", "),
-			)), nil
+			found = newAdapter
 		}
 		selected = append(selected, found)
 	}
