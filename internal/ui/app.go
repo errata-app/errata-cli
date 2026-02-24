@@ -7,11 +7,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/suarezc/errata/internal/adapters"
+	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
@@ -33,6 +36,10 @@ type runCompleteMsg struct {
 
 type compactCompleteMsg struct {
 	histories map[string][]models.ConversationTurn
+}
+
+type listModelsResultMsg struct {
+	results []adapters.ProviderModels
 }
 
 // ---- app modes ----
@@ -65,6 +72,7 @@ type App struct {
 	activeAdapters []models.ModelAdapter // nil = use all adapters
 	prefPath       string
 	sessionID      string
+	cfg            config.Config
 
 	mode    mode
 	verbose bool
@@ -95,7 +103,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, histPath, sessionID string) *App {
+func New(adapters []models.ModelAdapter, prefPath, histPath, sessionID string, cfg config.Config) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -118,6 +126,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, sessionID string) *
 		feedVP:                viewport.New(80, 20),
 		panelIdx:              make(map[string]int),
 		conversationHistories: h,
+		cfg:                   cfg,
 	}
 }
 
@@ -238,6 +247,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.feedVP.SetContent(a.renderFeedContent())
 		a.feedVP.GotoBottom()
 		return a, nil
+
+	case listModelsResultMsg:
+		return a.withMessage(formatAvailableModels(msg.results)), nil
 
 	case compactCompleteMsg:
 		a.conversationHistories = msg.histories
@@ -375,7 +387,13 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 		if a.activeAdapters != nil {
 			suffix = " (filtered)"
 		}
-		return a.withMessage("Models: " + strings.Join(ids, ", ") + suffix), nil
+		cfg := a.cfg
+		updated := a.withMessage("Active" + suffix + ": " + strings.Join(ids, ", ") + "\nFetching available models…")
+		return updated, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			return listModelsResultMsg{results: adapters.ListAvailableModels(ctx, cfg)}
+		}
 	case "/clear":
 		a.feed = nil
 		a.conversationHistories = nil
@@ -651,14 +669,47 @@ func helpText() string {
   /clear             Clear display history and conversation memory
   /compact           Summarise conversation history to free up context
   /verbose           Toggle verbose mode
-  /models            List active models
+  /models            List active and all available models by provider
   /model [id...]     Restrict to model(s); bare /model resets to all
   /exit              Exit`
 }
 
+// formatAvailableModels formats a ListAvailableModels result for display.
+// Providers with more than ModelListCap models are summarised as a count
+// to avoid flooding the feed (e.g. OpenRouter with 1000+ models).
+// When a provider filters its catalogue (OpenAI, Gemini), the header shows
+// "N of M (chat only)" so users understand why the count is lower than expected.
+func formatAvailableModels(results []adapters.ProviderModels) string {
+	if len(results) == 0 {
+		return "No provider API keys configured."
+	}
+	var sb strings.Builder
+	sb.WriteString("Available models:")
+	for _, r := range results {
+		sb.WriteString("\n\n")
+		if r.Err != nil {
+			fmt.Fprintf(&sb, "%s — error: %v", r.Provider, r.Err)
+			continue
+		}
+		n := len(r.Models)
+		var header string
+		if r.TotalCount > n {
+			header = fmt.Sprintf("%s (%d of %d, chat only)", r.Provider, n, r.TotalCount)
+		} else {
+			header = fmt.Sprintf("%s (%d)", r.Provider, n)
+		}
+		if n > adapters.ModelListCap {
+			fmt.Fprintf(&sb, "%s — set ERRATA_ACTIVE_MODELS=<id> to use one", header)
+		} else {
+			fmt.Fprintf(&sb, "%s:\n  %s", header, strings.Join(r.Models, ", "))
+		}
+	}
+	return sb.String()
+}
+
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, histPath, sessionID string, warnings []string) error {
-	app := New(adapters, prefPath, histPath, sessionID)
+func Run(adapters []models.ModelAdapter, prefPath, histPath, sessionID string, cfg config.Config, warnings []string) error {
+	app := New(adapters, prefPath, histPath, sessionID, cfg)
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	app.SetProgram(p)

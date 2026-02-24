@@ -658,6 +658,13 @@ function handleSend() {
     return;
   }
 
+  // Handle /models slash command.
+  if (/^\/models$/i.test(prompt)) {
+    inputEl.value = '';
+    showModels();
+    return;
+  }
+
   currentRunPrompt = prompt;
   inputEl.value = '';
   toRunning();
@@ -691,11 +698,31 @@ async function showStats() {
   }
 }
 
+const MODEL_LIST_CAP = 50;
+
 async function showModels() {
   try {
-    const res = await fetch('/api/models');
-    const { models } = await res.json();
-    const text = 'Active models: ' + (models || []).join(', ');
+    const res = await fetch('/api/available-models');
+    const data = await res.json();
+
+    const parts = ['Active: ' + (data.active || []).join(', ')];
+
+    for (const p of (data.providers || [])) {
+      if (p.error) {
+        parts.push(`${p.name} — error: ${p.error}`);
+        continue;
+      }
+      const header = (p.total_count > p.count)
+        ? `${p.name} (${p.count} of ${p.total_count}, chat only)`
+        : `${p.name} (${p.count})`;
+      if (p.count > MODEL_LIST_CAP) {
+        parts.push(`${header} — set ERRATA_ACTIVE_MODELS=<id> to use one`);
+      } else {
+        parts.push(`${header}:\n  ${(p.models || []).join(', ')}`);
+      }
+    }
+
+    const text = parts.join('\n\n');
     history.push({ type: 'msg', text, cls: '' });
     saveHistory();
     appendHistoryMsg(text, '');

@@ -40,6 +40,8 @@ errata/
 │   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
 │   ├── adapters/
 │   │   ├── registry.go      # NewAdapter(), ListAdapters() — prefix/slash routing
+│   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildSuccessResponse — shared helpers
+│   │   ├── list.go          # ListAvailableModels(), ProviderModels — per-provider model catalogue fetch
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
 │   │   ├── gemini.go        # GeminiAdapter.RunAgent()
@@ -101,7 +103,7 @@ Both the TUI and the web textarea accept slash commands.
 | `/help` | Show available commands |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/compact` | Summarize conversation history to free up context window |
-| `/models` | List currently active models (marks filter if set) |
+| `/models` | List active models and query each configured provider for all available models |
 | `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
 | `/model` | Reset model filter back to all configured models |
 | `/exit` or `/quit` | Exit (TUI only) |
@@ -231,6 +233,14 @@ The web server embeds all static assets at compile time (`//go:embed static`).
 Each browser tab gets one persistent WebSocket connection; the server maintains
 per-connection state (active adapter filter, last run results, cancel function).
 
+### REST endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/stats` | Preference tally JSON |
+| `GET` | `/api/models` | Active model IDs JSON |
+| `GET` | `/api/available-models` | Active models + all models from each configured provider (concurrent fetch, 15 s timeout); providers with >50 models omit the list and return only the count |
+
 ### WebSocket message protocol
 
 **Client → Server:**
@@ -289,8 +299,8 @@ diff        ← os, strings, sergi/go-diff
 history     ← models, encoding/json, os
 logging     ← models (ModelAdapter, ModelResponse), stdlib
 preferences ← models (for ModelResponse latency/ID), encoding/json, os
-ui          ← models, pricing, tools, runner, diff, history, bubbletea, lipgloss
-web         ← models, runner, tools, diff, preferences, logging, history, coder/websocket
+ui          ← models, pricing, tools, runner, diff, history, adapters, config, bubbletea, lipgloss
+web         ← models, runner, tools, diff, preferences, logging, history, adapters, config, coder/websocket
 cmd/errata  ← config, adapters, pricing, logging, ui, web
 ```
 

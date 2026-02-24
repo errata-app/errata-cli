@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	"strings"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/models"
@@ -394,4 +396,119 @@ func TestIsContextOverflowError_DoesNotMatchGenericError(t *testing.T) {
 	assert.False(t, runner.IsContextOverflowError("internal server error"))
 	assert.False(t, runner.IsContextOverflowError("authentication failed"))
 	assert.False(t, runner.IsContextOverflowError(""))
+}
+
+// ─── ShouldAutoCompact ────────────────────────────────────────────────────────
+
+// makeTurns builds a ConversationTurn slice from alternating role/content pairs.
+// e.g. makeTurns("user", "hello", "assistant", "hi") → two turns.
+func makeTurns(args ...string) []models.ConversationTurn {
+	out := make([]models.ConversationTurn, 0, len(args)/2)
+	for i := 0; i+1 < len(args); i += 2 {
+		out = append(out, models.ConversationTurn{Role: args[i], Content: args[i+1]})
+	}
+	return out
+}
+
+func TestShouldAutoCompact_NoHistoryReturnsFalse(t *testing.T) {
+	if runner.ShouldAutoCompact(nil, "claude-sonnet-4-6") {
+		t.Error("nil histories should not trigger compact")
+	}
+	if runner.ShouldAutoCompact(map[string][]models.ConversationTurn{}, "claude-sonnet-4-6") {
+		t.Error("empty histories should not trigger compact")
+	}
+}
+
+func TestShouldAutoCompact_UnknownModelReturnsFalse(t *testing.T) {
+	// Unknown model → context window = 0 → fraction undefined → no compact.
+	h := map[string][]models.ConversationTurn{
+		"no-such-model": makeTurns("user", strings.Repeat("x", 1_000_000), "assistant", "y"),
+	}
+	if runner.ShouldAutoCompact(h, "no-such-model") {
+		t.Error("unknown model should never trigger auto-compact")
+	}
+}
+
+func TestShouldAutoCompact_BelowThresholdReturnsFalse(t *testing.T) {
+	// gemini-2.0-flash context = 1,048,576 tokens; 80% = 838,860 tokens ≈ 3.36M chars.
+	h := map[string][]models.ConversationTurn{
+		"gemini-2.0-flash": makeTurns("user", "short", "assistant", "reply"),
+	}
+	if runner.ShouldAutoCompact(h, "gemini-2.0-flash") {
+		t.Error("well-below-threshold history should not trigger compact")
+	}
+}
+
+func TestShouldAutoCompact_AboveThresholdReturnsTrue(t *testing.T) {
+	// claude-sonnet-4-6 context = 200,000 tokens; 80% = 160,000 tokens ≈ 640,000 chars.
+	bigText := strings.Repeat("x", 700_000) // ~175,000 tokens, above 80%
+	h := map[string][]models.ConversationTurn{
+		"claude-sonnet-4-6": {{Role: "user", Content: bigText}},
+	}
+	if !runner.ShouldAutoCompact(h, "claude-sonnet-4-6") {
+		t.Error("above-threshold history should trigger auto-compact")
+	}
+}
+
+// ─── CompactHistories ─────────────────────────────────────────────────────────
+
+// compactStub is an adapter whose RunAgent always returns a fixed summary string.
+type compactStub struct {
+	id      string
+	summary string
+}
+
+func (s compactStub) ID() string { return s.id }
+func (s compactStub) RunAgent(_ context.Context, hist []models.ConversationTurn, prompt string, onEvent func(models.AgentEvent)) (models.ModelResponse, error) {
+	return models.ModelResponse{ModelID: s.id, Text: s.summary}, nil
+}
+
+func TestCompactHistories_ReplacesWithSinglePair(t *testing.T) {
+	ad := compactStub{id: "model-a", summary: "Here is the summary."}
+	h := map[string][]models.ConversationTurn{
+		"model-a": makeTurns("user", "hello", "assistant", "hi", "user", "world", "assistant", "earth"),
+	}
+	result := runner.CompactHistories(context.Background(), []models.ModelAdapter{ad}, h, func(_ string, _ models.AgentEvent) {})
+	got, ok := result["model-a"]
+	if !ok {
+		t.Fatal("expected model-a history after compaction")
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 turns (1 user + 1 assistant) after compact, got %d", len(got))
+	}
+	if got[1].Content != "Here is the summary." {
+		t.Errorf("assistant content = %q, want %q", got[1].Content, "Here is the summary.")
+	}
+}
+
+func TestCompactHistories_EmptyHistoryUnchanged(t *testing.T) {
+	ad := compactStub{id: "model-b", summary: "summary"}
+	result := runner.CompactHistories(context.Background(), []models.ModelAdapter{ad}, nil, func(_ string, _ models.AgentEvent) {})
+	if hist := result["model-b"]; len(hist) != 0 {
+		t.Errorf("expected no history for model without prior history, got %v", hist)
+	}
+}
+
+func TestCompactHistories_MultipleAdaptersIndependent(t *testing.T) {
+	ads := []models.ModelAdapter{
+		compactStub{id: "m1", summary: "summary-1"},
+		compactStub{id: "m2", summary: "summary-2"},
+	}
+	h := map[string][]models.ConversationTurn{
+		"m1": makeTurns("user", "hi", "assistant", "hello"),
+		"m2": makeTurns("user", "hey", "assistant", "sup"),
+	}
+	result := runner.CompactHistories(context.Background(), ads, h, func(_ string, _ models.AgentEvent) {})
+	for _, id := range []string{"m1", "m2"} {
+		got := result[id]
+		if len(got) != 2 {
+			t.Errorf("%s: expected 2 turns, got %d", id, len(got))
+		}
+	}
+	if result["m1"][1].Content != "summary-1" {
+		t.Errorf("m1 summary wrong: %q", result["m1"][1].Content)
+	}
+	if result["m2"][1].Content != "summary-2" {
+		t.Errorf("m2 summary wrong: %q", result["m2"][1].Content)
+	}
 }

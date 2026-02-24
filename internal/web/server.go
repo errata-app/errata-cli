@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 )
@@ -24,6 +25,7 @@ type Server struct {
 	prefPath  string
 	histPath  string
 	sessionID string
+	cfg       config.Config
 
 	histMu    sync.RWMutex
 	histories map[string][]models.ConversationTurn // shared across all browser connections
@@ -31,7 +33,7 @@ type Server struct {
 
 // New creates a Server. A fresh session ID is generated on each call.
 // Conversation history is loaded from histPath if it exists.
-func New(adapters []models.ModelAdapter, prefPath, histPath string) *Server {
+func New(adapters []models.ModelAdapter, prefPath, histPath string, cfg config.Config) *Server {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 
@@ -45,6 +47,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath string) *Server {
 		prefPath:  prefPath,
 		histPath:  histPath,
 		sessionID: hex.EncodeToString(b),
+		cfg:       cfg,
 		histories: h,
 	}
 }
@@ -63,6 +66,7 @@ func (s *Server) Start(addr string) error {
 	// Stateless REST endpoints
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/models", s.handleModels)
+	mux.HandleFunc("GET /api/available-models", s.handleAvailableModels)
 
 	return http.ListenAndServe(addr, mux)
 }

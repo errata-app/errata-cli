@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/diff"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
@@ -371,6 +372,54 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"models": ids})
+}
+
+// ─── Available models handler ─────────────────────────────────────────────────
+
+// providerModelsResult is the per-provider payload returned by /api/available-models.
+// TotalCount is the raw API count before any chat filter; Count is the filtered count.
+// When TotalCount > Count the provider filtered non-chat models (OpenAI, Gemini).
+type providerModelsResult struct {
+	Name       string   `json:"name"`
+	Models     []string `json:"models"`
+	Count      int      `json:"count"`
+	TotalCount int      `json:"total_count"`
+	Error      string   `json:"error,omitempty"`
+}
+
+func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	active := make([]string, len(s.adapters))
+	for i, a := range s.adapters {
+		active[i] = a.ID()
+	}
+
+	raw := adapters.ListAvailableModels(ctx, s.cfg)
+	providers := make([]providerModelsResult, len(raw))
+	for i, p := range raw {
+		entry := providerModelsResult{
+			Name:       p.Provider,
+			Models:     p.Models,
+			Count:      len(p.Models),
+			TotalCount: p.TotalCount,
+		}
+		if p.Err != nil {
+			entry.Error = p.Err.Error()
+		}
+		// Omit the full list for large providers to keep the response lean.
+		if entry.Count > adapters.ModelListCap {
+			entry.Models = nil
+		}
+		providers[i] = entry
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"active":    active,
+		"providers": providers,
+	})
 }
 
 // ─── Serialisation helper ─────────────────────────────────────────────────────
