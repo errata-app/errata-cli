@@ -75,6 +75,15 @@ func DispatchTool(
 		fileGlob := args["file_glob"]
 		onEvent(models.AgentEvent{Type: "reading", Data: pattern})
 		return tools.ExecuteSearchCode(pattern, path, fileGlob), true
+
+	case tools.BashToolName:
+		command := args["command"]
+		desc := args["description"]
+		if desc == "" {
+			desc = command
+		}
+		onEvent(models.AgentEvent{Type: "bash", Data: desc})
+		return tools.ExecuteBash(command), true
 	}
 	return "", false
 }

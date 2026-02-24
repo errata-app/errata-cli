@@ -32,7 +32,7 @@ func (a *AnthropicAdapter) RunAgent(
 ) (models.ModelResponse, error) {
 	client := anthropic.NewClient(option.WithAPIKey(a.apiKey))
 
-	toolParams := buildAnthropicTools()
+	toolParams := buildAnthropicTools(ctx)
 	messages := make([]anthropic.MessageParam, 0, len(history)+1)
 	for _, turn := range history {
 		switch turn.Role {
@@ -95,9 +95,9 @@ func (a *AnthropicAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
-func buildAnthropicTools() []anthropic.ToolUnionParam {
+func buildAnthropicTools(ctx context.Context) []anthropic.ToolUnionParam {
 	var out []anthropic.ToolUnionParam
-	for _, def := range tools.Definitions {
+	for _, def := range tools.ActiveToolsFromContext(ctx) {
 		props := map[string]any{}
 		for name, p := range def.Properties {
 			props[name] = map[string]any{

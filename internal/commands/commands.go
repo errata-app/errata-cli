@@ -20,6 +20,7 @@ var All = []Command{
 	{"/verbose",   "Toggle verbose mode",                               false},
 	{"/models",    "List active and all available models by provider",  false},
 	{"/model",     "Restrict to model(s); bare /model resets to all",   false},
+	{"/tools",     "Enable/disable tools: /tools off bash; /tools on bash; /tools reset", false},
 	{"/stats",     "Show preference wins and session cost",             false},
 	{"/totalcost", "Show total inference cost for this session",        false},
 	{"/exit",      "Exit",                                              true},

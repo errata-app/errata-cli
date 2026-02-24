@@ -33,7 +33,7 @@ func (a *OpenAIAdapter) RunAgent(
 ) (models.ModelResponse, error) {
 	client := openai.NewClient(option.WithAPIKey(a.apiKey))
 
-	toolParams := buildOpenAITools()
+	toolParams := buildOpenAITools(ctx)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
 	messages = append(messages, openai.SystemMessage(tools.SystemPromptSuffix()))
 	for _, turn := range history {
@@ -97,9 +97,9 @@ func (a *OpenAIAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "openai/"+a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
-func buildOpenAITools() []openai.ChatCompletionToolParam {
+func buildOpenAITools(ctx context.Context) []openai.ChatCompletionToolParam {
 	var out []openai.ChatCompletionToolParam
-	for _, def := range tools.Definitions {
+	for _, def := range tools.ActiveToolsFromContext(ctx) {
 		props := map[string]any{}
 		for name, p := range def.Properties {
 			props[name] = map[string]any{

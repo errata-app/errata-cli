@@ -159,6 +159,55 @@ func TestContextWindowTokens_Gemini(t *testing.T) {
 	assert.Equal(t, int64(1_000_000), cw)
 }
 
+// ─── ProviderQualifiedID ──────────────────────────────────────────────────────
+
+func TestProviderQualifiedID_Anthropic(t *testing.T) {
+	assert.Equal(t, "anthropic/claude-sonnet-4-6", ProviderQualifiedID("Anthropic", "claude-sonnet-4-6"))
+}
+
+func TestProviderQualifiedID_OpenAI(t *testing.T) {
+	assert.Equal(t, "openai/gpt-4o", ProviderQualifiedID("OpenAI", "gpt-4o"))
+}
+
+func TestProviderQualifiedID_Gemini(t *testing.T) {
+	assert.Equal(t, "google/gemini-2.0-flash", ProviderQualifiedID("Gemini", "gemini-2.0-flash"))
+}
+
+func TestProviderQualifiedID_OpenRouter_PassThrough(t *testing.T) {
+	// OpenRouter IDs already carry the provider prefix; pass them as-is.
+	assert.Equal(t, "meta-llama/llama-3-70b", ProviderQualifiedID("OpenRouter", "meta-llama/llama-3-70b"))
+}
+
+func TestProviderQualifiedID_LiteLLM_PassThrough(t *testing.T) {
+	assert.Equal(t, "litellm/claude-sonnet-4-6", ProviderQualifiedID("LiteLLM", "litellm/claude-sonnet-4-6"))
+}
+
+// ─── PricingFor ───────────────────────────────────────────────────────────────
+
+func TestPricingFor_KnownModel(t *testing.T) {
+	resetDynamicPricing(t)
+	in, out, ok := PricingFor("claude-sonnet-4-6")
+	assert.True(t, ok)
+	assert.Greater(t, in, 0.0)
+	assert.Greater(t, out, 0.0)
+}
+
+func TestPricingFor_QualifiedIDFallback(t *testing.T) {
+	resetDynamicPricing(t)
+	in1, out1, ok1 := PricingFor("claude-sonnet-4-6")
+	in2, out2, ok2 := PricingFor("anthropic/claude-sonnet-4-6")
+	assert.True(t, ok1)
+	assert.True(t, ok2)
+	assert.Equal(t, in1, in2)
+	assert.Equal(t, out1, out2)
+}
+
+func TestPricingFor_UnknownModel_ReturnsFalse(t *testing.T) {
+	resetDynamicPricing(t)
+	_, _, ok := PricingFor("no-such-model-xyz")
+	assert.False(t, ok)
+}
+
 // TestLoadPricing_MissingCache_FallsBackToHardcoded verifies that when no
 // cache file exists and the OpenRouter fetch fails, the hardcoded table is used.
 func TestLoadPricing_MissingCache_FallsBackToHardcoded(t *testing.T) {

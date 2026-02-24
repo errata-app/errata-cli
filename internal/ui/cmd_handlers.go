@@ -17,6 +17,7 @@ import (
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
@@ -25,6 +26,9 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 
 	if lower == "/model" || strings.HasPrefix(lower, "/model ") {
 		return a.handleModelCommand(strings.TrimSpace(trimmed[len("/model"):]))
+	}
+	if lower == "/tools" || strings.HasPrefix(lower, "/tools ") {
+		return a.handleToolsCommand(strings.TrimSpace(trimmed[len("/tools"):]))
 	}
 	switch lower {
 	case "/exit", "/quit":
@@ -190,6 +194,7 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	verbose := a.verbose
 	prog := a.prog
 	histories := a.conversationHistories // read-only in goroutine; written only by main loop
+	activeDefs := tools.ActiveDefinitions(a.disabledTools)
 
 	return a, func() tea.Msg {
 		effectiveHistories := histories
@@ -208,8 +213,9 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 				compacted = effectiveHistories
 			}
 		}
+		runCtx := tools.WithActiveTools(context.Background(), activeDefs)
 		responses := runner.RunAll(
-			context.Background(), ads, effectiveHistories, trimmed,
+			runCtx, ads, effectiveHistories, trimmed,
 			func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
 			},
@@ -217,6 +223,64 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 		)
 		return runCompleteMsg{responses: responses, compactedHistories: compacted}
 	}
+}
+
+func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) {
+	lower := strings.ToLower(strings.TrimSpace(args))
+
+	// /tools reset — re-enable all tools
+	if lower == "reset" {
+		a.disabledTools = nil
+		return a.withMessage("All tools enabled."), nil
+	}
+
+	// /tools (bare) — list current state
+	if lower == "" {
+		var lines []string
+		for _, d := range tools.Definitions {
+			state := "on "
+			if a.disabledTools[d.Name] {
+				state = "off"
+			}
+			lines = append(lines, fmt.Sprintf("  [%s] %s", state, d.Name))
+		}
+		return a.withMessage("Tools:\n" + strings.Join(lines, "\n")), nil
+	}
+
+	// /tools on <name...> or /tools off <name...>
+	parts := strings.Fields(lower)
+	if len(parts) < 2 || (parts[0] != "on" && parts[0] != "off") {
+		return a.withMessage("Usage: /tools  |  /tools off <name...>  |  /tools on <name...>  |  /tools reset"), nil
+	}
+
+	action, names := parts[0], parts[1:]
+	// Validate all names first.
+	validNames := make(map[string]bool, len(tools.Definitions))
+	for _, d := range tools.Definitions {
+		validNames[d.Name] = true
+	}
+	for _, n := range names {
+		if !validNames[n] {
+			var all []string
+			for _, d := range tools.Definitions {
+				all = append(all, d.Name)
+			}
+			return a.withMessage(fmt.Sprintf("Unknown tool %q. Available: %s", n, strings.Join(all, ", "))), nil
+		}
+	}
+
+	if a.disabledTools == nil {
+		a.disabledTools = make(map[string]bool)
+	}
+	for _, n := range names {
+		if action == "off" {
+			a.disabledTools[n] = true
+		} else {
+			delete(a.disabledTools, n)
+		}
+	}
+	// Return the updated list.
+	return a.handleToolsCommand("")
 }
 
 func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {

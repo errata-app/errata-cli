@@ -68,6 +68,7 @@ type feedItem struct {
 type App struct {
 	adapters       []models.ModelAdapter
 	activeAdapters []models.ModelAdapter // nil = use all adapters
+	disabledTools  map[string]bool       // tools excluded from runs; nil = all enabled
 	prefPath       string
 	sessionID      string
 	cfg            config.Config

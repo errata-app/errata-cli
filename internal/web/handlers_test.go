@@ -321,3 +321,119 @@ func TestHandleAvailableModels_ReturnsAllModelsNoCap(t *testing.T) {
 		t.Errorf("truncated field should not be present in response")
 	}
 }
+
+// ─── handleCommands ───────────────────────────────────────────────────────────
+
+func TestHandleCommands_ReturnsJSONArray(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	w := httptest.NewRecorder()
+	s.handleCommands(w, httptest.NewRequest("GET", "/api/commands", nil))
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+}
+
+func TestHandleCommands_ContainsKnownCommands(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	w := httptest.NewRecorder()
+	s.handleCommands(w, httptest.NewRequest("GET", "/api/commands", nil))
+
+	var cmds []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&cmds); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(cmds) == 0 {
+		t.Fatal("expected non-empty command list")
+	}
+	// /help should always be present and not TUIOnly
+	found := false
+	for _, c := range cmds {
+		if c["name"] == "/help" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("/help not found in commands response")
+	}
+}
+
+func TestHandleCommands_OmitsTUIOnlyCommands(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	w := httptest.NewRecorder()
+	s.handleCommands(w, httptest.NewRequest("GET", "/api/commands", nil))
+
+	var cmds []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&cmds); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, c := range cmds {
+		if c["name"] == "/exit" {
+			t.Error("/exit is TUIOnly and should not appear in web commands")
+		}
+	}
+}
+
+// ─── wsHandleSetTools ─────────────────────────────────────────────────────────
+
+func wsSetTools(t *testing.T, ctx context.Context, conn *websocket.Conn, disabled []string) wsServerMsg {
+	t.Helper()
+	if err := wsjson.Write(ctx, conn, wsClientMsg{Type: "set_tools", Disabled: disabled}); err != nil {
+		t.Fatalf("write set_tools: %v", err)
+	}
+	var msg wsServerMsg
+	if err := wsjson.Read(ctx, conn, &msg); err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return msg
+}
+
+func TestHandleWS_SetTools_DisableBash(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	ctx, conn := wsConnect(t, s)
+
+	msg := wsSetTools(t, ctx, conn, []string{"bash"})
+	if msg.Type != "tools_set" {
+		t.Fatalf("type = %q, want tools_set", msg.Type)
+	}
+	for _, name := range msg.Models {
+		if name == "bash" {
+			t.Error("bash should be excluded from active tools after disabling")
+		}
+	}
+}
+
+func TestHandleWS_SetTools_EmptyDisabledEnablesAll(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	ctx, conn := wsConnect(t, s)
+
+	msg := wsSetTools(t, ctx, conn, nil)
+	if msg.Type != "tools_set" {
+		t.Fatalf("type = %q, want tools_set", msg.Type)
+	}
+	if len(msg.Models) == 0 {
+		t.Error("expected all tools active when disabled list is empty")
+	}
+}
+
+// ─── wsHandleClearHistory ─────────────────────────────────────────────────────
+
+func TestHandleWS_ClearHistory_SendsHistoryCleared(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	ctx, conn := wsConnect(t, s)
+
+	if err := wsjson.Write(ctx, conn, wsClientMsg{Type: "clear_history"}); err != nil {
+		t.Fatalf("write clear_history: %v", err)
+	}
+	var msg wsServerMsg
+	if err := wsjson.Read(ctx, conn, &msg); err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if msg.Type != "history_cleared" {
+		t.Errorf("type = %q, want history_cleared", msg.Type)
+	}
+}

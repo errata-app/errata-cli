@@ -108,6 +108,8 @@ func renderEvent(e models.AgentEvent) string {
 		return dimStyle.Render("reading  ") + e.Data
 	case "writing":
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AFAF00")).Render("writing  ") + e.Data
+	case "bash":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF87")).Render("bash     ") + truncateLine(e.Data, 60)
 	case "error":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error    ") + truncateLine(e.Data, 60)
 	case "text":

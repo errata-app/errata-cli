@@ -74,6 +74,162 @@ func TestDispatchTool_WriteDoesNotExecute(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "write_file must not write to disk")
 }
 
+func TestDispatchTool_ListDirectoryEmitsEventAndReturnsTree(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile("file.txt", []byte(""), 0o644))
+
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+
+	result, ok := DispatchTool(tools.ListDirToolName, map[string]string{"path": "."},
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
+
+	assert.True(t, ok)
+	assert.Contains(t, result, "file.txt")
+	require.Len(t, events, 1)
+	assert.Equal(t, "reading", events[0].Type)
+	assert.Empty(t, proposed)
+}
+
+func TestDispatchTool_ListDirectoryDepthParam(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.MkdirAll("sub/nested", 0o755))
+	require.NoError(t, os.WriteFile("sub/nested/deep.txt", []byte(""), 0o644))
+
+	var proposed []tools.FileWrite
+
+	// depth=1 should not recurse into nested/
+	result1, _ := DispatchTool(tools.ListDirToolName, map[string]string{"path": ".", "depth": "1"},
+		func(models.AgentEvent) {}, &proposed)
+	assert.Contains(t, result1, "sub/")
+	assert.NotContains(t, result1, "deep.txt")
+
+	// depth=3 should reach deep.txt
+	result3, _ := DispatchTool(tools.ListDirToolName, map[string]string{"path": ".", "depth": "3"},
+		func(models.AgentEvent) {}, &proposed)
+	assert.Contains(t, result3, "deep.txt")
+}
+
+func TestDispatchTool_SearchFilesEmitsEventAndReturnsMatches(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile("main.go", []byte(""), 0o644))
+	require.NoError(t, os.WriteFile("readme.md", []byte(""), 0o644))
+
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+
+	result, ok := DispatchTool(tools.SearchFilesName, map[string]string{"pattern": "*.go"},
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
+
+	assert.True(t, ok)
+	assert.Contains(t, result, "main.go")
+	assert.NotContains(t, result, "readme.md")
+	require.Len(t, events, 1)
+	assert.Equal(t, "reading", events[0].Type)
+	assert.Empty(t, proposed)
+}
+
+func TestDispatchTool_SearchFilesDoubleStarPattern(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.MkdirAll("internal/tools", 0o755))
+	require.NoError(t, os.WriteFile("internal/tools/tools.go", []byte(""), 0o644))
+
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(tools.SearchFilesName, map[string]string{"pattern": "**/*.go"},
+		func(models.AgentEvent) {}, &proposed)
+
+	assert.True(t, ok)
+	assert.Contains(t, result, "tools.go")
+	assert.NotContains(t, result, "[error:")
+}
+
+func TestDispatchTool_SearchCodeEmitsEventAndReturnsMatches(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile("foo.go", []byte("package main\nfunc Hello() {}\n"), 0o644))
+
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+
+	result, ok := DispatchTool(tools.SearchCodeName, map[string]string{"pattern": "Hello"},
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
+
+	assert.True(t, ok)
+	assert.Contains(t, result, "Hello")
+	require.Len(t, events, 1)
+	assert.Equal(t, "reading", events[0].Type)
+	assert.Empty(t, proposed)
+}
+
+func TestDispatchTool_SearchCodeFileGlob(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile("foo.go", []byte("needle\n"), 0o644))
+	require.NoError(t, os.WriteFile("bar.txt", []byte("needle\n"), 0o644))
+
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(tools.SearchCodeName, map[string]string{"pattern": "needle", "file_glob": "*.go"},
+		func(models.AgentEvent) {}, &proposed)
+
+	assert.True(t, ok)
+	assert.Contains(t, result, "foo.go")
+	assert.NotContains(t, result, "bar.txt")
+}
+
+func TestDispatchTool_BashEmitsEventAndReturnsOutput(t *testing.T) {
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+
+	result, ok := DispatchTool(tools.BashToolName,
+		map[string]string{"command": "echo hi", "description": "say hi"},
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
+
+	assert.True(t, ok)
+	assert.Equal(t, "hi", result)
+	require.Len(t, events, 1)
+	assert.Equal(t, "bash", events[0].Type)
+	assert.Equal(t, "say hi", events[0].Data)
+	assert.Empty(t, proposed)
+}
+
+func TestDispatchTool_BashFallsBackToCommandAsDesc(t *testing.T) {
+	// When description is omitted, the command itself is used as the event Data.
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+
+	_, ok := DispatchTool(tools.BashToolName,
+		map[string]string{"command": "echo x"},
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
+
+	assert.True(t, ok)
+	require.Len(t, events, 1)
+	assert.Equal(t, "echo x", events[0].Data)
+}
+
+// ─── extractStringMap ─────────────────────────────────────────────────────────
+
+func TestExtractStringMap_StringValues(t *testing.T) {
+	in := map[string]any{"path": "/tmp/foo", "content": "hello"}
+	out := extractStringMap(in)
+	assert.Equal(t, "/tmp/foo", out["path"])
+	assert.Equal(t, "hello", out["content"])
+}
+
+func TestExtractStringMap_DropsNonStringValues(t *testing.T) {
+	in := map[string]any{"name": "foo", "count": 42, "flag": true}
+	out := extractStringMap(in)
+	assert.Equal(t, map[string]string{"name": "foo"}, out)
+}
+
+func TestExtractStringMap_EmptyInput(t *testing.T) {
+	out := extractStringMap(map[string]any{})
+	assert.Empty(t, out)
+}
+
 // ─── BuildErrorResponse ───────────────────────────────────────────────────────
 
 func TestBuildErrorResponse_Fields(t *testing.T) {

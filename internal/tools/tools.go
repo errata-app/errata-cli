@@ -13,15 +13,33 @@ import (
 )
 
 const (
-	ReadToolName      = "read_file"
-	WriteToolName     = "write_file"
-	ListDirToolName   = "list_directory"
-	SearchFilesName   = "search_files"
-	SearchCodeName    = "search_code"
+	ReadToolName    = "read_file"
+	WriteToolName   = "write_file"
+	ListDirToolName = "list_directory"
+	SearchFilesName = "search_files"
+	SearchCodeName  = "search_code"
+	BashToolName    = "bash"
 )
 
 // searchCommandTimeout is the maximum time allowed for search_code subprocess execution.
 const searchCommandTimeout = 30 * time.Second
+
+// defaultBashTimeout is the production timeout for bash tool execution.
+const defaultBashTimeout = 2 * time.Minute
+
+// bashTimeout returns the effective bash timeout, allowing ERRATA_BASH_TIMEOUT
+// to override (e.g. "2s") in tests without modifying global state.
+func bashTimeout() time.Duration {
+	if v := os.Getenv("ERRATA_BASH_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultBashTimeout
+}
+
+// bashOutputLimit is the maximum bytes returned from a bash tool call.
+const bashOutputLimit = 10_000
 
 // FileWrite is a proposed file write intercepted from an agent's tool call.
 // It lives here (not in models) to break the import cycle:
@@ -98,6 +116,50 @@ var Definitions = []ToolDef{
 		},
 		Required: []string{"pattern"},
 	},
+	{
+		Name: BashToolName,
+		Description: "Execute a shell command and return its combined stdout+stderr output. " +
+			"Use for running tests, builds, linters, git commands, or any shell operation. " +
+			"Commands run with a 2-minute timeout. Provide a brief description of what the command does.",
+		Properties: map[string]ToolParam{
+			"command":     {Type: "string", Description: "The shell command to execute"},
+			"description": {Type: "string", Description: "One-line summary of what this command does"},
+		},
+		Required: []string{"command", "description"},
+	},
+}
+
+// activeToolsKey is the context key for the active tool set.
+type activeToolsKey struct{}
+
+// WithActiveTools returns a context carrying the given tool definitions.
+// Adapters call ActiveToolsFromContext to retrieve the set for this run.
+func WithActiveTools(ctx context.Context, defs []ToolDef) context.Context {
+	return context.WithValue(ctx, activeToolsKey{}, defs)
+}
+
+// ActiveToolsFromContext returns the tool definitions stored in ctx, or Definitions
+// if no active set was provided.
+func ActiveToolsFromContext(ctx context.Context) []ToolDef {
+	if v, ok := ctx.Value(activeToolsKey{}).([]ToolDef); ok && len(v) > 0 {
+		return v
+	}
+	return Definitions
+}
+
+// ActiveDefinitions returns the subset of Definitions not in disabled.
+// An empty or nil disabled map returns all Definitions unchanged.
+func ActiveDefinitions(disabled map[string]bool) []ToolDef {
+	if len(disabled) == 0 {
+		return Definitions
+	}
+	out := make([]ToolDef, 0, len(Definitions))
+	for _, d := range Definitions {
+		if !disabled[d.Name] {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // SystemPromptSuffix returns guidance text appended to each adapter's system prompt
@@ -109,6 +171,7 @@ Tool use guidance:
 - Use search_files to find files by name pattern (e.g. search_files("**/*.go")).
 - Use search_code to find where a function, type, or string is defined or used.
 - Use read_file only after you know which file you need.
+- Use bash to run tests, builds, or any shell command; always provide a clear description.
 - write_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
 `
 }
@@ -278,6 +341,50 @@ func ExecuteSearchFiles(pattern, basePath string) string {
 		return "(no matches)"
 	}
 	return strings.Join(matches, "\n")
+}
+
+// ExecuteBash runs command via the system shell (sh -c) with a 2-minute timeout.
+// stdout and stderr are combined; output is capped at bashOutputLimit bytes.
+func ExecuteBash(command string) string {
+	timeout := bashTimeout()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if runErr := cmd.Run(); runErr != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			output := out.String()
+			if output == "" {
+				return fmt.Sprintf("[error: command timed out after %s]", timeout)
+			}
+			return capOutput(output) + fmt.Sprintf("\n[error: command timed out after %s]", timeout)
+		}
+		// Non-zero exit is normal (e.g. test failures); return output + exit info.
+		output := out.String()
+		if output == "" {
+			return fmt.Sprintf("[exit: %v]", runErr)
+		}
+		return capOutput(output) + fmt.Sprintf("\n[exit: %v]", runErr)
+	}
+
+	output := out.String()
+	if output == "" {
+		return "(no output)"
+	}
+	return capOutput(output)
+}
+
+// capOutput truncates output at bashOutputLimit bytes with a notice.
+func capOutput(s string) string {
+	if len(s) <= bashOutputLimit {
+		return strings.TrimRight(s, "\n")
+	}
+	return strings.TrimRight(s[:bashOutputLimit], "\n") +
+		fmt.Sprintf("\n[truncated: output exceeded %d bytes]", bashOutputLimit)
 }
 
 // matchGlob matches a slash-separated path against a glob pattern that may

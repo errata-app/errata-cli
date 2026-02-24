@@ -3,9 +3,10 @@
 ## Project Overview
 
 **Errata** is a tool that sends programming prompts to multiple AI models simultaneously,
-runs each as a coding agent with `read_file` / `write_file` tools, shows live tool-event panels,
-lets the user select the best proposal, and applies the winner's file writes to disk.
-Every selection is logged for preference analysis over time.
+runs each as a full coding agent with six tools (`list_directory`, `search_files`, `search_code`,
+`read_file`, `bash`, `write_file`), shows live tool-event panels, lets the user select the best
+proposal, and applies the winner's file writes to disk. Every selection is logged for preference
+analysis over time.
 
 Two user surfaces share the same core engine:
 - **TUI** (`./errata`) — bubbletea REPL for terminal use
@@ -107,6 +108,10 @@ Both the TUI and the web textarea accept slash commands.
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/compact` | Summarize conversation history to free up context window |
 | `/models` | Query each configured provider for all available models; shows per-model pricing ($X in / $Y out /1M tokens); for OpenAI and Gemini shows only chat-capable models with a "N of M, chat only" count; caps display at 10 per provider with "… and N more" notice |
+| `/tools` | Show current tool status (`on`/`off` for each tool) |
+| `/tools off <name...>` | Disable one or more tools for this session (e.g. `/tools off bash`) |
+| `/tools on <name...>` | Re-enable specific tools |
+| `/tools reset` | Re-enable all tools |
 | `/stats` | Show preference win counts and per-model session cost |
 | `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
@@ -134,15 +139,20 @@ Both surfaces derive their lists from this single source; web commands are serve
 
 1. User types a prompt (TUI REPL or web textarea)
 2. `runner.RunAll()` fans out to all active adapters concurrently via goroutines
-3. Each adapter runs a multi-turn agentic loop:
-   - `read_file` calls execute immediately (path-traversal guarded, read-only)
-   - `write_file` calls are **intercepted** — stored as proposals, not written to disk
+3. Each adapter runs a multi-turn agentic loop using six tools:
+   - `list_directory(path, depth)` — directory tree (read-only, path-traversal guarded)
+   - `search_files(pattern, base_path)` — glob file search with `**` support (read-only)
+   - `search_code(pattern, path, file_glob)` — regex content search via `grep -rn` (read-only)
+   - `read_file(path)` — file contents (read-only, path-traversal guarded)
+   - `bash(command, description)` — shell execution with 2-minute timeout
+   - `write_file(path, content)` — **intercepted**: stored as proposals, not written to disk
    - Loop exits when the model stops calling tools
-4. Live tool-event panels render while goroutines run
-5. If no model proposed any file writes, responses are shown as text and the run ends
-6. Otherwise a compact diff view shows each model's proposed changes
-7. User selects a response; that model's `ProposedWrites` are applied via `tools.ApplyWrites()`
-8. Preference entry appended to `data/preferences.jsonl`
+4. Active tool set is configurable per-session with `/tools off <name>` / `/tools on <name>` / `/tools reset`
+5. Live tool-event panels render while goroutines run
+6. If no model proposed any file writes, responses are shown as text and the run ends
+7. Otherwise a compact diff view shows each model's proposed changes
+8. User selects a response; that model's `ProposedWrites` are applied via `tools.ApplyWrites()`
+9. Preference entry appended to `data/preferences.jsonl`
 
 Agent timeout: **5 minutes** per adapter (`context.WithTimeout`).
 
@@ -363,8 +373,13 @@ for {
     for _, block := range resp.Content {
         if block is text  → collect text, optionally emit AgentEvent{Type:"text"}
         if block is tool_use:
-            read_file  → ExecuteRead(), emit AgentEvent{Type:"reading"}, feed result back
-            write_file → append to proposed[], emit AgentEvent{Type:"writing"}, ack "queued"
+            // All tool dispatch goes through adapters.DispatchTool():
+            list_directory → ExecuteListDirectory(), emit AgentEvent{Type:"reading"}
+            search_files   → ExecuteSearchFiles(),   emit AgentEvent{Type:"reading"}
+            search_code    → ExecuteSearchCode(),    emit AgentEvent{Type:"reading"}
+            read_file      → ExecuteRead(),          emit AgentEvent{Type:"reading"}
+            bash           → ExecuteBash(),          emit AgentEvent{Type:"bash"}
+            write_file     → append to proposed[],  emit AgentEvent{Type:"writing"}, ack "queued"
     }
     if no tool calls → break
     append tool results to messages, loop
@@ -381,6 +396,14 @@ return ModelResponse{
 Tokens are accumulated across all turns (each turn re-sends context, so input grows).
 Writes are **never** executed inside the loop — they accumulate in `proposed` and are
 returned in `ModelResponse.ProposedWrites`.
+
+**Tool dispatch is centralised:** All adapters call `adapters.DispatchTool(name, args, onEvent, &proposed)`
+from `internal/adapters/common.go`. Adding a new tool requires only adding a `ToolDef` to
+`tools.Definitions` in `internal/tools/tools.go` and a new case in `DispatchTool`.
+
+**Tool availability is context-scoped:** The active tool set (after `/tools off` filtering) is stored
+in the request `context.Context` via `tools.WithActiveTools`. Each adapter reads it with
+`tools.ActiveToolsFromContext(ctx)` to build the tool list passed to the API.
 
 **`ModelID` is enforced by the runner:** `runner.RunAll` overwrites `resp.ModelID = a.ID()`
 after every `RunAgent` call. Adapters do not need to set it. Provider SDKs return resolved

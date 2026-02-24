@@ -71,6 +71,7 @@ let currentRunEl     = null;     // live DOM element for the ongoing run
 let currentPanelsGrid = null;    // panels grid inside currentRunEl
 let modelsData       = null;     // cached /api/available-models response
 let activeModelFilter = null;    // null = all configured; string[] = per-connection filter
+let disabledTools     = new Set(); // tool names currently disabled for this session
 
 const PANEL_CAP           = 50;  // per-provider display limit when not filtering
 const HISTORY_DISPLAY_CAP = 50;  // localStorage history entry limit
@@ -222,6 +223,18 @@ function handleServerMessage(msg) {
       history.push({ type: 'msg', text: active, cls: '' });
       saveHistory();
       appendHistoryMsg(active, '');
+      break;
+    }
+
+    case 'tools_set': {
+      // msg.models contains the active (enabled) tool names.
+      const allToolNames = msg.models || [];
+      // Recompute disabledTools from the inverse (server sends active list).
+      // We keep our disabledTools state in sync via set_tools requests, so just confirm.
+      const msg2 = allToolNames.length > 0
+        ? 'Active tools: ' + allToolNames.join(', ')
+        : 'All tools disabled.';
+      appendHistoryMsg(msg2, '');
       break;
     }
 
@@ -856,6 +869,32 @@ function handleSend() {
   // Handle /totalcost slash command.
   if (/^\/totalcost$/i.test(prompt)) {
     handleLocalCommand(`Total session cost: $${sessionCostUSD.toFixed(4)}`);
+    return;
+  }
+
+  // Handle /tools slash command.
+  if (/^\/tools(\s|$)/i.test(prompt)) {
+    inputEl.value = '';
+    const args = prompt.slice(6).trim().toLowerCase();
+    const parts = args.split(/\s+/).filter(Boolean);
+
+    if (args === '' || args === 'reset') {
+      if (args === 'reset') disabledTools.clear();
+      wsSend({ type: 'set_tools', disabled: [...disabledTools] });
+      return;
+    }
+    if ((parts[0] === 'on' || parts[0] === 'off') && parts.length > 1) {
+      const action = parts[0];
+      const names = parts.slice(1);
+      names.forEach(n => {
+        if (action === 'off') disabledTools.add(n);
+        else disabledTools.delete(n);
+      });
+      wsSend({ type: 'set_tools', disabled: [...disabledTools] });
+      return;
+    }
+    // Unknown /tools sub-command — show help inline.
+    handleLocalCommand('Usage: /tools  |  /tools off <name...>  |  /tools on <name...>  |  /tools reset');
     return;
   }
 

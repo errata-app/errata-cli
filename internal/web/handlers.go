@@ -33,11 +33,12 @@ type ModelSpec struct {
 
 // wsClientMsg is a message sent from the browser to the server.
 type wsClientMsg struct {
-	Type       string      `json:"type"`              // "run" | "select" | "cancel" | "set_models"
+	Type       string      `json:"type"`              // "run" | "select" | "cancel" | "set_models" | "set_tools"
 	Prompt     string      `json:"prompt,omitempty"`
 	ModelID    string      `json:"model_id,omitempty"`
 	ModelSpecs []ModelSpec `json:"model_ids,omitempty"`
 	Verbose    bool        `json:"verbose,omitempty"`
+	Disabled   []string    `json:"disabled,omitempty"` // for set_tools: list of disabled tool names
 }
 
 // wsServerMsg is a message sent from the server to the browser.
@@ -95,10 +96,11 @@ type wsConn struct {
 	send func(wsServerMsg)
 
 	mu             sync.Mutex
-	cancelRun      context.CancelFunc    // cancel for the most recent run; nil initially
+	cancelRun      context.CancelFunc     // cancel for the most recent run; nil initially
 	lastRun        []models.ModelResponse // results of last completed run
 	lastPrompt     string
 	activeAdapters []models.ModelAdapter // nil = use all s.adapters
+	disabledTools  map[string]bool       // tools excluded from runs; nil = all enabled
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +160,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			wc.wsHandleCompact()
 		case "clear_history":
 			wc.wsHandleClearHistory()
+		case "set_tools":
+			wc.wsHandleSetTools(msg)
 		}
 	}
 }
@@ -190,6 +194,8 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		oldCancel()
 	}
 
+	activeDefs := tools.ActiveDefinitions(wc.disabledTools)
+
 	go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, ads []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
 		defer cancel()
 
@@ -207,7 +213,7 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		}
 
 		rs := runner.RunAll(
-			runCtx, ads, effectiveHistories, prompt,
+			tools.WithActiveTools(runCtx, activeDefs), ads, effectiveHistories, prompt,
 			func(modelID string, e models.AgentEvent) {
 				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
 			},
@@ -329,6 +335,24 @@ func (wc *wsConn) wsHandleSetModels(msg wsClientMsg) {
 		ids[i] = a.ID()
 	}
 	wc.send(wsServerMsg{Type: "models_set", Models: ids})
+}
+
+func (wc *wsConn) wsHandleSetTools(msg wsClientMsg) {
+	if len(msg.Disabled) == 0 {
+		wc.disabledTools = nil
+	} else {
+		wc.disabledTools = make(map[string]bool, len(msg.Disabled))
+		for _, name := range msg.Disabled {
+			wc.disabledTools[name] = true
+		}
+	}
+	// Reply with the names of currently active tools so the client can sync state.
+	active := tools.ActiveDefinitions(wc.disabledTools)
+	names := make([]string, len(active))
+	for i, d := range active {
+		names[i] = d.Name
+	}
+	wc.send(wsServerMsg{Type: "tools_set", Models: names})
 }
 
 func (wc *wsConn) wsHandleCancel() {

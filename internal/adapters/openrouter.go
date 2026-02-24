@@ -38,7 +38,7 @@ func (a *OpenRouterAdapter) RunAgent(
 		option.WithBaseURL(openRouterBaseURL),
 	)
 
-	toolParams := buildOpenAITools()
+	toolParams := buildOpenAITools(ctx)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
 	messages = append(messages, openai.SystemMessage(tools.SystemPromptSuffix()))
 	for _, turn := range history {

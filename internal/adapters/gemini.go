@@ -36,7 +36,7 @@ func (a *GeminiAdapter) RunAgent(
 	}
 
 	config := &genai.GenerateContentConfig{
-		Tools:             buildGeminiTools(),
+		Tools:             buildGeminiTools(ctx),
 		SystemInstruction: genai.NewContentFromText(tools.SystemPromptSuffix(), ""),
 	}
 	contents := make([]*genai.Content, 0, len(history)+1)
@@ -96,9 +96,9 @@ func (a *GeminiAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "google/"+a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
-func buildGeminiTools() []*genai.Tool {
+func buildGeminiTools(ctx context.Context) []*genai.Tool {
 	var decls []*genai.FunctionDeclaration
-	for _, def := range tools.Definitions {
+	for _, def := range tools.ActiveToolsFromContext(ctx) {
 		props := map[string]*genai.Schema{}
 		for name, p := range def.Properties {
 			props[name] = &genai.Schema{

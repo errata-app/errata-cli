@@ -164,6 +164,44 @@ func TestWrap_LogsEntryWithAllFields(t *testing.T) {
 	assert.Empty(t, entry.Response.Error)
 }
 
+// TestWrapAll_WithRealLogger_WrapsAllAdapters verifies that WrapAll with a non-nil
+// logger returns a slice of the same length with wrapped adapters.
+func TestWrapAll_WithRealLogger_WrapsAllAdapters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.jsonl")
+	l, err := logging.NewLogger(path)
+	require.NoError(t, err)
+	defer l.Close()
+
+	a1 := &stubAdapter{id: "m1", response: models.ModelResponse{ModelID: "m1"}}
+	a2 := &stubAdapter{id: "m2", response: models.ModelResponse{ModelID: "m2"}}
+	wrapped := logging.WrapAll([]models.ModelAdapter{a1, a2}, "sess", l)
+
+	require.Len(t, wrapped, 2)
+	assert.Equal(t, "m1", wrapped[0].ID())
+	assert.Equal(t, "m2", wrapped[1].ID())
+
+	// Each wrapped adapter should log an entry when run.
+	wrapped[0].RunAgent(context.Background(), nil, "p1", func(models.AgentEvent) {}) //nolint:errcheck
+	wrapped[1].RunAgent(context.Background(), nil, "p2", func(models.AgentEvent) {}) //nolint:errcheck
+	require.NoError(t, l.Close())
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	assert.Len(t, lines, 2)
+}
+
+// TestLoggingAdapter_ID verifies that the ID() method delegates to the inner adapter.
+func TestLoggingAdapter_ID(t *testing.T) {
+	l, err := logging.NewLogger(filepath.Join(t.TempDir(), "test.jsonl"))
+	require.NoError(t, err)
+	defer l.Close()
+
+	inner := &stubAdapter{id: "my-model"}
+	wrapped := logging.Wrap(inner, "s", l)
+	assert.Equal(t, "my-model", wrapped.ID())
+}
+
 // TestWrap_AppendsTwoEntries verifies that successive runs append new JSONL
 // lines and do not truncate or overwrite previous entries.
 func TestWrap_AppendsTwoEntries(t *testing.T) {

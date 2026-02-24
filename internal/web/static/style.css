@@ -193,6 +193,7 @@ body {
 .panel-event-label              { min-width: 52px; }
 .panel-event.reading .panel-event-label { color: var(--accent-0); }
 .panel-event.writing .panel-event-label { color: var(--accent-2); }
+.panel-event.bash    .panel-event-label { color: #00af87; }
 .panel-event.error   .panel-event-label { color: var(--diff-remove); }
 .panel-event.text    .panel-event-label { color: var(--text-dim); font-style: italic; }
 .panel-event-data { color: var(--text-dim); }

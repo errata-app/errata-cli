@@ -10,8 +10,8 @@ it to disk. Every choice is logged so you can see which models you actually pref
 
 1. You type a prompt in the Errata REPL
 2. All configured models receive it concurrently, each running as a coding agent
-3. Models read your files on demand and propose file changes
-4. Live panels show each model's tool activity (reading/writing) in real time
+3. Models navigate your codebase using a full tool set: list directories, search files by name or content, read files, run shell commands, and propose file changes
+4. Live panels show each model's tool activity in real time
 5. Once all models finish, a diff view shows exactly what each one wants to change
 6. You pick a winner by number — that model's writes are applied to disk
 7. Your choice is appended to a local preference log
@@ -112,10 +112,12 @@ Read src/utils/retry.py and add exponential backoff to the retry decorator
 Live panels show each model's tool activity as it works:
 
 ```
-╭── claude-sonnet-4-6  running… ──╮  ╭── gpt-4o  running… ──────────╮
-│ reading  src/utils/retry.py      │  │ reading  src/utils/retry.py   │
-│ writing  src/utils/retry.py      │  │ writing  src/utils/retry.py   │
-╰──────────────────────────────────╯  ╰───────────────────────────────╯
+╭── claude-sonnet-4-6  running… ────╮  ╭── gpt-4o  running… ────────────╮
+│ reading  .                         │  │ reading  .                      │
+│ reading  **/*.go                   │  │ reading  src/utils/retry.py     │
+│ bash     go test ./...             │  │ writing  src/utils/retry.py     │
+│ writing  src/utils/retry.py        │  │                                 │
+╰────────────────────────────────────╯  ╰─────────────────────────────────╯
 ```
 
 Once all models finish, a diff view shows exactly what each proposed, along with latency,
@@ -158,6 +160,10 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/compact` | Summarize conversation history to free up context window |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/models` | List all available models from each configured provider with per-model pricing; OpenAI and Gemini show only chat-capable models ("N of M, chat only"); up to 10 per provider with "… and N more" if truncated |
+| `/tools` | Show current tool status (`on`/`off` for each tool) |
+| `/tools off <name...>` | Disable one or more tools for this session (e.g. `/tools off bash`) |
+| `/tools on <name...>` | Re-enable specific tools |
+| `/tools reset` | Re-enable all tools |
 | `/stats` | Show preference win counts and per-model session cost |
 | `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict subsequent runs to specific model(s) |
@@ -310,7 +316,7 @@ errata/
 │   ├── runner/
 │   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories()
 │   ├── tools/
-│   │   └── tools.go         # FileWrite, tool schemas, ExecuteRead(), ApplyWrites()
+│   │   └── tools.go         # ToolDef, Definitions, ExecuteRead/ListDirectory/SearchFiles/SearchCode/Bash/ApplyWrites
 │   ├── diff/
 │   │   └── diff.go          # Compute() → FileDiff (Myers algorithm via sergi/go-diff)
 │   ├── history/
