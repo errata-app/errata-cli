@@ -84,36 +84,52 @@ func ListAvailableModels(ctx context.Context, cfg config.Config) []ProviderModel
 	return results
 }
 
-// ─── per-provider listing ─────────────────────────────────────────────────────
+// ─── shared HTTP helpers ──────────────────────────────────────────────────────
 
-func listAnthropicModels(ctx context.Context, apiKey string) ([]string, int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.anthropic.com/v1/models", nil)
+// doGetJSON issues a GET to url, calls configReq (if non-nil) to add headers,
+// and decodes the JSON response body into dst.
+func doGetJSON(ctx context.Context, url string, configReq func(*http.Request), dst any) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, 0, err
+		return err
 	}
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
+	if configReq != nil {
+		configReq(req)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return err
 	}
 	defer resp.Body.Close()
+	return json.NewDecoder(resp.Body).Decode(dst)
+}
 
+// fetchDataIDs issues a GET and decodes the common {"data":[{"id":"..."}]} shape,
+// returning the list of IDs.
+func fetchDataIDs(ctx context.Context, url string, configReq func(*http.Request)) ([]string, error) {
 	var body struct {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, 0, err
+	if err := doGetJSON(ctx, url, configReq, &body); err != nil {
+		return nil, err
 	}
-
 	ids := make([]string, len(body.Data))
 	for i, m := range body.Data {
 		ids[i] = m.ID
 	}
-	return ids, len(ids), nil
+	return ids, nil
+}
+
+// ─── per-provider listing ─────────────────────────────────────────────────────
+
+func listAnthropicModels(ctx context.Context, apiKey string) ([]string, int, error) {
+	ids, err := fetchDataIDs(ctx, "https://api.anthropic.com/v1/models", func(r *http.Request) {
+		r.Header.Set("x-api-key", apiKey)
+		r.Header.Set("anthropic-version", "2023-06-01")
+	})
+	return ids, len(ids), err
 }
 
 // isOpenAIChatModel reports whether id is a chat-completion-capable OpenAI model.
@@ -132,24 +148,14 @@ func isOpenAIChatModel(id string) bool {
 }
 
 func listOpenAIModels(ctx context.Context, apiKey string) ([]string, int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.openai.com/v1/models", nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
 	var body struct {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := doGetJSON(ctx, "https://api.openai.com/v1/models", func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+apiKey)
+	}, &body); err != nil {
 		return nil, 0, err
 	}
 
@@ -166,25 +172,14 @@ func listOpenAIModels(ctx context.Context, apiKey string) ([]string, int, error)
 }
 
 func listGeminiModels(ctx context.Context, apiKey string) ([]string, int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET",
-		"https://generativelanguage.googleapis.com/v1beta/models?key="+apiKey, nil)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
 	var body struct {
 		Models []struct {
 			Name                       string   `json:"name"`
 			SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
 		} `json:"models"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	url := "https://generativelanguage.googleapis.com/v1beta/models?key=" + apiKey
+	if err := doGetJSON(ctx, url, nil, &body); err != nil {
 		return nil, 0, err
 	}
 
@@ -204,63 +199,25 @@ func listGeminiModels(ctx context.Context, apiKey string) ([]string, int, error)
 }
 
 func listOpenRouterModels(ctx context.Context, apiKey string) ([]string, int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://openrouter.ai/api/v1/models", nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	var body struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, 0, err
-	}
-
-	ids := make([]string, len(body.Data))
-	for i, m := range body.Data {
-		ids[i] = m.ID
-	}
+	ids, err := fetchDataIDs(ctx, "https://openrouter.ai/api/v1/models", func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+apiKey)
+	})
 	sort.Strings(ids)
-	return ids, len(ids), nil
+	return ids, len(ids), err
 }
 
 func listLiteLLMModels(ctx context.Context, baseURL, apiKey string) ([]string, int, error) {
 	url := strings.TrimSuffix(baseURL, "/") + "/models"
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	ids, err := fetchDataIDs(ctx, url, func(r *http.Request) {
+		if apiKey != "" {
+			r.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	var body struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, 0, err
-	}
-
-	ids := make([]string, len(body.Data))
-	for i, m := range body.Data {
-		ids[i] = "litellm/" + m.ID
+	for i, id := range ids {
+		ids[i] = "litellm/" + id
 	}
 	sort.Strings(ids)
 	return ids, len(ids), nil
