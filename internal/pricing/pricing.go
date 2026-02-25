@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -137,17 +138,31 @@ func ProviderQualifiedID(provider, modelID string) string {
 //   - -2024-08-06   (YYYY-MM-DD — OpenAI)
 var dateSuffixRE = regexp.MustCompile(`-(\d{4}-\d{2}-\d{2}|\d{8})$`)
 
+// digitHyphenRE matches a hyphen between two single digits (e.g. "4-5" in
+// "claude-opus-4-5"). Used to normalize Anthropic-style version hyphens
+// ("claude-opus-4-5") to OpenRouter-style dots ("claude-opus-4.5").
+var digitHyphenRE = regexp.MustCompile(`(\d)-(\d)`)
+
 // stripDateSuffix removes a trailing date suffix from a model ID, if present.
 // Returns the original string unchanged when no date suffix is found.
 func stripDateSuffix(id string) string {
 	return dateSuffixRE.ReplaceAllString(id, "")
 }
 
-// resolvePricing looks up pricing for qualifiedID using a four-step fallback:
+// hyphensToDots replaces hyphens between adjacent digits with dots.
+// This normalizes Anthropic-style version hyphens ("claude-opus-4-5") to
+// the OpenRouter-style dot notation ("claude-opus-4.5").
+func hyphensToDots(id string) string {
+	return digitHyphenRE.ReplaceAllString(id, "${1}.${2}")
+}
+
+// resolvePricing looks up pricing for qualifiedID using a six-step fallback:
 //  1. Exact match on qualified ID (e.g. "anthropic/claude-sonnet-4-6-20250714")
 //  2. Bare portion after "/" (e.g. "claude-sonnet-4-6-20250714")
 //  3. Qualified ID with date suffix stripped (e.g. "anthropic/claude-sonnet-4-6")
 //  4. Bare ID with date suffix stripped (e.g. "claude-sonnet-4-6")
+//  5. Qualified ID with digit-hyphens replaced by dots (e.g. "anthropic/claude-opus-4.5")
+//  6. Bare ID with digit-hyphens replaced by dots (e.g. "claude-opus-4.5")
 func resolvePricing(qualifiedID string) (modelPricing, bool) {
 	// 1. Exact match on qualified ID.
 	if p, ok := lookupPricing(qualifiedID); ok {
@@ -164,15 +179,34 @@ func resolvePricing(qualifiedID string) (modelPricing, bool) {
 	}
 
 	// 3. Strip date suffix from qualified ID.
-	if stripped := stripDateSuffix(qualifiedID); stripped != qualifiedID {
-		if p, ok := lookupPricing(stripped); ok {
+	strippedQualified := stripDateSuffix(qualifiedID)
+	if strippedQualified != qualifiedID {
+		if p, ok := lookupPricing(strippedQualified); ok {
 			return p, true
 		}
 	}
 
 	// 4. Strip date suffix from bare ID.
-	if strippedBare := stripDateSuffix(bare); strippedBare != bare {
+	strippedBare := stripDateSuffix(bare)
+	if strippedBare != bare {
 		if p, ok := lookupPricing(strippedBare); ok {
+			return p, true
+		}
+	}
+
+	// 5. Normalize digit-hyphens to dots on qualified ID (with date already stripped).
+	// Covers the Anthropic "claude-opus-4-5" → OpenRouter "claude-opus-4.5" mismatch.
+	dottedQualified := hyphensToDots(strippedQualified)
+	if dottedQualified != strippedQualified {
+		if p, ok := lookupPricing(dottedQualified); ok {
+			return p, true
+		}
+	}
+
+	// 6. Same normalization on bare ID.
+	dottedBare := hyphensToDots(strippedBare)
+	if dottedBare != strippedBare {
+		if p, ok := lookupPricing(dottedBare); ok {
 			return p, true
 		}
 	}
@@ -224,6 +258,13 @@ func lookupPricing(key string) (modelPricing, bool) {
 	return p, ok
 }
 
+// roundPMT rounds a per-million-token price to 6 decimal places, which is
+// enough to eliminate IEEE 754 noise (e.g. 0.7999999999999999 → 0.8) while
+// preserving meaningful sub-cent precision.
+func roundPMT(v float64) float64 {
+	return math.Round(v*1e6) / 1e6
+}
+
 // ─── OpenRouter fetch ─────────────────────────────────────────────────────────
 
 const openRouterModelsURL = "https://openrouter.ai/api/v1/models"
@@ -268,17 +309,19 @@ func fetchOpenRouterPricing() (map[string]modelPricing, error) {
 			continue // skip free / unknown-price models
 		}
 		// OpenRouter prices are per-token; convert to per-million-token.
+		// Round to 6 decimal places to eliminate IEEE 754 floating-point noise
+		// (e.g. 0.0000008 * 1e6 = 0.7999999999999999 → 0.8).
 		p := modelPricing{
-			InputPMT:      inp * 1_000_000,
-			OutputPMT:     out * 1_000_000,
+			InputPMT:      roundPMT(inp * 1_000_000),
+			OutputPMT:     roundPMT(out * 1_000_000),
 			ContextWindow: m.ContextLength,
 		}
 		// Cache rates are optional — only populated when the provider exposes them.
 		if cr, err := strconv.ParseFloat(m.Pricing.InputCacheRead, 64); err == nil && cr > 0 {
-			p.CacheReadPMT = cr * 1_000_000
+			p.CacheReadPMT = roundPMT(cr * 1_000_000)
 		}
 		if cw, err := strconv.ParseFloat(m.Pricing.InputCacheWrite, 64); err == nil && cw > 0 {
-			p.CacheWritePMT = cw * 1_000_000
+			p.CacheWritePMT = roundPMT(cw * 1_000_000)
 		}
 		table[m.ID] = p
 	}
