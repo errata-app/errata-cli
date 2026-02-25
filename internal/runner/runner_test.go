@@ -512,3 +512,45 @@ func TestCompactHistories_MultipleAdaptersIndependent(t *testing.T) {
 		t.Errorf("m2 summary wrong: %q", result["m2"][1].Content)
 	}
 }
+
+// ─── Snapshot event suppression ──────────────────────────────────────────────
+
+// snapshotAdapter emits a mix of regular events and a "snapshot" event.
+type snapshotAdapter struct {
+	id string
+}
+
+func (s *snapshotAdapter) ID() string { return s.id }
+func (s *snapshotAdapter) RunAgent(
+	ctx context.Context,
+	history []models.ConversationTurn,
+	prompt string,
+	onEvent func(models.AgentEvent),
+) (models.ModelResponse, error) {
+	onEvent(models.AgentEvent{Type: "reading", Data: "file.go"})
+	onEvent(models.AgentEvent{Type: "snapshot", Data: `{"text":"partial","input_tokens":10}`})
+	onEvent(models.AgentEvent{Type: "writing", Data: "out.go"})
+	return models.ModelResponse{ModelID: s.id, Text: "done"}, nil
+}
+
+func TestRunAll_SnapshotEventsNotForwarded(t *testing.T) {
+	a := &snapshotAdapter{id: "m"}
+
+	var mu sync.Mutex
+	var received []models.AgentEvent
+	runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(_ string, e models.AgentEvent) {
+		mu.Lock()
+		received = append(received, e)
+		mu.Unlock()
+	}, true) // verbose=true so all non-snapshot events pass through
+
+	// "reading" and "writing" should be forwarded; "snapshot" should NOT.
+	for _, e := range received {
+		if e.Type == "snapshot" {
+			t.Error("snapshot event should not be forwarded to caller's onEvent")
+		}
+	}
+	assert.Len(t, received, 2)
+	assert.Equal(t, "reading", received[0].Type)
+	assert.Equal(t, "writing", received[1].Type)
+}

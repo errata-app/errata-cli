@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/suarezc/errata/internal/adapters"
+	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/diff"
 	"github.com/suarezc/errata/internal/history"
@@ -91,6 +92,7 @@ type responseData struct {
 	CostUSD             float64     `json:"cost_usd"`
 	ContextWindowTokens int64       `json:"context_window_tokens"`
 	Error               string      `json:"error,omitempty"`
+	Interrupted         bool        `json:"interrupted,omitempty"`
 	ProposedWrites      []writeData `json:"proposed_writes"`
 }
 
@@ -174,6 +176,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			wc.wsHandleSetModels(msg)
 		case "cancel":
 			wc.wsHandleCancel()
+		case "resume":
+			wc.wsHandleResume()
 		case "compact":
 			wc.wsHandleCompact()
 		case "clear_history":
@@ -285,6 +289,7 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+			CheckpointPath:   checkpoint.DefaultPath,
 		})
 		toolCtx = tools.WithSubagentDispatcher(toolCtx, subagent.NewDispatcher(
 			ads, cfg, mcpDispatchers,
@@ -306,7 +311,21 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		)
 
 		if runCtx.Err() != nil {
-			wc.send(wsServerMsg{Type: "cancelled"})
+			// Save checkpoint for interrupted responses.
+			adapterIDs := make([]string, len(ads))
+			for i, ad := range ads {
+				adapterIDs[i] = ad.ID()
+			}
+			if cp := checkpoint.Build(prompt, adapterIDs, rs, verbose); cp != nil {
+				_ = checkpoint.Save(checkpoint.DefaultPath, *cp)
+			}
+
+			wc.mu.Lock()
+			wc.lastRun = rs
+			wc.lastPrompt = prompt
+			wc.mu.Unlock()
+
+			wc.send(wsServerMsg{Type: "cancelled", Responses: buildCompletePayload(rs)})
 			return
 		}
 
@@ -498,6 +517,183 @@ func (wc *wsConn) wsHandleCancel() {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (wc *wsConn) wsHandleResume() {
+	cp, err := checkpoint.Load(checkpoint.DefaultPath)
+	if err != nil {
+		wc.send(wsServerMsg{Type: "error", Message: "checkpoint error: " + err.Error()})
+		return
+	}
+	if cp == nil {
+		wc.send(wsServerMsg{Type: "error", Message: "No interrupted run to resume."})
+		return
+	}
+
+	var completedResponses []models.ModelResponse
+	var toRerunIDs []string
+	for _, snap := range cp.Responses {
+		if snap.Completed {
+			completedResponses = append(completedResponses, snap.ToModelResponse())
+		} else {
+			toRerunIDs = append(toRerunIDs, snap.ModelID)
+		}
+	}
+
+	if len(toRerunIDs) == 0 {
+		_ = checkpoint.Clear(checkpoint.DefaultPath)
+		wc.send(wsServerMsg{Type: "error", Message: "All models completed. No resume needed."})
+		return
+	}
+
+	// Resolve adapters for models to re-run.
+	var rerunAdapters []models.ModelAdapter
+	for _, id := range toRerunIDs {
+		var found models.ModelAdapter
+		for _, ad := range wc.s.adapters {
+			if ad.ID() == id {
+				found = ad
+				break
+			}
+		}
+		if found == nil {
+			newAd, err := adapters.NewAdapter(id, wc.s.cfg)
+			if err != nil {
+				wc.send(wsServerMsg{Type: "error", Message: "Cannot create adapter for " + id + ": " + err.Error()})
+				return
+			}
+			found = newAd
+		}
+		rerunAdapters = append(rerunAdapters, found)
+	}
+
+	_ = checkpoint.Clear(checkpoint.DefaultPath)
+
+	// Launch a resume run using the same pattern as wsHandleRun but with filtered adapters.
+	prompt := cp.Prompt
+	verbose := cp.Verbose
+	ads := rerunAdapters
+
+	cfg := wc.s.cfg
+	timeout := cfg.AgentTimeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+
+	wc.mu.Lock()
+	oldCancel := wc.cancelRun
+	runCtx, cancel := context.WithTimeout(wc.ctx, timeout)
+	wc.cancelRun = cancel
+	wc.mu.Unlock()
+
+	wc.s.histMu.RLock()
+	histSnapshot := make(map[string][]models.ConversationTurn, len(wc.s.histories))
+	for k, v := range wc.s.histories {
+		cp2 := make([]models.ConversationTurn, len(v))
+		copy(cp2, v)
+		histSnapshot[k] = cp2
+	}
+	wc.s.histMu.RUnlock()
+
+	if oldCancel != nil {
+		oldCancel()
+	}
+
+	var toolAllowlist []string
+	var bashPrefixes []string
+	sandboxFilesystem := ""
+	sandboxNetwork := ""
+	projectRoot := ""
+	if wc.s.rec != nil {
+		if wc.s.rec.Tools != nil {
+			toolAllowlist = wc.s.rec.Tools.Allowlist
+			bashPrefixes = wc.s.rec.Tools.BashPrefixes
+		}
+		sandboxFilesystem = wc.s.rec.Sandbox.Filesystem
+		sandboxNetwork = wc.s.rec.Sandbox.Network
+		projectRoot = wc.s.rec.Metadata.ProjectRoot
+	}
+	activeDefs := tools.DefinitionsAllowed(toolAllowlist, wc.disabledTools)
+	activeDefs = append(activeDefs, tools.FilterDefs(wc.s.mcpDefs, wc.disabledTools)...)
+	if sandboxFilesystem == "read_only" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{tools.WriteToolName: true, tools.EditToolName: true})
+	}
+	if sandboxNetwork == "none" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{tools.WebFetchToolName: true, tools.WebSearchToolName: true})
+	}
+	mcpDispatchers := wc.s.mcpDispatchers
+
+	go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, ads []models.ModelAdapter, histSnapshot map[string][]models.ConversationTurn) {
+		defer cancel()
+
+		toolCtx := tools.WithActiveTools(runCtx, activeDefs)
+		toolCtx = tools.WithMCPDispatchers(toolCtx, mcpDispatchers)
+		toolCtx = tools.WithBashPrefixes(toolCtx, bashPrefixes)
+		toolCtx = sandbox.WithConfig(toolCtx, sandbox.Config{
+			Filesystem: sandboxFilesystem, Network: sandboxNetwork, ProjectRoot: projectRoot,
+		})
+		toolCtx = runner.WithRunOptions(toolCtx, runner.RunOptions{
+			Timeout: cfg.AgentTimeout, CompactThreshold: cfg.CompactThreshold, MaxHistoryTurns: cfg.MaxHistoryTurns,
+			CheckpointPath: checkpoint.DefaultPath,
+		})
+		toolCtx = tools.WithSubagentDispatcher(toolCtx, subagent.NewDispatcher(
+			ads, cfg, mcpDispatchers,
+			func(modelID string, e models.AgentEvent) {
+				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+			},
+		))
+		toolCtx = tools.WithSubagentDepth(toolCtx, 0)
+		if wc.seed != nil {
+			toolCtx = tools.WithSeed(toolCtx, *wc.seed)
+		}
+
+		collector := output.NewCollector()
+		rs := runner.RunAll(
+			toolCtx, ads, histSnapshot, prompt,
+			collector.WrapOnEvent(func(modelID string, e models.AgentEvent) {
+				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+			}),
+			verbose,
+		)
+
+		// Merge completed (from checkpoint) + fresh re-run responses.
+		allResponses := append(completedResponses, rs...)
+
+		if runCtx.Err() != nil {
+			// Save updated checkpoint if interrupted again.
+			allIDs := make([]string, len(allResponses))
+			for i, r := range allResponses {
+				allIDs[i] = r.ModelID
+			}
+			if cpNew := checkpoint.Build(prompt, allIDs, allResponses, verbose); cpNew != nil {
+				_ = checkpoint.Save(checkpoint.DefaultPath, *cpNew)
+			}
+			wc.send(wsServerMsg{Type: "cancelled", Responses: buildCompletePayload(allResponses)})
+			return
+		}
+
+		// Clear checkpoint on successful completion.
+		_ = checkpoint.Clear(checkpoint.DefaultPath)
+
+		adapterIDs := make([]string, len(allResponses))
+		for i, r := range allResponses {
+			adapterIDs[i] = r.ModelID
+		}
+
+		wc.mu.Lock()
+		wc.lastRun = allResponses
+		wc.lastPrompt = prompt
+		wc.mu.Unlock()
+
+		wc.s.histMu.Lock()
+		wc.s.histories = runner.AppendHistory(histSnapshot, adapterIDs, allResponses, prompt)
+		if err := history.Save(wc.s.histPath, wc.s.histories); err != nil {
+			log.Printf("web: could not save history: %v", err)
+		}
+		wc.s.histMu.Unlock()
+
+		wc.send(wsServerMsg{Type: "complete", Responses: buildCompletePayload(allResponses)})
+	}(prompt, runCtx, cancel, verbose, ads, histSnapshot)
 }
 
 func (wc *wsConn) wsHandleCompact() {
@@ -699,6 +895,7 @@ func buildCompletePayload(responses []models.ModelResponse) []responseData {
 			CostUSD:             resp.CostUSD,
 			ContextWindowTokens: pricing.ContextWindowTokens(resp.ModelID),
 			Error:               errText,
+			Interrupted:         resp.Interrupted,
 			ProposedWrites:      writes,
 		}
 	}

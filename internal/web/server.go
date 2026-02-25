@@ -3,6 +3,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
@@ -35,8 +36,9 @@ type Server struct {
 	mcpDefs        []tools.ToolDef
 	mcpDispatchers map[string]tools.MCPDispatcher
 
-	histMu    sync.RWMutex
-	histories map[string][]models.ConversationTurn // shared across all browser connections
+	histMu     sync.RWMutex
+	histories  map[string][]models.ConversationTurn // shared across all browser connections
+	httpServer *http.Server                         // set by Start; used by Shutdown
 }
 
 // New creates a Server. A fresh session ID is generated on each call.
@@ -83,5 +85,16 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("GET /api/available-models", s.handleAvailableModels)
 	mux.HandleFunc("GET /api/tools", s.handleToolsList)
 
-	return http.ListenAndServe(addr, mux)
+	s.httpServer = &http.Server{Addr: addr, Handler: mux}
+	return s.httpServer.ListenAndServe()
+}
+
+// Shutdown gracefully shuts down the HTTP server, allowing active WebSocket
+// connections to close (which triggers per-connection context cancellation and
+// checkpoint saves for any active runs).
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpServer == nil {
+		return nil
+	}
+	return s.httpServer.Shutdown(ctx)
 }

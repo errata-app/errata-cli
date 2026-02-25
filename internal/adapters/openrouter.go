@@ -68,6 +68,9 @@ func (a *OpenRouterAdapter) RunAgent(
 		}
 		resp, err := client.Chat.Completions.New(ctx, params)
 		if err != nil {
+			if ctx.Err() != nil {
+				return BuildInterruptedResponse(a.modelID, a.modelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed, err), err
+			}
 			return BuildErrorResponse(a.modelID, a.modelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}
 
@@ -108,6 +111,7 @@ func (a *OpenRouterAdapter) RunAgent(
 				messages = append(messages, openai.ToolMessage(result, tc.ID))
 			}
 		}
+		EmitSnapshot(onEvent, a.modelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed)
 	}
 
 	return BuildSuccessResponse(a.modelID, a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil

@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/suarezc/errata/internal/adapters"
+	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
@@ -60,6 +61,8 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 		return a.handleClearCmd()
 	case "/compact":
 		return a.handleCompactCmd()
+	case "/resume":
+		return a.handleResumeCmd()
 	case "/stats":
 		return a.handleStatsCmd()
 	case "/totalcost":
@@ -290,6 +293,9 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	sessionID := a.sessionID
 	rec := a.recipe
 
+	baseCtx, cancelFn := context.WithCancel(context.Background())
+	a.cancelRun = cancelFn
+
 	return a, func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
@@ -301,7 +307,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 						Type: "text", Data: "[auto-compacting history…]",
 					}})
 					effectiveHistories = runner.CompactHistories(
-						context.Background(), []models.ModelAdapter{ad},
+						baseCtx, []models.ModelAdapter{ad},
 						effectiveHistories, func(id string, e models.AgentEvent) {
 							prog.Send(agentEventMsg{modelID: id, event: e})
 						},
@@ -310,7 +316,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 				}
 			}
 		}
-		runCtx := tools.WithActiveTools(context.Background(), activeDefs)
+		runCtx := tools.WithActiveTools(baseCtx, activeDefs)
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
 		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
@@ -322,6 +328,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+			CheckpointPath:   checkpoint.DefaultPath,
 		})
 		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
 			ads, cfg, mcpDispatchers,
@@ -342,6 +349,18 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			verbose,
 		)
 
+		// Save checkpoint immediately if interrupted (before bubbletea processes
+		// the message — critical for surviving SIGTERM).
+		if baseCtx.Err() != nil {
+			panelIDs := make([]string, len(ads))
+			for i, ad := range ads {
+				panelIDs[i] = ad.ID()
+			}
+			if cp := checkpoint.Build(trimmed, panelIDs, responses, verbose); cp != nil {
+				_ = checkpoint.Save(checkpoint.DefaultPath, *cp)
+			}
+		}
+
 		toolNames := make([]string, len(activeDefs))
 		for i, d := range activeDefs {
 			toolNames[i] = d.Name
@@ -352,6 +371,198 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		}
 
 		return runCompleteMsg{responses: responses, compactedHistories: compacted, report: report}
+	}
+}
+
+func (a App) handleResumeCmd() (tea.Model, tea.Cmd) {
+	cp, err := checkpoint.Load(checkpoint.DefaultPath)
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Error loading checkpoint: %v", err)), nil
+	}
+	if cp == nil {
+		return a.withMessage("No interrupted run to resume."), nil
+	}
+
+	var completedResponses []models.ModelResponse
+	var toRerunIDs []string
+	for _, snap := range cp.Responses {
+		if snap.Completed {
+			completedResponses = append(completedResponses, snap.ToModelResponse())
+		} else {
+			toRerunIDs = append(toRerunIDs, snap.ModelID)
+		}
+	}
+
+	if len(toRerunIDs) == 0 {
+		_ = checkpoint.Clear(checkpoint.DefaultPath)
+		return a.withMessage("All models from the last run completed. No resume needed."), nil
+	}
+
+	var rerunAdapters []models.ModelAdapter
+	for _, id := range toRerunIDs {
+		var found models.ModelAdapter
+		for _, ad := range a.adapters {
+			if ad.ID() == id {
+				found = ad
+				break
+			}
+		}
+		if found == nil {
+			newAd, err := adapters.NewAdapter(id, a.cfg)
+			if err != nil {
+				return a.withMessage(fmt.Sprintf("Cannot create adapter for %q: %v", id, err)), nil
+			}
+			found = newAd
+		}
+		rerunAdapters = append(rerunAdapters, found)
+	}
+
+	_ = checkpoint.Clear(checkpoint.DefaultPath)
+	return a.launchResumeRun(cp.Prompt, rerunAdapters, completedResponses, cp.Verbose)
+}
+
+func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) {
+	a.lastPrompt = prompt
+	a.mode = modeRunning
+	a.panels = nil
+	a.panelIdx = make(map[string]int)
+
+	// Add panels for already-completed responses (marked done immediately).
+	for i, resp := range completedResponses {
+		ps := newPanelState(resp.ModelID, i)
+		ps.done = true
+		ps.latencyMS = resp.LatencyMS
+		ps.inputTokens = resp.InputTokens
+		ps.outputTokens = resp.OutputTokens
+		ps.costUSD = resp.CostUSD
+		a.panels = append(a.panels, ps)
+		a.panelIdx[resp.ModelID] = i
+	}
+	// Add panels for models being re-run.
+	for j, ad := range rerunAdapters {
+		idx := len(completedResponses) + j
+		ps := newPanelState(ad.ID(), idx)
+		ps.histTokens = runner.EstimateHistoryTokens(a.conversationHistories[ad.ID()])
+		a.panels = append(a.panels, ps)
+		a.panelIdx[ad.ID()] = idx
+	}
+
+	a.feed = append(a.feed, feedItem{
+		kind:   "run",
+		prompt: "[resume] " + prompt,
+		panels: a.panels,
+	})
+	a = a.withFeedRebuilt(true)
+
+	ads := rerunAdapters
+	prog := a.prog
+	histories := a.conversationHistories
+	activeDefs := tools.DefinitionsAllowed(a.toolAllowlist, a.disabledTools)
+	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
+	if a.sandboxFilesystem == "read_only" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
+			tools.WriteToolName: true,
+			tools.EditToolName:  true,
+		})
+	}
+	if a.sandboxNetwork == "none" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
+			tools.WebFetchToolName:  true,
+			tools.WebSearchToolName: true,
+		})
+	}
+	mcpDispatchers := a.mcpDispatchers
+	bashPrefixes := a.bashPrefixes
+	contextStrategy := a.contextStrategy
+	sandboxFilesystem := a.sandboxFilesystem
+	sandboxNetwork := a.sandboxNetwork
+	projectRoot := a.projectRoot
+	cfg := a.cfg
+	seed := a.seed
+	sessionID := a.sessionID
+	rec := a.recipe
+
+	baseCtx, cancelFn := context.WithCancel(context.Background())
+	a.cancelRun = cancelFn
+
+	return a, func() tea.Msg {
+		effectiveHistories := histories
+		var compacted map[string][]models.ConversationTurn
+		if contextStrategy != "manual" && contextStrategy != "off" {
+			for _, ad := range ads {
+				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
+					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
+						Type: "text", Data: "[auto-compacting history…]",
+					}})
+					effectiveHistories = runner.CompactHistories(
+						baseCtx, []models.ModelAdapter{ad},
+						effectiveHistories, func(id string, e models.AgentEvent) {
+							prog.Send(agentEventMsg{modelID: id, event: e})
+						},
+					)
+					compacted = effectiveHistories
+				}
+			}
+		}
+		runCtx := tools.WithActiveTools(baseCtx, activeDefs)
+		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
+		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
+		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
+			Filesystem:  sandboxFilesystem,
+			Network:     sandboxNetwork,
+			ProjectRoot: projectRoot,
+		})
+		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
+			Timeout:          cfg.AgentTimeout,
+			CompactThreshold: cfg.CompactThreshold,
+			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+			CheckpointPath:   checkpoint.DefaultPath,
+		})
+		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
+			ads, cfg, mcpDispatchers,
+			func(modelID string, e models.AgentEvent) {
+				prog.Send(agentEventMsg{modelID: modelID, event: e})
+			},
+		))
+		runCtx = tools.WithSubagentDepth(runCtx, 0)
+		if seed != nil {
+			runCtx = tools.WithSeed(runCtx, *seed)
+		}
+		collector := output.NewCollector()
+		responses := runner.RunAll(
+			runCtx, ads, effectiveHistories, prompt,
+			collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
+				prog.Send(agentEventMsg{modelID: modelID, event: event})
+			}),
+			verbose,
+		)
+
+		// Save checkpoint if interrupted.
+		if baseCtx.Err() != nil {
+			// Merge completed + new for checkpoint so completed models stay preserved.
+			allResp := append(completedResponses, responses...)
+			allIDs := make([]string, len(allResp))
+			for i, r := range allResp {
+				allIDs[i] = r.ModelID
+			}
+			if cp := checkpoint.Build(prompt, allIDs, allResp, verbose); cp != nil {
+				_ = checkpoint.Save(checkpoint.DefaultPath, *cp)
+			}
+		}
+
+		// Merge completed responses (from checkpoint) with fresh re-run responses.
+		allResponses := append(completedResponses, responses...)
+
+		toolNames := make([]string, len(activeDefs))
+		for i, d := range activeDefs {
+			toolNames[i] = d.Name
+		}
+		report := output.BuildReport(sessionID, rec, prompt, allResponses, collector, toolNames)
+		if _, err := output.Save(output.DefaultDir, report); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
+		}
+
+		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, report: report}
 	}
 }
 

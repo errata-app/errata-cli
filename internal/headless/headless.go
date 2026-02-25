@@ -13,6 +13,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/criteria"
 	"github.com/suarezc/errata/internal/models"
@@ -105,6 +106,33 @@ func Run(ctx context.Context, opts Options) (*RunReport, error) {
 		})
 
 		responses := runner.RunAll(runCtx, opts.Adapters, histories, taskPrompt, onEvent, opts.Verbose)
+
+		// Check for context cancellation (SIGINT/SIGTERM).
+		if ctx.Err() != nil {
+			adapterIDs := make([]string, len(opts.Adapters))
+			for j, a := range opts.Adapters {
+				adapterIDs[j] = a.ID()
+			}
+			if cp := checkpoint.Build(taskPrompt, adapterIDs, responses, opts.Verbose); cp != nil {
+				if err := checkpoint.Save(checkpoint.DefaultPath, *cp); err != nil {
+					fmt.Fprintf(w, "warning: could not save checkpoint: %v\n", err)
+				} else {
+					fmt.Fprintf(w, "\nCheckpoint saved to %s. Use `errata run` again to resume.\n", checkpoint.DefaultPath)
+				}
+			}
+			// Print partial results for the interrupted task.
+			for _, resp := range responses {
+				status := "done"
+				if resp.Interrupted {
+					status = "interrupted"
+				} else if resp.Error != "" {
+					status = "error"
+				}
+				fmt.Fprintf(w, "  %-22s %-11s  %5dms  $%.4f\n",
+					resp.ModelID, status, resp.LatencyMS, resp.CostUSD)
+			}
+			return nil, fmt.Errorf("interrupted at task %d/%d", i+1, len(rec.Tasks))
+		}
 
 		// Build the per-task output report.
 		toolNames := toolNameList(activeDefs)
@@ -238,6 +266,7 @@ func buildRunContext(parent context.Context, opts Options, rec *recipe.Recipe, a
 		Timeout:          opts.Cfg.AgentTimeout,
 		CompactThreshold: opts.Cfg.CompactThreshold,
 		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
+		CheckpointPath:   checkpoint.DefaultPath,
 	})
 	ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
 		opts.Adapters, opts.Cfg, opts.MCPDispatchers,

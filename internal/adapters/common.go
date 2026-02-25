@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -156,6 +157,26 @@ func DispatchTool(
 	return "", false
 }
 
+// EmitSnapshot sends a "snapshot" event with the current turn state for incremental
+// checkpoint persistence. Called at each turn boundary inside the agentic loop.
+func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
+	textParts []string, start time.Time, totalInput, totalOutput int64,
+	proposed []tools.FileWrite) {
+	snap := models.PartialSnapshot{
+		Text:         join(textParts),
+		InputTokens:  totalInput,
+		OutputTokens: totalOutput,
+		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
+		LatencyMS:    time.Since(start).Milliseconds(),
+		Writes:       proposed,
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return
+	}
+	onEvent(models.AgentEvent{Type: "snapshot", Data: string(data)})
+}
+
 // BuildErrorResponse constructs a ModelResponse for an API error encountered mid-loop.
 // qualifiedID is the provider-prefixed model ID passed to CostUSD
 // (e.g. "anthropic/claude-sonnet-4-6"); pass the bare modelID for OpenRouter/LiteLLM.
@@ -168,6 +189,24 @@ func BuildErrorResponse(modelID, qualifiedID string, start time.Time, totalInput
 		OutputTokens: totalOutput,
 		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
 		Error:        err.Error(),
+	}
+}
+
+// BuildInterruptedResponse constructs a ModelResponse for a run that was cancelled mid-flight.
+// It preserves the partial text, proposed writes, and token counts accumulated before cancellation.
+func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
+	start time.Time, totalInput, totalOutput int64,
+	proposed []tools.FileWrite, err error) models.ModelResponse {
+	return models.ModelResponse{
+		ModelID:        modelID,
+		Text:           join(textParts),
+		LatencyMS:      time.Since(start).Milliseconds(),
+		InputTokens:    totalInput,
+		OutputTokens:   totalOutput,
+		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
+		ProposedWrites: proposed,
+		Error:          err.Error(),
+		Interrupted:    true,
 	}
 }
 

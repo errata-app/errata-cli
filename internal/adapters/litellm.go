@@ -86,6 +86,9 @@ func (a *LiteLLMAdapter) RunAgent(
 		}
 		resp, err := client.Chat.Completions.New(ctx, params)
 		if err != nil {
+			if ctx.Err() != nil {
+				return BuildInterruptedResponse(a.modelID, a.bareModelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed, err), err
+			}
 			return BuildErrorResponse(a.modelID, a.bareModelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}
 
@@ -126,6 +129,7 @@ func (a *LiteLLMAdapter) RunAgent(
 				messages = append(messages, openai.ToolMessage(result, tc.ID))
 			}
 		}
+		EmitSnapshot(onEvent, a.bareModelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed)
 	}
 
 	return BuildSuccessResponse(a.modelID, a.bareModelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil

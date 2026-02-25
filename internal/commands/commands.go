@@ -26,6 +26,7 @@ var All = []Command{
 	{"/all",       "Reset to all models",                                false},
 	{"/config",    "View/edit configuration; /config <section> jumps to section", false},
 	{"/set",       "Set config: /set <path> <value>; bare path shows current",    false},
+	{"/resume",    "Resume interrupted run — re-runs only interrupted models", false},
 	{"/stats",     "Show preference wins and session cost",             false},
 	{"/totalcost", "Show total inference cost for this session",        false},
 	{"/exit",      "Exit",                                              true},

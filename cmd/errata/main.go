@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/suarezc/errata/internal/adapters"
@@ -159,7 +161,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	_ = sessionID // web server creates its own session ID per connection
 	addr := ":8080"
 	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
-	return web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg, mcpDefs, mcpDispatchers, warnings, rec).Start(addr)
+
+	srv := web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg, mcpDefs, mcpDispatchers, warnings, rec)
+
+	// Graceful shutdown on SIGINT/SIGTERM. Active WebSocket connections will
+	// have their contexts cancelled, triggering per-run checkpoint saves.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "\nshutting down…")
+		srv.Shutdown(context.Background())
+	}()
+
+	return srv.Start(addr)
 }
 
 func runHeadless(cmd *cobra.Command, args []string) error {
@@ -187,7 +202,18 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	outputDir, _ := cmd.Flags().GetString("output-dir")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
-	_, err := headless.Run(context.Background(), headless.Options{
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "\ninterrupted — saving checkpoint…")
+		cancel()
+	}()
+
+	_, err := headless.Run(ctx, headless.Options{
 		Recipe:         rec,
 		Adapters:       ads,
 		SessionID:      sessionID,
