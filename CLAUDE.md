@@ -44,7 +44,7 @@ errata/
 │   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
 │   ├── adapters/
 │   │   ├── registry.go      # NewAdapter(), NewAdapterForProvider(), ListAdapters() — routing
-│   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildInterruptedResponse, BuildSuccessResponse — shared helpers
+│   │   ├── common.go        # DispatchTool, EmitSnapshot, BuildErrorResponse, BuildInterruptedResponse, BuildSuccessResponse — shared helpers
 │   │   ├── list.go          # ListAvailableModels(), ProviderModels — per-provider model catalogue fetch
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
@@ -69,7 +69,7 @@ errata/
 │   ├── logging/
 │   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
 │   ├── checkpoint/
-│   │   └── checkpoint.go    # Save(), Load(), Clear(), Build() — interrupted run state persistence
+│   │   └── checkpoint.go    # Save(), Load(), Clear(), Build(), IncrementalSaver — interrupted run state persistence
 │   ├── commands/
 │   │   └── commands.go      # Command{Name,Desc,TUIOnly}; All, Web() — canonical slash command registry
 │   ├── prompthistory/
@@ -180,6 +180,13 @@ button (web), or SIGINT/SIGTERM (headless). Cancellation propagates via `context
 through all active adapter API calls. Partial results (accumulated text, proposed writes,
 token counts) are preserved in the response with `Interrupted: true`. A checkpoint is saved
 to `data/checkpoint.json` so the run can be resumed with `/resume`.
+
+**Incremental checkpointing (crash resilience):** In addition to the post-run checkpoint,
+each adapter emits a `"snapshot"` `AgentEvent` at every turn boundary (after tool dispatch,
+before the next API call). The runner intercepts these via `checkpoint.IncrementalSaver`,
+which atomically flushes per-model state to `data/checkpoint.json` on each update. This
+ensures partial work survives ungraceful termination (SIGKILL, OOM kill, power loss) —
+the checkpoint file always reflects the most recent complete turn for each model.
 
 ---
 
@@ -367,7 +374,7 @@ commands       ← stdlib only
 prompthistory  ← stdlib only
 checkpoint     ← models, tools (for FileWrite conversion)
 adapters       ← models, pricing, tools, config, provider SDKs
-runner         ← models, pricing
+runner         ← models, pricing, checkpoint
 diff           ← os, strings, sergi/go-diff
 history        ← models, encoding/json, os
 logging        ← models (ModelAdapter, ModelResponse), stdlib
@@ -411,7 +418,8 @@ for {
             write_file     → append to proposed[],  emit AgentEvent{Type:"writing"}, ack "queued"
     }
     if no tool calls → break
-    append tool results to messages, loop
+    append tool results to messages
+    EmitSnapshot(onEvent, qualifiedID, textParts, start, totalInput, totalOutput, proposed)
 }
 return ModelResponse{
     InputTokens:  totalInput,
@@ -425,6 +433,12 @@ return ModelResponse{
 Tokens are accumulated across all turns (each turn re-sends context, so input grows).
 Writes are **never** executed inside the loop — they accumulate in `proposed` and are
 returned in `ModelResponse.ProposedWrites`.
+
+**Turn-boundary snapshots:** `EmitSnapshot` (in `common.go`) serialises a `models.PartialSnapshot`
+to JSON and emits it as `AgentEvent{Type: "snapshot"}` at the end of every loop iteration.
+The runner intercepts these events for incremental checkpointing and never forwards them to
+the UI. The snapshot is not emitted on the final turn (no tool calls → `break` before reaching
+the end of the loop body); `MarkCompleted` handles final state instead.
 
 **Tool dispatch is centralised:** All adapters call `adapters.DispatchTool(ctx, name, args, onEvent, &proposed)`
 from `internal/adapters/common.go`. `DispatchTool` first checks MCP dispatchers in context, then

@@ -279,6 +279,11 @@ If you interrupt again during a resume, the checkpoint is updated and you can `/
 once more. The checkpoint is cleared automatically after any successful (non-interrupted)
 run completes.
 
+**Crash resilience:** Checkpoints are written incrementally at each adapter turn boundary,
+not just after the run finishes. This means partial work survives even ungraceful
+termination (kill -9, OOM kill, power loss) — use `/resume` to pick up from the last
+completed turn.
+
 ---
 
 ## MCP tool servers
@@ -479,7 +484,7 @@ errata/
 │   ├── preferences/
 │   │   └── preferences.go   # Record(), LoadAll(), Summarize()
 │   ├── checkpoint/
-│   │   └── checkpoint.go    # Save/Load/Clear/Build — interrupted run state for /resume
+│   │   └── checkpoint.go    # Save/Load/Clear/Build/IncrementalSaver — interrupted run state for /resume
 │   ├── commands/
 │   │   └── commands.go      # canonical slash command registry (TUI + web)
 │   ├── prompthistory/
