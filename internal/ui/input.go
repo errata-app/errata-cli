@@ -8,6 +8,10 @@ import (
 )
 
 func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Config overlay captures all keystrokes.
+	if a.configOverlayActive {
+		return a.handleConfigKey(msg)
+	}
 	// Search mode captures all keystrokes.
 	if a.searchActive {
 		return a.handleSearchKey(msg)
@@ -76,6 +80,12 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 			}
+		}
+		// Try @mention completion (e.g. @gpt<TAB>).
+		if completed, ok := a.tryMentionComplete(val); ok {
+			a.input.SetValue(completed)
+			a.input.CursorEnd()
+			return a, nil
 		}
 	}
 

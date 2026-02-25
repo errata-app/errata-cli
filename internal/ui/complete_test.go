@@ -179,3 +179,84 @@ func TestTryArgComplete_BareModelNoArgs(t *testing.T) {
 		t.Error("expected no arg completion for bare /model without space")
 	}
 }
+
+func TestTryArgComplete_SubsetSingleMatch(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"gpt-4o"}})
+	result, ok := a.tryArgComplete("/subset gpt")
+	if !ok {
+		t.Fatal("expected completion")
+	}
+	if result != "/subset gpt-4o " {
+		t.Errorf("got %q, want %q", result, "/subset gpt-4o ")
+	}
+}
+
+func TestTryArgComplete_SubsetMultipleMatches(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"claude-opus-4-6"}})
+	result, ok := a.tryArgComplete("/subset claude")
+	if !ok {
+		t.Fatal("expected completion")
+	}
+	if result != "/subset claude-" {
+		t.Errorf("got %q, want %q", result, "/subset claude-")
+	}
+}
+
+// ─── @mention completion tests ──────────────────────────────────────────────
+
+func TestTryMentionComplete_SingleMatch(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"gpt-4o"}})
+	result, ok := a.tryMentionComplete("@gpt")
+	if !ok {
+		t.Fatal("expected completion")
+	}
+	if result != "@gpt-4o " {
+		t.Errorf("got %q, want %q", result, "@gpt-4o ")
+	}
+}
+
+func TestTryMentionComplete_MultipleMatch(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"claude-opus-4-6"}})
+	result, ok := a.tryMentionComplete("@claude")
+	if !ok {
+		t.Fatal("expected completion")
+	}
+	if result != "@claude-" {
+		t.Errorf("got %q, want %q", result, "@claude-")
+	}
+}
+
+func TestTryMentionComplete_NoMatch(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{uiStub{"gpt-4o"}})
+	_, ok := a.tryMentionComplete("@xyz")
+	if ok {
+		t.Error("expected no completion for unknown prefix")
+	}
+}
+
+func TestTryMentionComplete_MidSentence(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"gpt-4o"}})
+	result, ok := a.tryMentionComplete("hello @gpt")
+	if !ok {
+		t.Fatal("expected completion")
+	}
+	if result != "hello @gpt-4o " {
+		t.Errorf("got %q, want %q", result, "hello @gpt-4o ")
+	}
+}
+
+func TestTryMentionComplete_NoBareAt(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{uiStub{"gpt-4o"}})
+	_, ok := a.tryMentionComplete("@")
+	if ok {
+		t.Error("expected no completion for bare @")
+	}
+}
+
+func TestTryMentionComplete_NotAtWord(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{uiStub{"gpt-4o"}})
+	_, ok := a.tryMentionComplete("hello world")
+	if ok {
+		t.Error("expected no completion for non-@ word")
+	}
+}

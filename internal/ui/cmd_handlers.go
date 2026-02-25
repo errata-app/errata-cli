@@ -37,6 +37,18 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	if lower == "/seed" || strings.HasPrefix(lower, "/seed ") {
 		return a.handleSeedCommand(strings.TrimSpace(trimmed[len("/seed"):]))
 	}
+	if lower == "/subset" || strings.HasPrefix(lower, "/subset ") {
+		return a.handleSubsetCommand(strings.TrimSpace(trimmed[len("/subset"):]))
+	}
+	if lower == "/all" {
+		return a.handleAllCommand()
+	}
+	if lower == "/config" || strings.HasPrefix(lower, "/config ") {
+		return a.handleConfigCommand(strings.TrimSpace(trimmed[len("/config"):]))
+	}
+	if lower == "/set" || strings.HasPrefix(lower, "/set ") {
+		return a.handleSetCommand(strings.TrimSpace(trimmed[len("/set"):]))
+	}
 	switch lower {
 	case "/exit", "/quit":
 		return a, tea.Quit
@@ -54,6 +66,35 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 		return a.withMessage(fmt.Sprintf("Total session cost: $%.4f", a.totalCostUSD)), nil
 	case "/help":
 		return a.withMessage(helpText()), nil
+	}
+	// Parse @mentions for transient per-message model targeting.
+	mention := ParseMentions(trimmed, a.modelIDCandidates())
+	if len(mention.Errors) > 0 {
+		return a.withMessage(fmt.Sprintf("No model matching %q in current recipe.", mention.Errors[0])), nil
+	}
+	if len(mention.ModelIDs) > 0 {
+		if mention.Prompt == "" {
+			return a.withMessage("No prompt text after @mention(s)."), nil
+		}
+		var mentionAdapters []models.ModelAdapter
+		for _, id := range mention.ModelIDs {
+			var found models.ModelAdapter
+			for _, ad := range a.adapters {
+				if ad.ID() == id {
+					found = ad
+					break
+				}
+			}
+			if found == nil {
+				newAd, err := adapters.NewAdapter(id, a.cfg)
+				if err != nil {
+					return a.withMessage(fmt.Sprintf("Cannot create adapter for %q: %v", id, err)), nil
+				}
+				found = newAd
+			}
+			mentionAdapters = append(mentionAdapters, found)
+		}
+		return a.launchRunTargeted(mention.Prompt, mentionAdapters)
 	}
 	return a.launchRun(trimmed)
 }
@@ -178,8 +219,14 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) {
 }
 
 func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
+	return a.launchRunTargeted(trimmed, nil)
+}
+
+func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdapter) (tea.Model, tea.Cmd) {
 	toRun := a.adapters
-	if a.activeAdapters != nil {
+	if mentionTargets != nil {
+		toRun = mentionTargets
+	} else if a.activeAdapters != nil {
 		toRun = a.activeAdapters
 	}
 
@@ -429,6 +476,84 @@ func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {
 	return a.withMessage("Active models: " + strings.Join(ids, ", ")), nil
 }
 
+func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) {
+	if a.sessionRecipe == nil {
+		a.sessionRecipe = cloneRecipe(a.recipe)
+	}
+	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	a.configOverlayActive = true
+	a.configSelectedIdx = 0
+	a.configExpandedIdx = -1
+
+	if args != "" {
+		lowerArgs := strings.ToLower(args)
+		if lowerArgs == "reset" {
+			a.sessionRecipe = cloneRecipe(a.recipe)
+			a.recipeModified = false
+			a.applySessionRecipe()
+			a.configOverlayActive = false
+			return a.withMessage("Configuration reset to recipe defaults."), nil
+		}
+		for i, sec := range a.configSections {
+			if strings.EqualFold(sec.Name, lowerArgs) {
+				a.configSelectedIdx = i
+				a.configExpandedIdx = i
+				// Populate the editor state for the expanded section.
+				switch sec.Kind {
+				case "list":
+					switch sec.Name {
+					case "models":
+						a.configListItems = buildModelsList(a.sessionRecipe, a.adapters, a.activeAdapters)
+					case "tools":
+						a.configListItems = buildToolsList(a.disabledTools)
+					case "mcp-servers":
+						var items []listItem
+						for _, s := range a.sessionRecipe.MCPServers {
+							items = append(items, listItem{Label: s.Name + ": " + s.Command, Active: true})
+						}
+						a.configListItems = items
+					}
+					a.configListCursor = 0
+				case "scalar":
+					a.configScalarFields = buildScalarFields(sec.Name, a.sessionRecipe)
+					a.configScalarCursor = 0
+					a.configEditBuf = ""
+				case "text":
+					a.configEditBuf = a.sessionRecipe.SystemPrompt
+				}
+				break
+			}
+		}
+	}
+	return a, nil
+}
+
+func (a App) handleSetCommand(args string) (tea.Model, tea.Cmd) {
+	if args == "" {
+		return a.withMessage("Usage: /set <path> [value]"), nil
+	}
+	if a.sessionRecipe == nil {
+		a.sessionRecipe = cloneRecipe(a.recipe)
+	}
+
+	parts := strings.SplitN(args, " ", 2)
+	path := parts[0]
+	if len(parts) == 1 {
+		// Query mode: show current value.
+		v := getConfigValue(a.sessionRecipe, path)
+		return a.withMessage(fmt.Sprintf("%s = %s", path, v)), nil
+	}
+
+	value := parts[1]
+	err := setConfigValue(a.sessionRecipe, path, value)
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Error: %v", err)), nil
+	}
+	a.recipeModified = true
+	a.applySessionRecipe()
+	return a.withMessage(fmt.Sprintf("Set %s = %s", path, value)), nil
+}
+
 func (a App) handleSeedCommand(args string) (tea.Model, tea.Cmd) {
 	if args == "" {
 		a.seed = nil
@@ -440,6 +565,26 @@ func (a App) handleSeedCommand(args string) (tea.Model, tea.Cmd) {
 	}
 	a.seed = &n
 	return a.withMessage(fmt.Sprintf("Seed set to %d.", n)), nil
+}
+
+func (a App) handleSubsetCommand(args string) (tea.Model, tea.Cmd) {
+	if args == "" {
+		// Bare /subset: show current targeting state.
+		if a.activeAdapters == nil {
+			return a.withMessage("Model targeting: all models active"), nil
+		}
+		var ids []string
+		for _, ad := range a.activeAdapters {
+			ids = append(ids, ad.ID())
+		}
+		return a.withMessage("Model targeting: " + strings.Join(ids, ", ")), nil
+	}
+	// With args: same validation and resolution as /model.
+	return a.handleModelCommand(args)
+}
+
+func (a App) handleAllCommand() (tea.Model, tea.Cmd) {
+	return a.handleModelCommand("")
 }
 
 func helpText() string {
@@ -464,7 +609,8 @@ func fmtPrice(v float64) string {
 }
 
 // formatAvailableModels formats a ListAvailableModels result for display.
-func formatAvailableModels(results []adapters.ProviderModels) string {
+// If activeSet is non-nil, models in the set are marked with *.
+func formatAvailableModels(results []adapters.ProviderModels, activeSet map[string]bool) string {
 	if len(results) == 0 {
 		return "No provider API keys configured."
 	}
@@ -490,11 +636,15 @@ func formatAvailableModels(results []adapters.ProviderModels) string {
 			shown = r.Models[:cap]
 		}
 		for _, id := range shown {
+			marker := ""
+			if activeSet != nil && activeSet[id] {
+				marker = " *"
+			}
 			qid := pricing.ProviderQualifiedID(r.Provider, id)
 			if in, out, ok := pricing.PricingFor(qid); ok {
-				fmt.Fprintf(&sb, "\n  %s  (%s in / %s out /1M)", id, fmtPrice(in), fmtPrice(out))
+				fmt.Fprintf(&sb, "\n  %s%s  (%s in / %s out /1M)", id, marker, fmtPrice(in), fmtPrice(out))
 			} else {
-				fmt.Fprintf(&sb, "\n  %s", id)
+				fmt.Fprintf(&sb, "\n  %s%s", id, marker)
 			}
 		}
 		if n > cap {
