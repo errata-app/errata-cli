@@ -95,8 +95,11 @@ func (a App) tryArgComplete(val string) (string, bool) {
 	}
 	cmds := []argCmd{
 		{"/model ", a.modelIDCandidates()},
+		{"/subset ", a.modelIDCandidates()},
 		{"/tools on ", a.toolNameCandidates()},
 		{"/tools off ", a.toolNameCandidates()},
+		{"/config ", interactiveSections},
+		{"/set ", configPathCandidates()},
 	}
 
 	for _, cmd := range cmds {
@@ -117,6 +120,34 @@ func (a App) tryArgComplete(val string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// tryMentionComplete attempts tab-completion when the last word starts with @.
+// Returns the completed input line and true if completion occurred.
+func (a App) tryMentionComplete(val string) (string, bool) {
+	lw := lastWord(val)
+	if !strings.HasPrefix(lw, "@") || len(lw) < 2 {
+		return "", false
+	}
+	partial := lw[1:] // strip the @
+	replacement, ok := completeArg(partial, a.modelIDCandidates())
+	if !ok {
+		return "", false
+	}
+	// Replace the last word with @<completed>
+	prefix := val[:len(val)-len(lw)]
+	return prefix + "@" + replacement, true
+}
+
+// renderModelHints writes matching model ID suggestions to sb.
+func (a App) renderModelHints(sb *strings.Builder, partial string, nameStyle lipgloss.Style) {
+	lp := strings.ToLower(partial)
+	for _, id := range a.modelIDCandidates() {
+		if strings.HasPrefix(strings.ToLower(id), lp) {
+			sb.WriteByte('\n')
+			sb.WriteString(nameStyle.Render("  " + id))
+		}
+	}
 }
 
 // renderToolHints writes matching tool name suggestions to sb.

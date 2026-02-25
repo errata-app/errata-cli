@@ -936,3 +936,47 @@ func TestCompactCompleteMsg_UpdatesHistories(t *testing.T) {
 	}
 	assert.True(t, found, "expected 'History compacted.' in feed")
 }
+
+// ── Group: Judge UX — rating prompt wording ─────────────────────────────────
+
+func TestRatingView_ShowsModelName(t *testing.T) {
+	ads := []models.ModelAdapter{&scenarioAdapter{id: "claude-sonnet-4-6"}}
+	a := newAppForTest(t, ads)
+	setupRunState(&a, "test prompt", []string{"claude-sonnet-4-6"})
+
+	// Simulate runCompleteMsg with a single OK text response (no writes).
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "claude-sonnet-4-6", Text: "Here is my answer.", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	require.Equal(t, modeRating, a.mode)
+
+	view := a.View()
+	assert.Contains(t, view, "claude-sonnet-4-6's response:")
+	assert.NotContains(t, view, "Rate this response:")
+}
+
+func TestRatingView_FallbackWhenNoOKResponse(t *testing.T) {
+	ads := []models.ModelAdapter{&scenarioAdapter{id: "m1"}}
+	a := newAppForTest(t, ads)
+	// Manually set mode and responses with no OK responses (defensive case).
+	a.mode = modeRating
+	a.responses = []models.ModelResponse{
+		{ModelID: "m1", Error: "failed"},
+	}
+
+	view := a.View()
+	// Falls back to generic "this" when no OK response found.
+	assert.Contains(t, view, "this's response:")
+}
+
+func TestSelectionMenu_UsesComparisonWording(t *testing.T) {
+	responses := []models.ModelResponse{
+		{ModelID: "m1", Text: "answer 1", LatencyMS: 100},
+		{ModelID: "m2", Text: "answer 2", LatencyMS: 200},
+	}
+	menu := RenderSelectionMenu(responses)
+	assert.Contains(t, menu, "Vote for a response:")
+	assert.NotContains(t, menu, "Rate")
+}

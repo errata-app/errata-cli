@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/models"
@@ -32,7 +34,7 @@ func TestFormatAvailableModels_SmallProviderListsModels(t *testing.T) {
 	results := []adapters.ProviderModels{
 		{Provider: "Anthropic", Models: []string{"claude-opus-4-6", "claude-sonnet-4-6"}},
 	}
-	out := formatAvailableModels(results)
+	out := formatAvailableModels(results, nil)
 	if !strings.Contains(out, "Anthropic (2)") {
 		t.Errorf("expected 'Anthropic (2)' in output, got:\n%s", out)
 	}
@@ -53,7 +55,7 @@ func TestFormatAvailableModels_TruncatesAtCap(t *testing.T) {
 	results := []adapters.ProviderModels{
 		{Provider: "OpenRouter", Models: ms, TotalCount: total},
 	}
-	out := formatAvailableModels(results)
+	out := formatAvailableModels(results, nil)
 
 	// Header should reflect the full count.
 	wantCount := fmt.Sprintf("OpenRouter (%d)", total)
@@ -83,7 +85,7 @@ func TestFormatAvailableModels_FilteredProviderShowsChatOnlyLabel(t *testing.T) 
 	results := []adapters.ProviderModels{
 		{Provider: "OpenAI", Models: ms, TotalCount: 47},
 	}
-	out := formatAvailableModels(results)
+	out := formatAvailableModels(results, nil)
 	if !strings.Contains(out, "15 of 47") {
 		t.Errorf("expected '15 of 47' in output, got:\n%s", out)
 	}
@@ -96,7 +98,7 @@ func TestFormatAvailableModels_ProviderErrorShown(t *testing.T) {
 	results := []adapters.ProviderModels{
 		{Provider: "Gemini", Err: fmt.Errorf("connection refused")},
 	}
-	out := formatAvailableModels(results)
+	out := formatAvailableModels(results, nil)
 	if !strings.Contains(out, "Gemini") {
 		t.Errorf("expected provider name in output, got:\n%s", out)
 	}
@@ -106,11 +108,11 @@ func TestFormatAvailableModels_ProviderErrorShown(t *testing.T) {
 }
 
 func TestFormatAvailableModels_EmptyResultsNotEmpty(t *testing.T) {
-	out := formatAvailableModels(nil)
+	out := formatAvailableModels(nil, nil)
 	if out == "" {
 		t.Error("expected non-empty output for nil results")
 	}
-	out2 := formatAvailableModels([]adapters.ProviderModels{})
+	out2 := formatAvailableModels([]adapters.ProviderModels{}, nil)
 	if out2 == "" {
 		t.Error("expected non-empty output for empty results")
 	}
@@ -124,7 +126,7 @@ func TestFormatAvailableModels_ExactlyAtCap(t *testing.T) {
 	results := []adapters.ProviderModels{
 		{Provider: "OpenAI", Models: ms},
 	}
-	out := formatAvailableModels(results)
+	out := formatAvailableModels(results, nil)
 	// At exactly the cap, all models are listed and there is no truncation notice.
 	if !strings.Contains(out, "m-0") {
 		t.Errorf("at cap boundary should still list models, got:\n%s", out)
@@ -136,7 +138,7 @@ func TestFormatAvailableModels_MultipleProviders(t *testing.T) {
 		{Provider: "Anthropic", Models: []string{"claude-sonnet-4-6"}},
 		{Provider: "OpenAI", Models: []string{"gpt-4o", "gpt-4o-mini"}},
 	}
-	out := formatAvailableModels(results)
+	out := formatAvailableModels(results, nil)
 	if !strings.Contains(out, "Anthropic") {
 		t.Errorf("expected Anthropic in output, got:\n%s", out)
 	}
@@ -508,4 +510,137 @@ func TestHandleStatsCmd_WithSessionCost(t *testing.T) {
 	if !strings.Contains(msg, "0.0042") {
 		t.Errorf("expected cost in stats output, got: %s", msg)
 	}
+}
+
+// ─── handleSubsetCommand / handleAllCommand ─────────────────────────────────
+
+func TestHandleSubsetCommand_BareShowsCurrent_AllModels(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+
+	result, _ := a.handleSubsetCommand("")
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	if !strings.Contains(last, "all models active") {
+		t.Errorf("expected 'all models active', got: %s", last)
+	}
+}
+
+func TestHandleSubsetCommand_BareShowsCurrent_WithSubset(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+	a.activeAdapters = []models.ModelAdapter{uiStub{"m1"}}
+
+	result, _ := a.handleSubsetCommand("")
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	if !strings.Contains(last, "m1") {
+		t.Errorf("expected 'm1' in subset display, got: %s", last)
+	}
+}
+
+func TestHandleSubsetCommand_WithArgsSetsFilter(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}, uiStub{"m3"}}
+	a := newAppForTest(t, ads)
+
+	result, _ := a.handleSubsetCommand("m1 m3")
+	app := result.(App)
+	require.Len(t, app.activeAdapters, 2)
+	assert.Equal(t, "m1", app.activeAdapters[0].ID())
+	assert.Equal(t, "m3", app.activeAdapters[1].ID())
+}
+
+func TestHandleAllCommand_ResetsFilter(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+	a.activeAdapters = []models.ModelAdapter{uiStub{"m1"}}
+
+	result, _ := a.handleAllCommand()
+	app := result.(App)
+	assert.Nil(t, app.activeAdapters, "expected activeAdapters to be nil after /all")
+}
+
+func TestHandleSubsetCommand_InvalidModelShowsError(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+
+	result, _ := a.handleSubsetCommand("nonexistent")
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	if !strings.Contains(last, "Unknown model") {
+		t.Errorf("expected error message, got: %s", last)
+	}
+}
+
+func TestSubsetIndicator_ShownInView(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+	a.activeAdapters = []models.ModelAdapter{uiStub{"m1"}}
+
+	view := a.View()
+	assert.Contains(t, view, "[subset: m1]")
+}
+
+func TestSubsetIndicator_NotShownWhenAllModels(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+
+	view := a.View()
+	assert.NotContains(t, view, "[subset:")
+}
+
+// ─── formatAvailableModels with active set ──────────────────────────────────
+
+func TestFormatAvailableModels_ActiveIndicators(t *testing.T) {
+	results := []adapters.ProviderModels{
+		{Provider: "Test", Models: []string{"m1", "m2", "m3"}},
+	}
+	activeSet := map[string]bool{"m1": true, "m3": true}
+	out := formatAvailableModels(results, activeSet)
+	assert.Contains(t, out, "m1 *")
+	assert.Contains(t, out, "m3 *")
+	assert.NotContains(t, out, "m2 *")
+}
+
+func TestFormatAvailableModels_NilActiveSet_NoIndicators(t *testing.T) {
+	results := []adapters.ProviderModels{
+		{Provider: "Test", Models: []string{"m1", "m2"}},
+	}
+	out := formatAvailableModels(results, nil)
+	assert.NotContains(t, out, " *")
+}
+
+// ─── @mention integration ───────────────────────────────────────────────────
+
+func TestHandlePrompt_MentionErrorShowsMessage(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+	result, _ := a.handlePrompt("@nonexistent fix bug")
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "No model matching")
+	assert.Contains(t, last, "nonexistent")
+}
+
+func TestHandlePrompt_MentionOnlyNoPromptShowsError(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+	result, _ := a.handlePrompt("@m1")
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "No prompt text")
+}
+
+func TestHandlePrompt_MentionDoesNotChangeActiveAdapters(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+	// Set a persistent subset.
+	a.activeAdapters = []models.ModelAdapter{uiStub{"m2"}}
+
+	// @mention resolves m1 for this run only.
+	result, _ := a.handlePrompt("@m1 hello")
+	app := result.(App)
+	// activeAdapters should still be the original subset (m2), not changed by @mention.
+	require.Len(t, app.activeAdapters, 1)
+	assert.Equal(t, "m2", app.activeAdapters[0].ID())
 }

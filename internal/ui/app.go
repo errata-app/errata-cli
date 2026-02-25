@@ -142,6 +142,19 @@ type App struct {
 	// lastReport is the most recent output report; used by selection/rating
 	// handlers to call RecordSelection after the user picks a winner.
 	lastReport *output.Report
+
+	// config overlay state
+	configOverlayActive bool
+	configSections      []configSection
+	configSelectedIdx   int
+	configExpandedIdx   int // -1 = none expanded
+	configListItems     []listItem
+	configListCursor    int
+	configScalarFields  []scalarField
+	configScalarCursor  int
+	configEditBuf       string
+	sessionRecipe       *recipe.Recipe // working copy; nil until first /config or /set
+	recipeModified      bool
 }
 
 // New creates the App model.
@@ -337,7 +350,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case listModelsResultMsg:
-		return a.withMessage(formatAvailableModels(msg.results)), nil
+		var activeSet map[string]bool
+		if a.activeAdapters != nil {
+			activeSet = make(map[string]bool, len(a.activeAdapters))
+			for _, ad := range a.activeAdapters {
+				activeSet[ad.ID()] = true
+			}
+		}
+		return a.withMessage(formatAvailableModels(msg.results, activeSet)), nil
 
 	case compactCompleteMsg:
 		a.conversationHistories = msg.histories
@@ -469,7 +489,14 @@ func (a App) View() string {
 
 	case modeRating:
 		ratingStyle := lipgloss.NewStyle().Bold(true)
-		sb.WriteString(ratingStyle.Render("  Rate this response:"))
+		ratingModelName := "this"
+		for _, resp := range a.responses {
+			if resp.OK() {
+				ratingModelName = resp.ModelID
+				break
+			}
+		}
+		sb.WriteString(ratingStyle.Render(fmt.Sprintf("  Rate %s's response:", ratingModelName)))
 		sb.WriteString("  y = good  n = bad  s = skip\n")
 
 	case modeRunning:
@@ -477,6 +504,30 @@ func (a App) View() string {
 			Render("  running…"))
 
 	case modeIdle:
+		if a.configOverlayActive {
+			sb.WriteString(renderConfigOverlay(
+				a.configSections, a.configSelectedIdx, a.configExpandedIdx,
+				a.recipeModified, a.width,
+				a.configListItems, a.configListCursor,
+				a.configScalarFields, a.configScalarCursor,
+				a.configEditBuf,
+			))
+			break
+		}
+		if a.recipeModified {
+			modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
+			sb.WriteString(modStyle.Render("  [modified]"))
+			sb.WriteByte('\n')
+		}
+		if a.activeAdapters != nil {
+			var subIDs []string
+			for _, ad := range a.activeAdapters {
+				subIDs = append(subIDs, ad.ID())
+			}
+			filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
+			sb.WriteString(filterStyle.Render("  [subset: " + strings.Join(subIDs, ", ") + "]"))
+			sb.WriteByte('\n')
+		}
 		if !a.feedVP.AtBottom() {
 			hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).
 				Render(fmt.Sprintf("  scroll/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
@@ -499,37 +550,69 @@ func (a App) View() string {
 			sb.WriteByte('\n')
 		}
 		sb.WriteString(a.input.View())
-		if val := a.input.Value(); len(val) > 0 && val[0] == '/' {
-			lower := strings.ToLower(val)
+		if val := a.input.Value(); len(val) > 0 {
 			nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AFAF"))
 			descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 
-			switch {
-			case strings.HasPrefix(lower, "/model "):
-				partial := lastWord(val[len("/model "):])
-				lp := strings.ToLower(partial)
-				for _, id := range a.modelIDCandidates() {
-					if strings.HasPrefix(strings.ToLower(id), lp) {
-						sb.WriteByte('\n')
-						sb.WriteString(nameStyle.Render("  " + id))
+			if val[0] == '/' {
+				lower := strings.ToLower(val)
+				switch {
+				case strings.HasPrefix(lower, "/model "):
+					partial := lastWord(val[len("/model "):])
+					a.renderModelHints(&sb, partial, nameStyle)
+
+				case strings.HasPrefix(lower, "/subset "):
+					partial := lastWord(val[len("/subset "):])
+					a.renderModelHints(&sb, partial, nameStyle)
+
+				case strings.HasPrefix(lower, "/tools on "):
+					partial := lastWord(val[len("/tools on "):])
+					a.renderToolHints(&sb, partial, nameStyle, descStyle)
+
+				case strings.HasPrefix(lower, "/tools off "):
+					partial := lastWord(val[len("/tools off "):])
+					a.renderToolHints(&sb, partial, nameStyle, descStyle)
+
+				case strings.HasPrefix(lower, "/config "):
+					partial := lastWord(val[len("/config "):])
+					lp := strings.ToLower(partial)
+					for _, name := range interactiveSections {
+						if strings.HasPrefix(name, lp) {
+							sb.WriteByte('\n')
+							sb.WriteString(nameStyle.Render("  " + name))
+						}
+					}
+
+				case strings.HasPrefix(lower, "/set "):
+					partial := lastWord(val[len("/set "):])
+					lp := strings.ToLower(partial)
+					for _, path := range configPathCandidates() {
+						if strings.HasPrefix(path, lp) {
+							sb.WriteByte('\n')
+							sb.WriteString(nameStyle.Render("  " + path))
+						}
+					}
+
+				default:
+					prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
+					for _, c := range commands.All {
+						if strings.HasPrefix(c.Name, prefix) {
+							sb.WriteByte('\n')
+							sb.WriteString(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)))
+							sb.WriteString(descStyle.Render("  " + c.Desc))
+						}
 					}
 				}
-
-			case strings.HasPrefix(lower, "/tools on "):
-				partial := lastWord(val[len("/tools on "):])
-				a.renderToolHints(&sb, partial, nameStyle, descStyle)
-
-			case strings.HasPrefix(lower, "/tools off "):
-				partial := lastWord(val[len("/tools off "):])
-				a.renderToolHints(&sb, partial, nameStyle, descStyle)
-
-			default:
-				prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
-				for _, c := range commands.All {
-					if strings.HasPrefix(c.Name, prefix) {
-						sb.WriteByte('\n')
-						sb.WriteString(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)))
-						sb.WriteString(descStyle.Render("  " + c.Desc))
+			} else {
+				// @mention hints: if the last word starts with @, show matching models.
+				lw := lastWord(val)
+				if strings.HasPrefix(lw, "@") && len(lw) >= 2 {
+					partial := strings.ToLower(lw[1:])
+					for _, id := range a.modelIDCandidates() {
+						if strings.HasPrefix(strings.ToLower(id), partial) {
+							sb.WriteByte('\n')
+							sb.WriteString(nameStyle.Render("  @" + id))
+						}
 					}
 				}
 			}
