@@ -44,8 +44,9 @@ type Recipe struct {
 	Context      ContextConfig
 	SubAgent     SubAgentConfig
 	Sandbox      SandboxConfig
-	Tasks        []string
-	Metadata     MetadataConfig
+	Tasks           []string
+	SuccessCriteria []string
+	Metadata        MetadataConfig
 }
 
 // ToolsConfig describes which tools are available in a recipe.
@@ -85,6 +86,7 @@ type ContextConfig struct {
 	MaxHistoryTurns  int     // 0 = not set
 	Strategy         string  // "" | "auto_compact" | "manual" | "off"
 	CompactThreshold float64 // 0 = not set
+	TaskMode         string  // "" | "independent" | "sequential"
 }
 
 // SubAgentConfig configures spawn_agent sub-agent behaviour.
@@ -205,7 +207,7 @@ func parseBytes(data []byte) (*Recipe, error) {
 		case "tasks":
 			r.Tasks = parseList(body)
 		case "success criteria":
-			// Parsed but not used until Part 9 (headless execution).
+			r.SuccessCriteria = parseList(body)
 		case "metadata":
 			r.Metadata = parseMetadata(body)
 		case "system reminders":
@@ -366,6 +368,14 @@ func parseContext(body string) ContextConfig {
 	if v, ok := m["compact_threshold"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 1 {
 			cfg.CompactThreshold = f
+		}
+	}
+	if v, ok := m["task_mode"]; ok {
+		switch v {
+		case "independent", "sequential":
+			cfg.TaskMode = v
+		default:
+			fmt.Fprintf(os.Stderr, "recipe: unknown task_mode %q, ignoring\n", v)
 		}
 	}
 	return cfg

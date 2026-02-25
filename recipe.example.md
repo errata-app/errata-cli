@@ -46,6 +46,7 @@ max_steps: 50
 max_history_turns: 30
 strategy: auto_compact
 compact_threshold: 0.75
+task_mode: independent
 
 ## Sub-Agent
 model: claude-sonnet-4-6
@@ -60,3 +61,7 @@ network: full
 - Audit all Go files for unused error return values and fix them
 - Add table-driven tests for any function with fewer than two test cases
 - Run `go vet ./...` and resolve every reported issue
+
+## Success Criteria
+- no_errors
+- has_writes

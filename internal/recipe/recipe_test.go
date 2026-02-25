@@ -452,6 +452,48 @@ func TestApplyTo_SeedNil_DoesNotOverwrite(t *testing.T) {
 	assert.Equal(t, int64(99), *cfg.Seed, "absent seed must not clear existing config")
 }
 
+func TestParse_SuccessCriteria(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Success Criteria
+- no_errors
+- has_writes
+- contains: all tests pass
+`))
+	require.NoError(t, err)
+	require.Len(t, r.SuccessCriteria, 3)
+	assert.Equal(t, "no_errors", r.SuccessCriteria[0])
+	assert.Equal(t, "has_writes", r.SuccessCriteria[1])
+	assert.Equal(t, "contains: all tests pass", r.SuccessCriteria[2])
+}
+
+func TestParse_SuccessCriteriaAbsent(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	require.NoError(t, err)
+	assert.Nil(t, r.SuccessCriteria)
+}
+
+func TestParse_ContextTaskMode(t *testing.T) {
+	for _, mode := range []string{"independent", "sequential"} {
+		t.Run(mode, func(t *testing.T) {
+			r, err := recipe.Parse(writeRecipe(t, "## Context\ntask_mode: "+mode+"\n"))
+			require.NoError(t, err)
+			assert.Equal(t, mode, r.Context.TaskMode)
+		})
+	}
+}
+
+func TestParse_ContextTaskModeAbsent(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Context\nstrategy: auto_compact\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "", r.Context.TaskMode)
+}
+
+func TestParse_ContextTaskModeInvalid(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Context\ntask_mode: invalid\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "", r.Context.TaskMode, "unknown task_mode should be ignored")
+}
+
 func TestDefault_IsNonNil(t *testing.T) {
 	r := recipe.Default()
 	require.NotNil(t, r)
