@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/suarezc/errata/internal/config"
@@ -114,4 +115,141 @@ func TestLoad_DefaultModelNames(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-6", cfg.DefaultAnthropicModel)
 	assert.Equal(t, "gpt-4o", cfg.DefaultOpenAIModel)
 	assert.Equal(t, "gemini-2.0-flash", cfg.DefaultGeminiModel)
+}
+
+// ─── SubagentMaxDepth parsing ────────────────────────────────────────────────
+
+func TestLoad_SubagentMaxDepth_Valid(t *testing.T) {
+	os.Setenv("ERRATA_SUBAGENT_MAX_DEPTH", "3")
+	defer os.Unsetenv("ERRATA_SUBAGENT_MAX_DEPTH")
+	assert.Equal(t, 3, config.Load().SubagentMaxDepth)
+}
+
+func TestLoad_SubagentMaxDepth_Zero(t *testing.T) {
+	os.Setenv("ERRATA_SUBAGENT_MAX_DEPTH", "0")
+	defer os.Unsetenv("ERRATA_SUBAGENT_MAX_DEPTH")
+	assert.Equal(t, 0, config.Load().SubagentMaxDepth)
+}
+
+func TestLoad_SubagentMaxDepth_Negative(t *testing.T) {
+	os.Setenv("ERRATA_SUBAGENT_MAX_DEPTH", "-1")
+	defer os.Unsetenv("ERRATA_SUBAGENT_MAX_DEPTH")
+	assert.Equal(t, 1, config.Load().SubagentMaxDepth, "negative should keep default")
+}
+
+func TestLoad_SubagentMaxDepth_Invalid(t *testing.T) {
+	os.Setenv("ERRATA_SUBAGENT_MAX_DEPTH", "abc")
+	defer os.Unsetenv("ERRATA_SUBAGENT_MAX_DEPTH")
+	assert.Equal(t, 1, config.Load().SubagentMaxDepth, "invalid should keep default")
+}
+
+// ─── MaxHistoryTurns parsing ─────────────────────────────────────────────────
+
+func TestLoad_MaxHistoryTurns_Valid(t *testing.T) {
+	os.Setenv("ERRATA_MAX_HISTORY_TURNS", "50")
+	defer os.Unsetenv("ERRATA_MAX_HISTORY_TURNS")
+	assert.Equal(t, 50, config.Load().MaxHistoryTurns)
+}
+
+func TestLoad_MaxHistoryTurns_Zero(t *testing.T) {
+	os.Setenv("ERRATA_MAX_HISTORY_TURNS", "0")
+	defer os.Unsetenv("ERRATA_MAX_HISTORY_TURNS")
+	assert.Equal(t, 20, config.Load().MaxHistoryTurns, "zero should keep default")
+}
+
+func TestLoad_MaxHistoryTurns_Negative(t *testing.T) {
+	os.Setenv("ERRATA_MAX_HISTORY_TURNS", "-5")
+	defer os.Unsetenv("ERRATA_MAX_HISTORY_TURNS")
+	assert.Equal(t, 20, config.Load().MaxHistoryTurns, "negative should keep default")
+}
+
+func TestLoad_MaxHistoryTurns_Invalid(t *testing.T) {
+	os.Setenv("ERRATA_MAX_HISTORY_TURNS", "abc")
+	defer os.Unsetenv("ERRATA_MAX_HISTORY_TURNS")
+	assert.Equal(t, 20, config.Load().MaxHistoryTurns, "invalid should keep default")
+}
+
+// ─── AgentTimeout parsing ────────────────────────────────────────────────────
+
+func TestLoad_AgentTimeout_Valid(t *testing.T) {
+	os.Setenv("ERRATA_AGENT_TIMEOUT", "10m")
+	defer os.Unsetenv("ERRATA_AGENT_TIMEOUT")
+	cfg := config.Load()
+	assert.Equal(t, 10*time.Minute, cfg.AgentTimeout)
+}
+
+func TestLoad_AgentTimeout_ZeroDuration(t *testing.T) {
+	os.Setenv("ERRATA_AGENT_TIMEOUT", "0s")
+	defer os.Unsetenv("ERRATA_AGENT_TIMEOUT")
+	assert.Equal(t, time.Duration(0), config.Load().AgentTimeout, "zero should keep default")
+}
+
+func TestLoad_AgentTimeout_Negative(t *testing.T) {
+	os.Setenv("ERRATA_AGENT_TIMEOUT", "-1s")
+	defer os.Unsetenv("ERRATA_AGENT_TIMEOUT")
+	assert.Equal(t, time.Duration(0), config.Load().AgentTimeout, "negative should keep default")
+}
+
+func TestLoad_AgentTimeout_Invalid(t *testing.T) {
+	os.Setenv("ERRATA_AGENT_TIMEOUT", "not-a-duration")
+	defer os.Unsetenv("ERRATA_AGENT_TIMEOUT")
+	assert.Equal(t, time.Duration(0), config.Load().AgentTimeout, "invalid should keep default")
+}
+
+// ─── Direct env var reads ────────────────────────────────────────────────────
+
+func TestLoad_DebugLogPath(t *testing.T) {
+	os.Setenv("ERRATA_DEBUG_LOG", "custom/log.jsonl")
+	defer os.Unsetenv("ERRATA_DEBUG_LOG")
+	assert.Equal(t, "custom/log.jsonl", config.Load().DebugLogPath)
+}
+
+func TestLoad_MCPServers(t *testing.T) {
+	os.Setenv("ERRATA_MCP_SERVERS", "exa:npx @exa-ai/exa-mcp-server")
+	defer os.Unsetenv("ERRATA_MCP_SERVERS")
+	assert.Equal(t, "exa:npx @exa-ai/exa-mcp-server", config.Load().MCPServers)
+}
+
+func TestLoad_SystemPromptExtra(t *testing.T) {
+	os.Setenv("ERRATA_SYSTEM_PROMPT", "Use Go idioms")
+	defer os.Unsetenv("ERRATA_SYSTEM_PROMPT")
+	assert.Equal(t, "Use Go idioms", config.Load().SystemPromptExtra)
+}
+
+func TestLoad_SubagentModel(t *testing.T) {
+	os.Setenv("ERRATA_SUBAGENT_MODEL", "gpt-4o-mini")
+	defer os.Unsetenv("ERRATA_SUBAGENT_MODEL")
+	assert.Equal(t, "gpt-4o-mini", config.Load().SubagentModel)
+}
+
+func TestLoad_OpenRouterAPIKey(t *testing.T) {
+	os.Setenv("OPENROUTER_API_KEY", "sk-or-test")
+	defer os.Unsetenv("OPENROUTER_API_KEY")
+	assert.Equal(t, "sk-or-test", config.Load().OpenRouterAPIKey)
+}
+
+func TestLoad_LiteLLM(t *testing.T) {
+	os.Setenv("LITELLM_BASE_URL", "http://localhost:4000/v1")
+	os.Setenv("LITELLM_API_KEY", "test-key")
+	defer os.Unsetenv("LITELLM_BASE_URL")
+	defer os.Unsetenv("LITELLM_API_KEY")
+	cfg := config.Load()
+	assert.Equal(t, "http://localhost:4000/v1", cfg.LiteLLMBaseURL)
+	assert.Equal(t, "test-key", cfg.LiteLLMAPIKey)
+}
+
+// ─── ERRATA_ACTIVE_MODELS edge cases ─────────────────────────────────────────
+
+func TestLoad_ActiveModels_WhitespaceHandling(t *testing.T) {
+	os.Setenv("ERRATA_ACTIVE_MODELS", "model1 , model2 , model3")
+	defer os.Unsetenv("ERRATA_ACTIVE_MODELS")
+	cfg := config.Load()
+	assert.Equal(t, []string{"model1", "model2", "model3"}, cfg.ActiveModels)
+}
+
+func TestLoad_ActiveModels_EmptyEntries(t *testing.T) {
+	os.Setenv("ERRATA_ACTIVE_MODELS", "model1,,model2")
+	defer os.Unsetenv("ERRATA_ACTIVE_MODELS")
+	cfg := config.Load()
+	assert.Equal(t, []string{"model1", "model2"}, cfg.ActiveModels)
 }
