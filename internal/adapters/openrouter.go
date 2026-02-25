@@ -111,6 +111,7 @@ func (a *OpenRouterAdapter) RunAgent(
 				messages = append(messages, openai.ToolMessage(result, tc.ID))
 			}
 		}
+		EmitSnapshot(onEvent, a.modelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed)
 	}
 
 	return BuildSuccessResponse(a.modelID, a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil

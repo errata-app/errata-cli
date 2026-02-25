@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/suarezc/errata/internal/models"
@@ -154,4 +155,89 @@ func Clear(path string) error {
 		return nil
 	}
 	return err
+}
+
+// ─── Incremental saver ──────────────────────────────────────────────────────
+
+// IncrementalSaver aggregates per-model snapshots from concurrent adapter
+// goroutines and writes them to disk atomically after each update. This ensures
+// that the checkpoint file reflects the most recent turn boundary even if the
+// process is killed ungracefully (SIGKILL, OOM, power loss).
+//
+// All methods are safe for concurrent use.
+type IncrementalSaver struct {
+	mu         sync.Mutex
+	path       string
+	prompt     string
+	verbose    bool
+	adapterIDs []string
+	snapshots  map[string]ResponseSnapshot
+}
+
+// NewIncrementalSaver creates a saver that writes checkpoints to path.
+func NewIncrementalSaver(path, prompt string, adapterIDs []string, verbose bool) *IncrementalSaver {
+	return &IncrementalSaver{
+		path:       path,
+		prompt:     prompt,
+		verbose:    verbose,
+		adapterIDs: adapterIDs,
+		snapshots:  make(map[string]ResponseSnapshot),
+	}
+}
+
+// Update stores the latest snapshot for a model and flushes to disk.
+func (s *IncrementalSaver) Update(modelID string, snap ResponseSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshots[modelID] = snap
+	s.flush()
+}
+
+// MarkCompleted stores the final snapshot for a model with Completed=true and flushes.
+func (s *IncrementalSaver) MarkCompleted(modelID string, snap ResponseSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap.Completed = true
+	s.snapshots[modelID] = snap
+	s.flush()
+}
+
+// flush writes the current state to disk. Caller must hold s.mu.
+func (s *IncrementalSaver) flush() {
+	responses := make([]ResponseSnapshot, 0, len(s.adapterIDs))
+	for _, id := range s.adapterIDs {
+		if snap, ok := s.snapshots[id]; ok {
+			responses = append(responses, snap)
+		}
+	}
+	if len(responses) == 0 {
+		return
+	}
+	cp := Checkpoint{
+		Prompt:     s.prompt,
+		Timestamp:  time.Now(),
+		AdapterIDs: s.adapterIDs,
+		Responses:  responses,
+		Verbose:    s.verbose,
+	}
+	_ = Save(s.path, cp) // best-effort; never crash the run
+}
+
+// SnapshotFromPartial converts a PartialSnapshot (emitted by adapters via
+// AgentEvent) into a ResponseSnapshot suitable for incremental checkpointing.
+func SnapshotFromPartial(modelID string, ps models.PartialSnapshot) ResponseSnapshot {
+	var writes []WriteSnapshot
+	for _, w := range ps.Writes {
+		writes = append(writes, WriteSnapshot{Path: w.Path, Content: w.Content})
+	}
+	return ResponseSnapshot{
+		ModelID:        modelID,
+		Text:           ps.Text,
+		InputTokens:    ps.InputTokens,
+		OutputTokens:   ps.OutputTokens,
+		CostUSD:        ps.CostUSD,
+		LatencyMS:      ps.LatencyMS,
+		ProposedWrites: writes,
+		Interrupted:    true, // still in progress
+	}
 }

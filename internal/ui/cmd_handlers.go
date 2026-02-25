@@ -328,6 +328,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+			CheckpointPath:   checkpoint.DefaultPath,
 		})
 		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
 			ads, cfg, mcpDispatchers,
@@ -515,6 +516,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+			CheckpointPath:   checkpoint.DefaultPath,
 		})
 		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
 			ads, cfg, mcpDispatchers,

@@ -15,10 +15,23 @@ type ConversationTurn struct {
 }
 
 // AgentEvent is a single observable event emitted by an agent during its run.
-// Type is one of: "text", "reading", "writing", "error".
+// Type is one of: "text", "reading", "writing", "error", "bash", "snapshot".
 type AgentEvent struct {
 	Type string
 	Data string
+}
+
+// PartialSnapshot is emitted by adapters at turn boundaries (as JSON in
+// AgentEvent.Data with Type "snapshot") for incremental checkpoint persistence.
+// Placed in models (not adapters) so both adapters and runner can use it
+// without import cycles.
+type PartialSnapshot struct {
+	Text         string            `json:"text"`
+	InputTokens  int64             `json:"input_tokens"`
+	OutputTokens int64             `json:"output_tokens"`
+	CostUSD      float64           `json:"cost_usd"`
+	LatencyMS    int64             `json:"latency_ms"`
+	Writes       []tools.FileWrite `json:"writes,omitempty"`
 }
 
 // ModelResponse is the final result from one agent run.

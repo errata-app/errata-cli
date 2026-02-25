@@ -289,6 +289,7 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+			CheckpointPath:   checkpoint.DefaultPath,
 		})
 		toolCtx = tools.WithSubagentDispatcher(toolCtx, subagent.NewDispatcher(
 			ads, cfg, mcpDispatchers,
@@ -633,6 +634,7 @@ func (wc *wsConn) wsHandleResume() {
 		})
 		toolCtx = runner.WithRunOptions(toolCtx, runner.RunOptions{
 			Timeout: cfg.AgentTimeout, CompactThreshold: cfg.CompactThreshold, MaxHistoryTurns: cfg.MaxHistoryTurns,
+			CheckpointPath: checkpoint.DefaultPath,
 		})
 		toolCtx = tools.WithSubagentDispatcher(toolCtx, subagent.NewDispatcher(
 			ads, cfg, mcpDispatchers,

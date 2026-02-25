@@ -129,6 +129,7 @@ func (a *LiteLLMAdapter) RunAgent(
 				messages = append(messages, openai.ToolMessage(result, tc.ID))
 			}
 		}
+		EmitSnapshot(onEvent, a.bareModelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed)
 	}
 
 	return BuildSuccessResponse(a.modelID, a.bareModelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil

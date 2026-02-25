@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -154,6 +155,26 @@ func DispatchTool(
 		return text, true
 	}
 	return "", false
+}
+
+// EmitSnapshot sends a "snapshot" event with the current turn state for incremental
+// checkpoint persistence. Called at each turn boundary inside the agentic loop.
+func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
+	textParts []string, start time.Time, totalInput, totalOutput int64,
+	proposed []tools.FileWrite) {
+	snap := models.PartialSnapshot{
+		Text:         join(textParts),
+		InputTokens:  totalInput,
+		OutputTokens: totalOutput,
+		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
+		LatencyMS:    time.Since(start).Milliseconds(),
+		Writes:       proposed,
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return
+	}
+	onEvent(models.AgentEvent{Type: "snapshot", Data: string(data)})
 }
 
 // BuildErrorResponse constructs a ModelResponse for an API error encountered mid-loop.

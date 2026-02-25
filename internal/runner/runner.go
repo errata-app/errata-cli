@@ -3,10 +3,12 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/pricing"
 )
@@ -24,6 +26,7 @@ type RunOptions struct {
 	Timeout          time.Duration // 0 → agentTimeout (5 min)
 	CompactThreshold float64       // 0 → autoCompactThreshold (0.80)
 	MaxHistoryTurns  int           // 0 → defaultMaxHistoryTurns (20)
+	CheckpointPath   string        // "" disables incremental checkpointing
 }
 
 // WithRunOptions returns a context carrying the given RunOptions.
@@ -63,6 +66,16 @@ func RunAll(
 	results := make([]models.ModelResponse, len(adapters))
 	var wg sync.WaitGroup
 
+	// Set up incremental checkpointing (survives SIGKILL/OOM/power loss).
+	var saver *checkpoint.IncrementalSaver
+	if opts.CheckpointPath != "" {
+		adapterIDs := make([]string, len(adapters))
+		for i, a := range adapters {
+			adapterIDs[i] = a.ID()
+		}
+		saver = checkpoint.NewIncrementalSaver(opts.CheckpointPath, prompt, adapterIDs, verbose)
+	}
+
 	for i, a := range adapters {
 		i, a := i, a
 		wg.Add(1)
@@ -72,8 +85,18 @@ func RunAll(
 			tctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 			defer cancel()
 
-			// filtered suppresses "text" and "error" events when not verbose.
+			// filtered suppresses "text" and "error" events when not verbose,
+			// and intercepts "snapshot" events for incremental checkpointing.
 			filtered := func(e models.AgentEvent) {
+				if e.Type == "snapshot" {
+					if saver != nil {
+						var ps models.PartialSnapshot
+						if json.Unmarshal([]byte(e.Data), &ps) == nil {
+							saver.Update(a.ID(), checkpoint.SnapshotFromPartial(a.ID(), ps))
+						}
+					}
+					return // never forward snapshot events to UI
+				}
 				if !verbose && (e.Type == "text" || e.Type == "error") {
 					return
 				}
@@ -97,13 +120,25 @@ func RunAll(
 					filtered(models.AgentEvent{Type: "error", Data: err.Error()})
 				}
 				results[i] = resp
+				if saver != nil {
+					saver.MarkCompleted(a.ID(), checkpoint.FromModelResponse(resp))
+				}
 				return
 			}
 			results[i] = resp
+			if saver != nil {
+				saver.MarkCompleted(a.ID(), checkpoint.FromModelResponse(resp))
+			}
 		}()
 	}
 
 	wg.Wait()
+
+	// Clean up checkpoint if all adapters completed without interruption.
+	if saver != nil && !HasInterrupted(results) {
+		_ = checkpoint.Clear(opts.CheckpointPath)
+	}
+
 	return results
 }
 

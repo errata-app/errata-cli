@@ -101,6 +101,7 @@ func (a *GeminiAdapter) RunAgent(
 			break
 		}
 		contents = append(contents, genai.NewContentFromParts(toolResults, genai.RoleUser))
+		EmitSnapshot(onEvent, "google/"+a.modelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed)
 	}
 
 	return BuildSuccessResponse(a.modelID, "google/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil

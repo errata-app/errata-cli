@@ -114,6 +114,7 @@ func (a *AnthropicAdapter) RunAgent(
 		}
 
 		messages = append(messages, anthropic.NewUserMessage(toolResults...))
+		EmitSnapshot(onEvent, "anthropic/"+a.modelID, textParts, start, totalRegularInput+totalCacheRead+totalCacheCreation, totalOutput, proposed)
 	}
 
 	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, totalCacheCreation, totalOutput, proposed), nil

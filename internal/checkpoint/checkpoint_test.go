@@ -3,6 +3,7 @@ package checkpoint
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/suarezc/errata/internal/models"
@@ -234,5 +235,146 @@ func TestFromModelResponse_ToModelResponse_RoundTrip(t *testing.T) {
 			t.Errorf("ProposedWrite[%d]: got {%q, %q}, want {%q, %q}",
 				i, w.Path, w.Content, orig.ProposedWrites[i].Path, orig.ProposedWrites[i].Content)
 		}
+	}
+}
+
+// ─── IncrementalSaver tests ──────────────────────────────────────────────────
+
+func TestIncrementalSaver_UpdateWritesValidCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.json")
+
+	saver := NewIncrementalSaver(path, "test prompt", []string{"model-a", "model-b"}, false)
+
+	saver.Update("model-a", ResponseSnapshot{
+		ModelID:      "model-a",
+		Text:         "partial text",
+		InputTokens:  50,
+		OutputTokens: 20,
+		Interrupted:  true,
+	})
+
+	// Checkpoint file should exist and be valid.
+	cp, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after Update: %v", err)
+	}
+	if cp == nil {
+		t.Fatal("expected checkpoint file after Update")
+	}
+	if cp.Prompt != "test prompt" {
+		t.Errorf("Prompt = %q, want %q", cp.Prompt, "test prompt")
+	}
+	if len(cp.Responses) != 1 {
+		t.Fatalf("len(Responses) = %d, want 1", len(cp.Responses))
+	}
+	if cp.Responses[0].Text != "partial text" {
+		t.Errorf("Response text = %q, want %q", cp.Responses[0].Text, "partial text")
+	}
+}
+
+func TestIncrementalSaver_MarkCompleted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.json")
+
+	saver := NewIncrementalSaver(path, "prompt", []string{"model-a"}, false)
+
+	saver.MarkCompleted("model-a", ResponseSnapshot{
+		ModelID:     "model-a",
+		Text:        "done",
+		Interrupted: false,
+	})
+
+	cp, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cp.Responses[0].Completed {
+		t.Error("expected Completed=true after MarkCompleted")
+	}
+}
+
+func TestIncrementalSaver_ConcurrentUpdates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.json")
+
+	ids := []string{"model-a", "model-b", "model-c"}
+	saver := NewIncrementalSaver(path, "prompt", ids, false)
+
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		id := id
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for turn := 0; turn < 10; turn++ {
+				saver.Update(id, ResponseSnapshot{
+					ModelID:     id,
+					Text:        "turn data",
+					Interrupted: true,
+				})
+			}
+		}()
+	}
+	wg.Wait()
+
+	// File should be valid JSON with all 3 models.
+	cp, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after concurrent updates: %v", err)
+	}
+	if len(cp.Responses) != 3 {
+		t.Errorf("len(Responses) = %d, want 3", len(cp.Responses))
+	}
+}
+
+func TestIncrementalSaver_PreservesAdapterOrder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.json")
+
+	saver := NewIncrementalSaver(path, "prompt", []string{"model-a", "model-b"}, true)
+
+	// Update model-b first, then model-a.
+	saver.Update("model-b", ResponseSnapshot{ModelID: "model-b", Text: "b", Interrupted: true})
+	saver.Update("model-a", ResponseSnapshot{ModelID: "model-a", Text: "a", Interrupted: true})
+
+	cp, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Responses should be in adapter ID order, not insertion order.
+	if cp.Responses[0].ModelID != "model-a" || cp.Responses[1].ModelID != "model-b" {
+		t.Errorf("order: got [%s, %s], want [model-a, model-b]",
+			cp.Responses[0].ModelID, cp.Responses[1].ModelID)
+	}
+	if !cp.Verbose {
+		t.Error("Verbose should be true")
+	}
+}
+
+func TestSnapshotFromPartial(t *testing.T) {
+	ps := models.PartialSnapshot{
+		Text:         "hello",
+		InputTokens:  100,
+		OutputTokens: 50,
+		CostUSD:      0.005,
+		LatencyMS:    1234,
+		Writes:       []tools.FileWrite{{Path: "a.go", Content: "package a"}},
+	}
+	snap := SnapshotFromPartial("test-model", ps)
+	if snap.ModelID != "test-model" {
+		t.Errorf("ModelID = %q, want %q", snap.ModelID, "test-model")
+	}
+	if snap.Text != "hello" {
+		t.Errorf("Text = %q, want %q", snap.Text, "hello")
+	}
+	if snap.InputTokens != 100 {
+		t.Errorf("InputTokens = %d, want 100", snap.InputTokens)
+	}
+	if !snap.Interrupted {
+		t.Error("expected Interrupted=true for in-progress snapshot")
+	}
+	if len(snap.ProposedWrites) != 1 || snap.ProposedWrites[0].Path != "a.go" {
+		t.Errorf("ProposedWrites = %v", snap.ProposedWrites)
 	}
 }

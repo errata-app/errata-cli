@@ -266,6 +266,7 @@ func buildRunContext(parent context.Context, opts Options, rec *recipe.Recipe, a
 		Timeout:          opts.Cfg.AgentTimeout,
 		CompactThreshold: opts.Cfg.CompactThreshold,
 		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
+		CheckpointPath:   checkpoint.DefaultPath,
 	})
 	ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
 		opts.Adapters, opts.Cfg, opts.MCPDispatchers,
