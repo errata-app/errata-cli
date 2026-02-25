@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -131,15 +132,51 @@ func ProviderQualifiedID(provider, modelID string) string {
 	}
 }
 
-// resolvePricing looks up pricing for qualifiedID, falling back to the bare
-// portion after the first "/" for native-adapter qualified IDs.
+// dateSuffixRE matches a trailing date suffix in either of two formats:
+//   - -20250714     (YYYYMMDD  — Anthropic, Google)
+//   - -2024-08-06   (YYYY-MM-DD — OpenAI)
+var dateSuffixRE = regexp.MustCompile(`-(\d{4}-\d{2}-\d{2}|\d{8})$`)
+
+// stripDateSuffix removes a trailing date suffix from a model ID, if present.
+// Returns the original string unchanged when no date suffix is found.
+func stripDateSuffix(id string) string {
+	return dateSuffixRE.ReplaceAllString(id, "")
+}
+
+// resolvePricing looks up pricing for qualifiedID using a four-step fallback:
+//  1. Exact match on qualified ID (e.g. "anthropic/claude-sonnet-4-6-20250714")
+//  2. Bare portion after "/" (e.g. "claude-sonnet-4-6-20250714")
+//  3. Qualified ID with date suffix stripped (e.g. "anthropic/claude-sonnet-4-6")
+//  4. Bare ID with date suffix stripped (e.g. "claude-sonnet-4-6")
 func resolvePricing(qualifiedID string) (modelPricing, bool) {
+	// 1. Exact match on qualified ID.
 	if p, ok := lookupPricing(qualifiedID); ok {
 		return p, true
 	}
-	if strings.Contains(qualifiedID, "/") {
-		return lookupPricing(qualifiedID[strings.Index(qualifiedID, "/")+1:])
+
+	// 2. Strip provider prefix, try bare ID.
+	bare := qualifiedID
+	if i := strings.Index(qualifiedID, "/"); i >= 0 {
+		bare = qualifiedID[i+1:]
+		if p, ok := lookupPricing(bare); ok {
+			return p, true
+		}
 	}
+
+	// 3. Strip date suffix from qualified ID.
+	if stripped := stripDateSuffix(qualifiedID); stripped != qualifiedID {
+		if p, ok := lookupPricing(stripped); ok {
+			return p, true
+		}
+	}
+
+	// 4. Strip date suffix from bare ID.
+	if strippedBare := stripDateSuffix(bare); strippedBare != bare {
+		if p, ok := lookupPricing(strippedBare); ok {
+			return p, true
+		}
+	}
+
 	return modelPricing{}, false
 }
 
