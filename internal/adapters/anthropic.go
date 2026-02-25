@@ -78,7 +78,7 @@ func (a *AnthropicAdapter) RunAgent(
 				tu := block.AsToolUse()
 				var input map[string]any
 				_ = json.Unmarshal(tu.Input, &input)
-				result, ok := DispatchTool(tu.Name, extractStringMap(input), onEvent, &proposed)
+				result, ok := DispatchTool(ctx, tu.Name, extractStringMap(input), onEvent, &proposed)
 				if ok {
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, result, false))
 				}

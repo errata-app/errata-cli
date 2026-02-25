@@ -87,7 +87,7 @@ func (a *OpenAIAdapter) RunAgent(
 		for _, tc := range msg.ToolCalls {
 			var input map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &input)
-			result, ok := DispatchTool(tc.Function.Name, extractStringMap(input), onEvent, &proposed)
+			result, ok := DispatchTool(ctx, tc.Function.Name, extractStringMap(input), onEvent, &proposed)
 			if ok {
 				messages = append(messages, openai.ToolMessage(result, tc.ID))
 			}

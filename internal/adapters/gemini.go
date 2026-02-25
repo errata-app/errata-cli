@@ -80,7 +80,7 @@ func (a *GeminiAdapter) RunAgent(
 
 			if part.FunctionCall != nil {
 				fc := part.FunctionCall
-				result, ok := DispatchTool(fc.Name, extractStringMap(fc.Args), onEvent, &proposed)
+				result, ok := DispatchTool(ctx, fc.Name, extractStringMap(fc.Args), onEvent, &proposed)
 				if ok {
 					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"result": result}))
 				}

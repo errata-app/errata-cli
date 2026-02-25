@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -34,12 +35,24 @@ func join(parts []string) string {
 // It emits the appropriate AgentEvent, executes the tool, and returns the result
 // string for the adapter to feed back to the model.
 // Returns ("", false) for unrecognised tool names.
+//
+// ctx is checked for MCP dispatchers (registered at startup via tools.WithMCPDispatchers)
+// which take priority over built-in tool names.
 func DispatchTool(
+	ctx context.Context,
 	name string,
 	args map[string]string,
 	onEvent func(models.AgentEvent),
 	proposed *[]tools.FileWrite,
 ) (result string, ok bool) {
+	// MCP-dispatched tools take priority over built-in tool names.
+	if dispatchers := tools.MCPDispatchersFromContext(ctx); len(dispatchers) > 0 {
+		if dispatcher, found := dispatchers[name]; found {
+			onEvent(models.AgentEvent{Type: "reading", Data: "[mcp] " + name})
+			return dispatcher(args), true
+		}
+	}
+
 	switch name {
 	case tools.ReadToolName:
 		path := args["path"]
@@ -116,6 +129,11 @@ func DispatchTool(
 		rawURL := args["url"]
 		onEvent(models.AgentEvent{Type: "reading", Data: rawURL})
 		return tools.ExecuteWebFetch(rawURL), true
+
+	case tools.WebSearchToolName:
+		query := args["query"]
+		onEvent(models.AgentEvent{Type: "reading", Data: "web_search: " + query})
+		return tools.ExecuteWebSearch(query), true
 	}
 	return "", false
 }

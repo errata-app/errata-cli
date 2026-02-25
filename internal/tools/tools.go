@@ -27,14 +27,15 @@ import (
 var webFetchGroup singleflight.Group
 
 const (
-	ReadToolName     = "read_file"
-	WriteToolName    = "write_file"
-	EditToolName     = "edit_file"
-	ListDirToolName  = "list_directory"
-	SearchFilesName  = "search_files"
-	SearchCodeName   = "search_code"
-	BashToolName     = "bash"
-	WebFetchToolName = "web_fetch"
+	ReadToolName      = "read_file"
+	WriteToolName     = "write_file"
+	EditToolName      = "edit_file"
+	ListDirToolName   = "list_directory"
+	SearchFilesName   = "search_files"
+	SearchCodeName    = "search_code"
+	BashToolName      = "bash"
+	WebFetchToolName  = "web_fetch"
+	WebSearchToolName = "web_search"
 )
 
 // maxReadLines is the hard cap on lines returned by ExecuteRead.
@@ -176,6 +177,17 @@ var Definitions = []ToolDef{
 		},
 		Required: []string{"url"},
 	},
+	{
+		Name: WebSearchToolName,
+		Description: "Search DuckDuckGo for factual information and return instant answers. " +
+			"Best for definitions, Wikipedia-style summaries, and quick facts. " +
+			"Limited to knowledge-panel results — not a full web index. " +
+			"For specific documentation pages or URLs, use web_fetch instead.",
+		Properties: map[string]ToolParam{
+			"query": {Type: "string", Description: "The search query"},
+		},
+		Required: []string{"query"},
+	},
 }
 
 // activeToolsKey is the context key for the active tool set.
@@ -194,6 +206,26 @@ func ActiveToolsFromContext(ctx context.Context) []ToolDef {
 		return v
 	}
 	return Definitions
+}
+
+// MCPDispatcher is a function that executes one MCP tool call.
+// args values are strings to match Errata's DispatchTool convention.
+type MCPDispatcher func(args map[string]string) string
+
+// mcpDispatchersKey is the context key for the MCP dispatcher table.
+type mcpDispatchersKey struct{}
+
+// WithMCPDispatchers returns a context carrying the MCP dispatcher table.
+// Called at startup after MCP servers are launched.
+func WithMCPDispatchers(ctx context.Context, dispatchers map[string]MCPDispatcher) context.Context {
+	return context.WithValue(ctx, mcpDispatchersKey{}, dispatchers)
+}
+
+// MCPDispatchersFromContext returns the MCP dispatcher table stored in ctx,
+// or nil if no dispatchers were registered (MCP not configured).
+func MCPDispatchersFromContext(ctx context.Context) map[string]MCPDispatcher {
+	v, _ := ctx.Value(mcpDispatchersKey{}).(map[string]MCPDispatcher)
+	return v
 }
 
 // ActiveDefinitions returns the subset of Definitions not in disabled.
@@ -223,6 +255,7 @@ Tool use guidance:
 - Use edit_file for targeted changes to existing files (replaces an exact string). Use write_file only for new files or complete rewrites.
 - Use bash to run tests, builds, or any shell command; always provide a clear description.
 - Use web_fetch to read documentation, GitHub issues, package READMEs, or any public URL.
+- Use web_search for quick factual lookups (definitions, Wikipedia summaries). For specific URLs, use web_fetch directly.
 - write_file and edit_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
 `
 }
@@ -701,6 +734,186 @@ func SaveDisabledTools(path string, disabled map[string]bool) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// webSearchTimeout is the HTTP request timeout for web_search queries.
+const webSearchTimeout = 10 * time.Second
+
+// webSearchOutputLimit is the maximum bytes returned from a web_search call.
+const webSearchOutputLimit = 8_000
+
+// webSearchAPIBase returns the DuckDuckGo API base URL.
+// ERRATA_DDGSEARCH_URL overrides it — used in tests to point at a local server.
+func webSearchAPIBase() string {
+	if v := os.Getenv("ERRATA_DDGSEARCH_URL"); v != "" {
+		return strings.TrimRight(v, "/") + "/"
+	}
+	return "https://api.duckduckgo.com/"
+}
+
+// ddgResponse is the top-level DuckDuckGo instant answers API response.
+type ddgResponse struct {
+	AbstractText   string       `json:"AbstractText"`
+	AbstractURL    string       `json:"AbstractURL"`
+	AbstractSource string       `json:"AbstractSource"`
+	Answer         string       `json:"Answer"`
+	Definition     string       `json:"Definition"`
+	DefinitionURL  string       `json:"DefinitionURL"`
+	RelatedTopics  []ddgTopic   `json:"RelatedTopics"`
+	Results        []ddgResult  `json:"Results"`
+}
+
+// ddgTopic is either a direct topic entry or a named group of sub-topics.
+// A group has Name and Topics; a direct entry has Text and FirstURL.
+type ddgTopic struct {
+	Text     string     `json:"Text"`
+	FirstURL string     `json:"FirstURL"`
+	Name     string     `json:"Name"`
+	Topics   []ddgTopic `json:"Topics"`
+}
+
+type ddgResult struct {
+	Text     string `json:"Text"`
+	FirstURL string `json:"FirstURL"`
+}
+
+// ExecuteWebSearch queries the DuckDuckGo instant answers API and returns
+// a formatted plain-text result. Best for factual/definition queries.
+// Not a full web index — for specific URLs, callers should prefer ExecuteWebFetch.
+func ExecuteWebSearch(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "[error: query must not be empty]"
+	}
+
+	params := url.Values{
+		"q":             []string{query},
+		"format":        []string{"json"},
+		"no_redirect":   []string{"1"},
+		"no_html":       []string{"1"},
+		"skip_disambig": []string{"1"},
+	}
+	fullURL := webSearchAPIBase() + "?" + params.Encode()
+
+	client := &http.Client{Timeout: webSearchTimeout}
+	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
+	if err != nil {
+		return fmt.Sprintf("[error: could not create request: %v]", err)
+	}
+	req.Header.Set("User-Agent", webFetchUserAgent)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("[error: search failed: %v]", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Sprintf("[error: HTTP %d from DuckDuckGo]", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(webSearchOutputLimit*4)))
+	if err != nil {
+		return fmt.Sprintf("[error: reading response: %v]", err)
+	}
+
+	var ddg ddgResponse
+	if err := json.Unmarshal(body, &ddg); err != nil {
+		return fmt.Sprintf("[error: parsing response: %v]", err)
+	}
+
+	return formatWebSearchResult(query, ddg)
+}
+
+// formatWebSearchResult renders a DuckDuckGo API response as readable plain text.
+func formatWebSearchResult(query string, ddg ddgResponse) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[DuckDuckGo: %q]\n", query))
+
+	empty := true
+
+	if ddg.Answer != "" {
+		sb.WriteString("\n")
+		sb.WriteString(ddg.Answer)
+		sb.WriteString("\n")
+		empty = false
+	}
+
+	if ddg.AbstractText != "" {
+		sb.WriteString("\n")
+		sb.WriteString(ddg.AbstractText)
+		if ddg.AbstractSource != "" {
+			sb.WriteString(" (via " + ddg.AbstractSource + ")")
+		}
+		sb.WriteString("\n")
+		if ddg.AbstractURL != "" {
+			sb.WriteString("Source: " + ddg.AbstractURL + "\n")
+		}
+		empty = false
+	}
+
+	if ddg.Definition != "" {
+		sb.WriteString("\nDefinition: " + ddg.Definition + "\n")
+		if ddg.DefinitionURL != "" {
+			sb.WriteString("Source: " + ddg.DefinitionURL + "\n")
+		}
+		empty = false
+	}
+
+	// Collect related topic lines, flattening groups.
+	const maxTopics = 10
+	var topicLines []string
+	for _, t := range ddg.RelatedTopics {
+		if len(topicLines) >= maxTopics {
+			break
+		}
+		if t.Name != "" && len(t.Topics) > 0 {
+			// Named group: emit a header then subtopics.
+			topicLines = append(topicLines, "["+t.Name+"]")
+			for _, sub := range t.Topics {
+				if len(topicLines) >= maxTopics {
+					break
+				}
+				if sub.Text != "" {
+					line := "  • " + sub.Text
+					if sub.FirstURL != "" {
+						line += "  " + sub.FirstURL
+					}
+					topicLines = append(topicLines, line)
+				}
+			}
+		} else if t.Text != "" {
+			line := "• " + t.Text
+			if t.FirstURL != "" {
+				line += "  " + t.FirstURL
+			}
+			topicLines = append(topicLines, line)
+		}
+	}
+
+	if len(topicLines) > 0 {
+		sb.WriteString("\nRelated:\n")
+		for _, line := range topicLines {
+			sb.WriteString(line + "\n")
+		}
+		empty = false
+	}
+
+	if empty {
+		return fmt.Sprintf(
+			"(no instant answer found for %q)\n\n"+
+				"DuckDuckGo instant answers cover factual/definition queries.\n"+
+				"For code documentation, use web_fetch with the URL directly.",
+			query,
+		)
+	}
+
+	result := strings.TrimRight(sb.String(), "\n")
+	if len(result) > webSearchOutputLimit {
+		result = result[:webSearchOutputLimit] + "\n[truncated]"
+	}
+	return result
 }
 
 // matchGlob matches a slash-separated path against a glob pattern that may

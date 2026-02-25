@@ -152,6 +152,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			wc.wsHandleRun(msg)
 		case "select":
 			wc.wsHandleSelect(msg)
+		case "rate_bad":
+			wc.wsHandleRateBad(msg)
 		case "set_models":
 			wc.wsHandleSetModels(msg)
 		case "cancel":
@@ -195,6 +197,8 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 	}
 
 	activeDefs := tools.ActiveDefinitions(wc.disabledTools)
+	activeDefs = append(activeDefs, wc.s.mcpDefs...)
+	mcpDispatchers := wc.s.mcpDispatchers
 
 	go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, ads []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
 		defer cancel()
@@ -212,8 +216,10 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 			}
 		}
 
+		toolCtx := tools.WithActiveTools(runCtx, activeDefs)
+		toolCtx = tools.WithMCPDispatchers(toolCtx, mcpDispatchers)
 		rs := runner.RunAll(
-			tools.WithActiveTools(runCtx, activeDefs), ads, effectiveHistories, prompt,
+			toolCtx, ads, effectiveHistories, prompt,
 			func(modelID string, e models.AgentEvent) {
 				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
 			},
@@ -286,6 +292,28 @@ func (wc *wsConn) wsHandleSelect(msg wsClientMsg) {
 		applied = append(applied, fw.Path)
 	}
 	wc.send(wsServerMsg{Type: "applied", Applied: applied})
+}
+
+func (wc *wsConn) wsHandleRateBad(msg wsClientMsg) {
+	wc.mu.Lock()
+	rs := wc.lastRun
+	prompt := wc.lastPrompt
+	wc.mu.Unlock()
+
+	if rs == nil {
+		wc.send(wsServerMsg{Type: "error", Message: "no completed run to rate"})
+		return
+	}
+
+	if err := preferences.RecordBad(wc.s.prefPath, prompt, msg.ModelID, wc.s.sessionID, rs); err != nil {
+		log.Printf("web: could not record bad rating: %v", err)
+	}
+
+	wc.mu.Lock()
+	wc.lastRun = nil
+	wc.mu.Unlock()
+
+	wc.send(wsServerMsg{Type: "rated", ModelID: msg.ModelID})
 }
 
 func (wc *wsConn) wsHandleSetModels(msg wsClientMsg) {

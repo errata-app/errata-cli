@@ -28,12 +28,13 @@ func TestRenderDiffs_ShowsFailedResponses(t *testing.T) {
 	assert.Contains(t, out, "good-model")
 }
 
-func TestRenderDiffs_NoWritesShowsPlaceholder(t *testing.T) {
+func TestRenderDiffs_NoWritesShowsTextNotPlaceholder(t *testing.T) {
 	responses := []models.ModelResponse{
-		{ModelID: "claude-sonnet-4-6", LatencyMS: 200},
+		{ModelID: "claude-sonnet-4-6", LatencyMS: 200, Text: "here is my answer"},
 	}
 	out := ui.RenderDiffs(responses)
-	assert.Contains(t, out, "no file writes proposed")
+	assert.Contains(t, out, "here is my answer")
+	assert.NotContains(t, out, "no file writes proposed")
 }
 
 func TestRenderDiffs_ShowsModelIDAndLatency(t *testing.T) {
@@ -134,12 +135,13 @@ func TestRenderSelectionMenu_ShowsFailedResponsesAsNonSelectable(t *testing.T) {
 	assert.Contains(t, out, "  -  err-model")
 }
 
-func TestRenderSelectionMenu_ShowsNoWritesLabel(t *testing.T) {
+func TestRenderSelectionMenu_TextOnlyShowsVoteHeader(t *testing.T) {
 	responses := []models.ModelResponse{
 		{ModelID: "m", LatencyMS: 100},
 	}
 	out := ui.RenderSelectionMenu(responses)
-	assert.Contains(t, out, "no writes")
+	assert.Contains(t, out, "Vote for a response:")
+	assert.NotContains(t, out, "no writes")
 }
 
 func TestRenderSelectionMenu_ShowsFilePathsForWrites(t *testing.T) {

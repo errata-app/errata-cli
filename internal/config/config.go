@@ -39,6 +39,11 @@ type Config struct {
 	// DebugLogPath is the path for the append-only JSONL debug log.
 	// Empty (default) disables debug logging entirely.
 	DebugLogPath string
+
+	// MCPServers is the list of MCP server configs parsed from ERRATA_MCP_SERVERS.
+	// Format: "name:command arg1 arg2,name2:command2"
+	// Empty disables MCP entirely.
+	MCPServers string
 }
 
 // Load reads .env (if present) then environment variables and returns a Config.
@@ -57,6 +62,7 @@ func Load() Config {
 	}
 
 	cfg.DebugLogPath = os.Getenv("ERRATA_DEBUG_LOG")
+	cfg.MCPServers = os.Getenv("ERRATA_MCP_SERVERS")
 	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	cfg.GoogleAPIKey = os.Getenv("GOOGLE_API_KEY")

@@ -113,28 +113,44 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleStatsCmd() (tea.Model, tea.Cmd) {
-	tally := preferences.Summarize(a.prefPath)
+	stats := preferences.SummarizeDetailed(a.prefPath)
 	var sb strings.Builder
 	sb.WriteString("Stats:\n")
-	if len(tally) == 0 {
+	if len(stats) == 0 {
 		sb.WriteString("  No preference data yet.\n")
 	} else {
 		sb.WriteString("  Preference wins:\n")
-		type kv struct {
-			id   string
-			wins int
+		type row struct {
+			id string
+			s  preferences.ModelStats
 		}
-		kvs := make([]kv, 0, len(tally))
-		for id, wins := range tally {
-			kvs = append(kvs, kv{id, wins})
+		rows := make([]row, 0, len(stats))
+		for id, s := range stats {
+			rows = append(rows, row{id, s})
 		}
-		sort.Slice(kvs, func(i, j int) bool { return kvs[i].wins > kvs[j].wins })
-		for _, e := range kvs {
-			plural := "s"
-			if e.wins == 1 {
-				plural = ""
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].s.Wins != rows[j].s.Wins {
+				return rows[i].s.Wins > rows[j].s.Wins
 			}
-			sb.WriteString(fmt.Sprintf("    %s: %d win%s\n", e.id, e.wins, plural))
+			return rows[i].id < rows[j].id
+		})
+		for _, r := range rows {
+			cost := ""
+			if r.s.AvgCostUSD > 0 {
+				cost = fmt.Sprintf("  avg cost $%.4f", r.s.AvgCostUSD)
+			}
+			signals := fmt.Sprintf("%dW / %dL", r.s.Wins, r.s.Losses)
+			if r.s.ThumbsDown > 0 {
+				signals += fmt.Sprintf(" / %d👎", r.s.ThumbsDown)
+			}
+			sb.WriteString(fmt.Sprintf("    %s: %s  %.1f%% win  avg %dms%s  (%d runs)\n",
+				r.id,
+				signals,
+				r.s.WinRate,
+				int64(r.s.AvgLatencyMS),
+				cost,
+				r.s.Participations,
+			))
 		}
 	}
 	if len(a.sessionCostPerModel) > 0 {
@@ -195,6 +211,8 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	prog := a.prog
 	histories := a.conversationHistories // read-only in goroutine; written only by main loop
 	activeDefs := tools.ActiveDefinitions(a.disabledTools)
+	activeDefs = append(activeDefs, a.mcpDefs...)
+	mcpDispatchers := a.mcpDispatchers
 
 	return a, func() tea.Msg {
 		effectiveHistories := histories
@@ -214,6 +232,7 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 			}
 		}
 		runCtx := tools.WithActiveTools(context.Background(), activeDefs)
+		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		responses := runner.RunAll(
 			runCtx, ads, effectiveHistories, trimmed,
 			func(modelID string, event models.AgentEvent) {

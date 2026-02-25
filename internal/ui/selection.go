@@ -11,6 +11,61 @@ import (
 	"github.com/suarezc/errata/internal/tools"
 )
 
+// handleRatingKey handles y/n/s input in modeRating (single-model response).
+// y = thumbs up (records a preference win), n = thumbs down (skipped, no record), s = skip.
+func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	setNote := func(note string) {
+		if len(a.feed) > 0 {
+			a.feed[len(a.feed)-1].note = note
+		}
+	}
+
+	switch msg.Type {
+	case tea.KeyCtrlD, tea.KeyCtrlC:
+		return a, tea.Quit
+
+	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
+		var cmd tea.Cmd
+		a.feedVP, cmd = a.feedVP.Update(msg)
+		return a, cmd
+
+	case tea.KeyRunes:
+		switch string(msg.Runes) {
+		case "y", "Y":
+			// Find the single OK response and record it as the winner.
+			for _, resp := range a.responses {
+				if resp.OK() {
+					_ = preferences.Record(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses)
+					setNote(fmt.Sprintf("Rated good: %s", resp.ModelID))
+					break
+				}
+			}
+			a.responses = nil
+			a.mode = modeIdle
+			return a.withFeedRebuilt(true), nil
+
+		case "n", "N":
+			for _, resp := range a.responses {
+				if resp.OK() {
+					_ = preferences.RecordBad(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses)
+					setNote(fmt.Sprintf("Rated bad: %s", resp.ModelID))
+					break
+				}
+			}
+			a.responses = nil
+			a.mode = modeIdle
+			return a.withFeedRebuilt(true), nil
+
+		case "s", "S":
+			setNote("Skipped.")
+			a.responses = nil
+			a.mode = modeIdle
+			return a.withFeedRebuilt(true), nil
+		}
+	}
+	return a, nil
+}
+
 func (a App) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
@@ -80,7 +135,7 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) {
 	}
 
 	if len(selected.ProposedWrites) == 0 {
-		setNote(fmt.Sprintf("Model %s proposed no file writes.", selected.ModelID))
+		setNote(fmt.Sprintf("Voted for: %s", selected.ModelID))
 	} else {
 		if err := tools.ApplyWrites(selected.ProposedWrites); err != nil {
 			setNote(fmt.Sprintf("Error applying writes: %v", err))

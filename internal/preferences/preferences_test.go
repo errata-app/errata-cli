@@ -1,6 +1,7 @@
 package preferences_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -113,4 +114,197 @@ func TestSummarize_EmptyWhenNoRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prefs.jsonl")
 	tally := preferences.Summarize(path)
 	assert.Empty(t, tally)
+}
+
+// ─── SummarizeDetailed ────────────────────────────────────────────────────────
+
+func TestSummarizeDetailed_Empty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	stats := preferences.SummarizeDetailed(path)
+	assert.Empty(t, stats)
+}
+
+func TestSummarizeDetailed_WinsAndParticipations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	// a wins 2 of 3; b participates in all 3 and wins 1.
+	require.NoError(t, preferences.Record(path, "p1", "a", "s1", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100},
+		{ModelID: "b", LatencyMS: 200},
+	}))
+	require.NoError(t, preferences.Record(path, "p2", "b", "s2", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 150},
+		{ModelID: "b", LatencyMS: 250},
+	}))
+	require.NoError(t, preferences.Record(path, "p3", "a", "s3", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 200},
+		{ModelID: "b", LatencyMS: 300},
+	}))
+
+	stats := preferences.SummarizeDetailed(path)
+	require.Contains(t, stats, "a")
+	require.Contains(t, stats, "b")
+
+	sa := stats["a"]
+	assert.Equal(t, 2, sa.Wins)
+	assert.Equal(t, 3, sa.Participations)
+	assert.InDelta(t, 66.67, sa.WinRate, 0.1)
+
+	sb := stats["b"]
+	assert.Equal(t, 1, sb.Wins)
+	assert.Equal(t, 3, sb.Participations)
+	assert.InDelta(t, 33.33, sb.WinRate, 0.1)
+}
+
+func TestSummarizeDetailed_AvgLatency(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	require.NoError(t, preferences.Record(path, "p1", "a", "s1", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100},
+	}))
+	require.NoError(t, preferences.Record(path, "p2", "a", "s2", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 300},
+	}))
+
+	stats := preferences.SummarizeDetailed(path)
+	assert.InDelta(t, 200.0, stats["a"].AvgLatencyMS, 0.1, "avg latency should be mean of 100 and 300")
+}
+
+func TestSummarizeDetailed_AvgCostUSD(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	require.NoError(t, preferences.Record(path, "p1", "a", "s1", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100, CostUSD: 0.01},
+	}))
+	require.NoError(t, preferences.Record(path, "p2", "a", "s2", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100, CostUSD: 0.03},
+	}))
+
+	stats := preferences.SummarizeDetailed(path)
+	assert.InDelta(t, 0.02, stats["a"].AvgCostUSD, 1e-9, "avg cost should be mean of 0.01 and 0.03")
+}
+
+func TestSummarizeDetailed_ZeroCostForLegacyEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	require.NoError(t, preferences.Record(path, "p1", "a", "s1", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100}, // CostUSD == 0 → not stored
+	}))
+	stats := preferences.SummarizeDetailed(path)
+	assert.Equal(t, 0.0, stats["a"].AvgCostUSD)
+}
+
+func TestSummarizeDetailed_NoZeroDivide(t *testing.T) {
+	// Every model in stats must have Participations >= 1; no division by zero.
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	require.NoError(t, preferences.Record(path, "p", "a", "s", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 50},
+	}))
+	stats := preferences.SummarizeDetailed(path)
+	for _, s := range stats {
+		assert.GreaterOrEqual(t, s.Participations, 1)
+	}
+}
+
+// ─── RecordBad ────────────────────────────────────────────────────────────────
+
+func TestRecordBad_StoresRatingField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}
+	require.NoError(t, preferences.RecordBad(path, "a prompt", "a", "s1", responses))
+
+	entries := preferences.LoadAll(path)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "bad", entries[0].Rating)
+	assert.Equal(t, "", entries[0].Selected)
+	assert.Equal(t, []string{"a"}, entries[0].Models)
+}
+
+func TestRecordBad_CountedAsThumbsDown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}
+	require.NoError(t, preferences.RecordBad(path, "p1", "a", "s1", responses))
+	require.NoError(t, preferences.RecordBad(path, "p2", "a", "s2", responses))
+
+	stats := preferences.SummarizeDetailed(path)
+	assert.Equal(t, 0, stats["a"].Wins)
+	assert.Equal(t, 2, stats["a"].ThumbsDown)
+	assert.Equal(t, 0, stats["a"].Losses)
+	assert.InDelta(t, 100.0, stats["a"].BadRate, 0.1)
+}
+
+// ─── Losses ───────────────────────────────────────────────────────────────────
+
+func TestSummarizeDetailed_Losses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	// a wins twice; b participates in all 3 and loses both times a wins, wins once.
+	require.NoError(t, preferences.Record(path, "p1", "a", "s1", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100},
+		{ModelID: "b", LatencyMS: 200},
+	}))
+	require.NoError(t, preferences.Record(path, "p2", "b", "s2", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 150},
+		{ModelID: "b", LatencyMS: 250},
+	}))
+	require.NoError(t, preferences.Record(path, "p3", "a", "s3", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 200},
+		{ModelID: "b", LatencyMS: 300},
+	}))
+
+	stats := preferences.SummarizeDetailed(path)
+	// a: 2 wins, 1 loss (p2 where b won)
+	assert.Equal(t, 2, stats["a"].Wins)
+	assert.Equal(t, 1, stats["a"].Losses)
+	assert.Equal(t, 0, stats["a"].ThumbsDown)
+	// b: 1 win, 2 losses (p1 and p3 where a won)
+	assert.Equal(t, 1, stats["b"].Wins)
+	assert.Equal(t, 2, stats["b"].Losses)
+	assert.Equal(t, 0, stats["b"].ThumbsDown)
+}
+
+func TestSummarizeDetailed_LossRateCalculation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	// b participates 4 times, loses 3 of them.
+	for i := range 3 {
+		require.NoError(t, preferences.Record(path, fmt.Sprintf("p%d", i), "a", "s", []models.ModelResponse{
+			{ModelID: "a", LatencyMS: 100},
+			{ModelID: "b", LatencyMS: 200},
+		}))
+	}
+	require.NoError(t, preferences.Record(path, "p3", "b", "s", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100},
+		{ModelID: "b", LatencyMS: 200},
+	}))
+
+	stats := preferences.SummarizeDetailed(path)
+	assert.Equal(t, 3, stats["b"].Losses)
+	assert.InDelta(t, 75.0, stats["b"].LossRate, 0.1)
+}
+
+func TestSummarizeDetailed_MixedWinsLossesAndBad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses1 := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}
+	responses2 := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}, {ModelID: "b", LatencyMS: 200}}
+
+	require.NoError(t, preferences.Record(path, "p1", "a", "s1", responses2))    // a wins, b loses
+	require.NoError(t, preferences.RecordBad(path, "p2", "a", "s2", responses1)) // a rated bad
+
+	stats := preferences.SummarizeDetailed(path)
+	assert.Equal(t, 1, stats["a"].Wins)
+	assert.Equal(t, 0, stats["a"].Losses)
+	assert.Equal(t, 1, stats["a"].ThumbsDown)
+	assert.Equal(t, 0, stats["b"].Wins)
+	assert.Equal(t, 1, stats["b"].Losses)
+	assert.Equal(t, 0, stats["b"].ThumbsDown)
+}
+
+func TestRecord_StoresCostUSD(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100, CostUSD: 0.0042},
+		{ModelID: "b", LatencyMS: 200, CostUSD: 0.0}, // zero cost → omitted
+	}
+	require.NoError(t, preferences.Record(path, "p", "a", "s", responses))
+
+	entries := preferences.LoadAll(path)
+	require.Len(t, entries, 1)
+	assert.InDelta(t, 0.0042, entries[0].CostsUSD["a"], 1e-9)
+	_, hasB := entries[0].CostsUSD["b"]
+	assert.False(t, hasB, "zero-cost model should not be stored in CostsUSD")
 }

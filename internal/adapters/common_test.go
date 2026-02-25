@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -23,7 +24,7 @@ func TestDispatchTool_ReadEmitsEventAndReturnsContent(t *testing.T) {
 	var events []models.AgentEvent
 	var proposed []tools.FileWrite
 
-	result, ok := DispatchTool(tools.ReadToolName, map[string]string{"path": relPath},
+	result, ok := DispatchTool(context.Background(), tools.ReadToolName, map[string]string{"path": relPath},
 		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
 
 	assert.True(t, ok)
@@ -38,7 +39,7 @@ func TestDispatchTool_WriteEmitsEventAndQueues(t *testing.T) {
 	var events []models.AgentEvent
 	var proposed []tools.FileWrite
 
-	result, ok := DispatchTool(tools.WriteToolName, map[string]string{"path": "out.txt", "content": "world"},
+	result, ok := DispatchTool(context.Background(), tools.WriteToolName, map[string]string{"path": "out.txt", "content": "world"},
 		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
 
 	assert.True(t, ok)
@@ -53,7 +54,7 @@ func TestDispatchTool_WriteEmitsEventAndQueues(t *testing.T) {
 
 func TestDispatchTool_UnknownToolReturnsFalse(t *testing.T) {
 	var proposed []tools.FileWrite
-	result, ok := DispatchTool("unknown_tool", map[string]string{}, func(models.AgentEvent) {}, &proposed)
+	result, ok := DispatchTool(context.Background(), "unknown_tool", map[string]string{}, func(models.AgentEvent) {}, &proposed)
 	assert.False(t, ok)
 	assert.Equal(t, "", result)
 	assert.Empty(t, proposed)
@@ -66,7 +67,7 @@ func TestDispatchTool_WriteDoesNotExecute(t *testing.T) {
 	const relPath = "should-not-exist.txt"
 	var proposed []tools.FileWrite
 
-	_, ok := DispatchTool(tools.WriteToolName, map[string]string{"path": relPath, "content": "data"},
+	_, ok := DispatchTool(context.Background(), tools.WriteToolName, map[string]string{"path": relPath, "content": "data"},
 		func(models.AgentEvent) {}, &proposed)
 
 	assert.True(t, ok)
@@ -82,7 +83,7 @@ func TestDispatchTool_ListDirectoryEmitsEventAndReturnsTree(t *testing.T) {
 	var events []models.AgentEvent
 	var proposed []tools.FileWrite
 
-	result, ok := DispatchTool(tools.ListDirToolName, map[string]string{"path": "."},
+	result, ok := DispatchTool(context.Background(), tools.ListDirToolName, map[string]string{"path": "."},
 		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
 
 	assert.True(t, ok)
@@ -101,13 +102,13 @@ func TestDispatchTool_ListDirectoryDepthParam(t *testing.T) {
 	var proposed []tools.FileWrite
 
 	// depth=1 should not recurse into nested/
-	result1, _ := DispatchTool(tools.ListDirToolName, map[string]string{"path": ".", "depth": "1"},
+	result1, _ := DispatchTool(context.Background(), tools.ListDirToolName, map[string]string{"path": ".", "depth": "1"},
 		func(models.AgentEvent) {}, &proposed)
 	assert.Contains(t, result1, "sub/")
 	assert.NotContains(t, result1, "deep.txt")
 
 	// depth=3 should reach deep.txt
-	result3, _ := DispatchTool(tools.ListDirToolName, map[string]string{"path": ".", "depth": "3"},
+	result3, _ := DispatchTool(context.Background(), tools.ListDirToolName, map[string]string{"path": ".", "depth": "3"},
 		func(models.AgentEvent) {}, &proposed)
 	assert.Contains(t, result3, "deep.txt")
 }
@@ -121,7 +122,7 @@ func TestDispatchTool_SearchFilesEmitsEventAndReturnsMatches(t *testing.T) {
 	var events []models.AgentEvent
 	var proposed []tools.FileWrite
 
-	result, ok := DispatchTool(tools.SearchFilesName, map[string]string{"pattern": "*.go"},
+	result, ok := DispatchTool(context.Background(), tools.SearchFilesName, map[string]string{"pattern": "*.go"},
 		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
 
 	assert.True(t, ok)
@@ -139,7 +140,7 @@ func TestDispatchTool_SearchFilesDoubleStarPattern(t *testing.T) {
 	require.NoError(t, os.WriteFile("internal/tools/tools.go", []byte(""), 0o644))
 
 	var proposed []tools.FileWrite
-	result, ok := DispatchTool(tools.SearchFilesName, map[string]string{"pattern": "**/*.go"},
+	result, ok := DispatchTool(context.Background(), tools.SearchFilesName, map[string]string{"pattern": "**/*.go"},
 		func(models.AgentEvent) {}, &proposed)
 
 	assert.True(t, ok)
@@ -155,7 +156,7 @@ func TestDispatchTool_SearchCodeEmitsEventAndReturnsMatches(t *testing.T) {
 	var events []models.AgentEvent
 	var proposed []tools.FileWrite
 
-	result, ok := DispatchTool(tools.SearchCodeName, map[string]string{"pattern": "Hello"},
+	result, ok := DispatchTool(context.Background(), tools.SearchCodeName, map[string]string{"pattern": "Hello"},
 		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
 
 	assert.True(t, ok)
@@ -172,7 +173,7 @@ func TestDispatchTool_SearchCodeFileGlob(t *testing.T) {
 	require.NoError(t, os.WriteFile("bar.txt", []byte("needle\n"), 0o644))
 
 	var proposed []tools.FileWrite
-	result, ok := DispatchTool(tools.SearchCodeName, map[string]string{"pattern": "needle", "file_glob": "*.go"},
+	result, ok := DispatchTool(context.Background(), tools.SearchCodeName, map[string]string{"pattern": "needle", "file_glob": "*.go"},
 		func(models.AgentEvent) {}, &proposed)
 
 	assert.True(t, ok)
@@ -184,7 +185,7 @@ func TestDispatchTool_BashEmitsEventAndReturnsOutput(t *testing.T) {
 	var events []models.AgentEvent
 	var proposed []tools.FileWrite
 
-	result, ok := DispatchTool(tools.BashToolName,
+	result, ok := DispatchTool(context.Background(), tools.BashToolName,
 		map[string]string{"command": "echo hi", "description": "say hi"},
 		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
 
@@ -201,13 +202,37 @@ func TestDispatchTool_BashFallsBackToCommandAsDesc(t *testing.T) {
 	var events []models.AgentEvent
 	var proposed []tools.FileWrite
 
-	_, ok := DispatchTool(tools.BashToolName,
+	_, ok := DispatchTool(context.Background(), tools.BashToolName,
 		map[string]string{"command": "echo x"},
 		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
 
 	assert.True(t, ok)
 	require.Len(t, events, 1)
 	assert.Equal(t, "echo x", events[0].Data)
+}
+
+func TestDispatchTool_MCPDispatcherTakesPriority(t *testing.T) {
+	// An MCP dispatcher registered in context should be called instead of built-in tools.
+	called := false
+	dispatchers := map[string]tools.MCPDispatcher{
+		"my_mcp_tool": func(args map[string]string) string {
+			called = true
+			return "mcp result: " + args["input"]
+		},
+	}
+	ctx := tools.WithMCPDispatchers(context.Background(), dispatchers)
+
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(ctx, "my_mcp_tool", map[string]string{"input": "hello"},
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
+
+	assert.True(t, ok)
+	assert.True(t, called)
+	assert.Equal(t, "mcp result: hello", result)
+	require.Len(t, events, 1)
+	assert.Equal(t, "reading", events[0].Type)
+	assert.Contains(t, events[0].Data, "my_mcp_tool")
 }
 
 // ─── extractStringMap ─────────────────────────────────────────────────────────

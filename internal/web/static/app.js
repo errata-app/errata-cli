@@ -158,6 +158,7 @@ function handleServerMessage(msg) {
           sessionCostPerModel[r.model_id] = (sessionCostPerModel[r.model_id] || 0) + c;
         });
         const hasWrites = msg.responses.some(r => r.proposed_writes && r.proposed_writes.length > 0);
+        const okWithText = msg.responses.filter(r => !r.error && r.text).length;
         // Update live panel headers with the final latency/token/cost stats.
         msg.responses.forEach(resp => {
           const p = panels[resp.model_id];
@@ -171,12 +172,15 @@ function handleServerMessage(msg) {
           }
         });
 
-        if (!hasWrites) {
-          // Leave panels visible; remove running chrome, then reset state via toIdle().
+        if (!hasWrites && okWithText === 0) {
+          // No usable text response — go idle immediately.
           finalizeRunEl();
           history.push(buildRunEntry(currentRunPrompt, msg.responses, null));
           saveHistory();
           toIdle();
+        } else if (!hasWrites && okWithText === 1) {
+          // Single response — show thumbs-up/down rating bar.
+          toRating(msg.responses);
         } else {
           toSelecting(msg.responses);
         }
@@ -192,10 +196,15 @@ function handleServerMessage(msg) {
           const content = currentRunEl.querySelector('.history-run-content');
           if (content) {
             content.innerHTML = '';
-            if (msg.applied && msg.applied.length > 0) {
+            const noteText = (msg.applied && msg.applied.length > 0)
+              ? '✓ Applied: ' + msg.applied.join(', ')
+              : savedRunData && savedRunData.selected
+                ? '✓ Voted for: ' + savedRunData.selected
+                : null;
+            if (noteText) {
               const note = document.createElement('div');
               note.className = 'run-applied-note';
-              note.textContent = '✓ Applied: ' + msg.applied.join(', ');
+              note.textContent = noteText;
               content.appendChild(note);
             }
             content.classList.remove('visible');
@@ -208,6 +217,11 @@ function handleServerMessage(msg) {
         savedRunData = null;
       }
       toIdle();
+      break;
+
+    case 'rated':
+      // Server confirmed a bad rating was recorded.
+      finishRating('👎 Rated bad: ' + (msg.model_id || ''));
       break;
 
     case 'models_set': {
@@ -439,6 +453,105 @@ function toSelecting(responses) {
   mainEl.scrollTop = mainEl.scrollHeight;
 }
 
+function toRating(responses) {
+  appState = 'rating';
+  currentResponses = responses;
+  btnSend.disabled = false;
+  inputEl.disabled = false;
+
+  if (!currentRunEl) return;
+
+  const statusEl = currentRunEl.querySelector('.running-status');
+  if (statusEl) statusEl.remove();
+  const cancelArea = currentRunEl.querySelector('.cancel-area');
+  if (cancelArea) cancelArea.remove();
+  currentPanelsGrid = null;
+
+  const content = currentRunEl.querySelector('.history-run-content');
+  if (!content) return;
+  content.innerHTML = '';
+
+  // Show the single response text.
+  const resp = responses.find(r => !r.error && r.text);
+  if (resp) {
+    const textEl = document.createElement('div');
+    textEl.className = 'response-text';
+    textEl.textContent = resp.text;
+    content.appendChild(textEl);
+  }
+
+  // Rating bar.
+  const bar = document.createElement('div');
+  bar.className = 'rating-bar';
+
+  const label = document.createElement('span');
+  label.className = 'rating-label';
+  label.textContent = 'Rate this response:';
+  bar.appendChild(label);
+
+  const goodBtn = document.createElement('button');
+  goodBtn.className = 'btn-rate btn-rate-good';
+  goodBtn.textContent = '👍 Good';
+  goodBtn.addEventListener('click', () => doRate(resp ? resp.model_id : null, true));
+  bar.appendChild(goodBtn);
+
+  const badBtn = document.createElement('button');
+  badBtn.className = 'btn-rate btn-rate-bad';
+  badBtn.textContent = '👎 Bad';
+  badBtn.addEventListener('click', () => doRate(resp ? resp.model_id : null, false));
+  bar.appendChild(badBtn);
+
+  const skipBtn = document.createElement('button');
+  skipBtn.className = 'btn-rate btn-rate-skip';
+  skipBtn.textContent = 'Skip';
+  skipBtn.addEventListener('click', () => doRate(null, null));
+  bar.appendChild(skipBtn);
+
+  content.appendChild(bar);
+  mainEl.scrollTop = mainEl.scrollHeight;
+}
+
+function doRate(modelId, good) {
+  if (appState !== 'rating') return;
+  if (good === true && modelId) {
+    // Thumbs-up — record as a preference win via existing select path.
+    savedRunData = { prompt: currentRunPrompt, responses: currentResponses, selected: modelId };
+    appState = 'idle';
+    wsSend({ type: 'select', model_id: modelId });
+  } else if (good === false && modelId) {
+    // Thumbs-down — send to server for bad-rating recording; await 'rated' response.
+    savedRunData = { prompt: currentRunPrompt, responses: currentResponses, selected: null };
+    appState = 'idle';
+    wsSend({ type: 'rate_bad', model_id: modelId });
+  } else {
+    // Skip — no server call, just clean up.
+    finishRating('Skipped.');
+  }
+}
+
+function finishRating(noteText) {
+  if (currentRunEl) {
+    const content = currentRunEl.querySelector('.history-run-content');
+    if (content) {
+      content.innerHTML = '';
+      const note = document.createElement('div');
+      note.className = 'run-applied-note';
+      note.textContent = noteText;
+      content.appendChild(note);
+      content.classList.remove('visible');
+      const toggle = currentRunEl.querySelector('.run-toggle');
+      if (toggle) toggle.textContent = '▶';
+    }
+    currentRunEl = null;
+    currentPanelsGrid = null;
+  }
+  history.push(buildRunEntry(currentRunPrompt, currentResponses, null));
+  saveHistory();
+  currentResponses = null;
+  savedRunData = null;
+  toIdle();
+}
+
 // Finalizes the live run entry and optionally appends a status message.
 function toIdle(msg, cls) {
   appState         = 'idle';
@@ -647,6 +760,8 @@ function appendPanelEvent(modelId, type, data) {
 
 // Populates container with diff sections + selection buttons (in-place in currentRunEl).
 function buildSelectingContent(responses, container) {
+  const anyWrites = responses.some(r => !r.error && r.proposed_writes && r.proposed_writes.length > 0);
+
   responses.forEach((resp, idx) => {
     if (resp.error) return;
     const color = PANEL_COLORS[idx % PANEL_COLORS.length];
@@ -661,15 +776,11 @@ function buildSelectingContent(responses, container) {
     section.appendChild(hdr);
 
     if (!resp.proposed_writes || resp.proposed_writes.length === 0) {
-      const noW = document.createElement('div');
-      noW.className = 'no-writes';
-      noW.textContent = '(no file writes proposed)';
-      section.appendChild(noW);
       if (resp.text) {
-        const preview = document.createElement('div');
-        preview.className = 'text-preview';
-        preview.textContent = resp.text.split('\n')[0].slice(0, ERROR_TRUNCATE_LEN);
-        section.appendChild(preview);
+        const textEl = document.createElement('div');
+        textEl.className = 'response-text';
+        textEl.textContent = resp.text;
+        section.appendChild(textEl);
       }
     } else {
       resp.proposed_writes.forEach(pw => {
@@ -723,7 +834,7 @@ function buildSelectingContent(responses, container) {
   menu.className = 'selection-menu';
 
   const title = document.createElement('h3');
-  title.textContent = 'Select a response to apply:';
+  title.textContent = anyWrites ? 'Select a response to apply:' : 'Vote for a response:';
   menu.appendChild(title);
 
   const buttons = document.createElement('div');
@@ -733,11 +844,15 @@ function buildSelectingContent(responses, container) {
   responses.forEach((resp) => {
     if (resp.error) return;
     selIdx++;
-    const files = (resp.proposed_writes || []).map(w => w.path).join(', ') || '(no writes)';
     const btn = document.createElement('button');
     btn.className = 'btn-select';
     const cost = resp.cost_usd > 0 ? `  $${resp.cost_usd.toFixed(4)}` : '';
-    btn.textContent = `${selIdx}  ${resp.model_id}  (${resp.latency_ms}ms${cost})  →  ${files}`;
+    if (anyWrites) {
+      const files = (resp.proposed_writes || []).map(w => w.path).join(', ') || '(no writes)';
+      btn.textContent = `${selIdx}  ${resp.model_id}  (${resp.latency_ms}ms${cost})  →  ${files}`;
+    } else {
+      btn.textContent = `${selIdx}  ${resp.model_id}  (${resp.latency_ms}ms${cost})`;
+    }
     btn.addEventListener('click', () => doSelect(resp.model_id));
     buttons.appendChild(btn);
   });

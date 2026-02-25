@@ -14,6 +14,7 @@ import (
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 //go:embed static
@@ -27,13 +28,17 @@ type Server struct {
 	sessionID string
 	cfg       config.Config
 
+	// MCP tool definitions and dispatchers (nil if no MCP servers configured)
+	mcpDefs        []tools.ToolDef
+	mcpDispatchers map[string]tools.MCPDispatcher
+
 	histMu    sync.RWMutex
 	histories map[string][]models.ConversationTurn // shared across all browser connections
 }
 
 // New creates a Server. A fresh session ID is generated on each call.
 // Conversation history is loaded from histPath if it exists.
-func New(adapters []models.ModelAdapter, prefPath, histPath string, cfg config.Config) *Server {
+func New(adapters []models.ModelAdapter, prefPath, histPath string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher) *Server {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 
@@ -43,12 +48,14 @@ func New(adapters []models.ModelAdapter, prefPath, histPath string, cfg config.C
 	}
 
 	return &Server{
-		adapters:  adapters,
-		prefPath:  prefPath,
-		histPath:  histPath,
-		sessionID: hex.EncodeToString(b),
-		cfg:       cfg,
-		histories: h,
+		adapters:       adapters,
+		prefPath:       prefPath,
+		histPath:       histPath,
+		sessionID:      hex.EncodeToString(b),
+		cfg:            cfg,
+		histories:      h,
+		mcpDefs:        mcpDefs,
+		mcpDispatchers: mcpDispatchers,
 	}
 }
 

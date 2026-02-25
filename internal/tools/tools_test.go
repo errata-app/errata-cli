@@ -748,3 +748,106 @@ func TestExecuteWebFetch_ConcurrentSameURLDeduplicates(t *testing.T) {
 	// Only one HTTP request should have been made.
 	assert.Equal(t, 1, requestCount, "singleflight should deduplicate concurrent requests")
 }
+
+// ─── ExecuteWebSearch ─────────────────────────────────────────────────────────
+
+// ddgJSON builds a minimal DuckDuckGo instant-answers JSON payload for tests.
+func ddgJSON(abstract, source, abstractURL, answer string, topics []map[string]string) string {
+	topicsJSON := "[]"
+	if len(topics) > 0 {
+		var parts []string
+		for _, t := range topics {
+			parts = append(parts, `{"Text":"`+t["text"]+`","FirstURL":"`+t["url"]+`"}`)
+		}
+		topicsJSON = "[" + strings.Join(parts, ",") + "]"
+	}
+	return `{"AbstractText":"` + abstract + `","AbstractURL":"` + abstractURL +
+		`","AbstractSource":"` + source + `","Answer":"` + answer +
+		`","Definition":"","DefinitionURL":"","RelatedTopics":` + topicsJSON + `,"Results":[]}`
+}
+
+func TestExecuteWebSearch_AbstractResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(ddgJSON("Go is a language.", "Wikipedia", "https://en.wikipedia.org/wiki/Go", "", nil)))
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+
+	out := tools.ExecuteWebSearch("golang")
+	assert.Contains(t, out, "Go is a language.")
+	assert.Contains(t, out, "Wikipedia")
+}
+
+func TestExecuteWebSearch_AnswerField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(ddgJSON("", "", "", "42 is the answer.", nil)))
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+
+	out := tools.ExecuteWebSearch("answer to life")
+	assert.Contains(t, out, "42 is the answer.")
+}
+
+func TestExecuteWebSearch_RelatedTopics(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(ddgJSON("", "", "", "", []map[string]string{
+			{"text": "Topic A", "url": "https://example.com/a"},
+			{"text": "Topic B", "url": "https://example.com/b"},
+		})))
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+
+	out := tools.ExecuteWebSearch("something")
+	assert.Contains(t, out, "Topic A")
+	assert.Contains(t, out, "Topic B")
+}
+
+func TestExecuteWebSearch_EmptyResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(ddgJSON("", "", "", "", nil)))
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+
+	out := tools.ExecuteWebSearch("xyzzy12345")
+	assert.Contains(t, out, "no instant answer found")
+	assert.Contains(t, out, "web_fetch")
+}
+
+func TestExecuteWebSearch_HTTP500(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+
+	out := tools.ExecuteWebSearch("anything")
+	assert.Contains(t, out, "[error:")
+	assert.Contains(t, out, "500")
+}
+
+func TestExecuteWebSearch_EmptyQuery(t *testing.T) {
+	out := tools.ExecuteWebSearch("")
+	assert.Contains(t, out, "[error:")
+	assert.Contains(t, out, "empty")
+}
+
+func TestExecuteWebSearch_QueryForwardedToServer(t *testing.T) {
+	var receivedQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.Query().Get("q")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(ddgJSON("", "", "", "", nil)))
+	}))
+	defer srv.Close()
+	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+
+	tools.ExecuteWebSearch("my test query")
+	assert.Equal(t, "my test query", receivedQuery)
+}

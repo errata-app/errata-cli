@@ -49,6 +49,7 @@ const (
 	modeIdle      mode = iota
 	modeRunning        // agents running, panels live
 	modeSelecting      // diff shown in feed, awaiting selection
+	modeRating         // single-model text response, awaiting thumbs-up/down
 )
 
 // ---- feed item ----
@@ -74,6 +75,10 @@ type App struct {
 	toolStatePath  string // path to .errata_tools persistence file; "" = no persistence
 	sessionID      string
 	cfg            config.Config
+
+	// MCP tool definitions and dispatchers (nil if no MCP servers configured)
+	mcpDefs        []tools.ToolDef
+	mcpDispatchers map[string]tools.MCPDispatcher
 
 	mode    mode
 	verbose bool
@@ -119,7 +124,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID, toolStatePath string, cfg config.Config) *App {
+func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID, toolStatePath string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -159,6 +164,8 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		disabledTools:         disabled,
 		sessionCostPerModel:   make(map[string]float64),
 		cfg:                   cfg,
+		mcpDefs:               mcpDefs,
+		mcpDispatchers:        mcpDispatchers,
 	}
 }
 
@@ -184,6 +191,8 @@ func (a App) feedVPHeight() int {
 		if footerLines < 4 {
 			footerLines = 4
 		}
+	case modeRating:
+		footerLines = 2 // rating prompt line + blank
 	}
 	h := a.height - headerLines - sepLine - footerLines
 	if h < 3 {
@@ -263,12 +272,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		atBottom := a.feedVP.AtBottom()
 		return a.withFeedRebuilt(atBottom), nil
 
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress &&
+			(msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
+			var cmd tea.Cmd
+			a.feedVP, cmd = a.feedVP.Update(msg)
+			return a, cmd
+		}
+
 	case tea.KeyMsg:
 		switch a.mode {
 		case modeIdle:
 			return a.handleIdleKey(msg)
 		case modeSelecting:
 			return a.handleSelectKey(msg)
+		case modeRating:
+			return a.handleRatingKey(msg)
 		}
 		// modeRunning: ignore all key input
 		return a, nil
@@ -347,8 +366,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if !hasWrites {
-			a.mode = modeIdle
-			return a.withFeedRebuilt(true), nil
+			okWithText := 0
+			for _, resp := range msg.responses {
+				if resp.OK() && resp.Text != "" {
+					okWithText++
+				}
+			}
+			if okWithText == 0 {
+				a.mode = modeIdle
+				return a.withFeedRebuilt(true), nil
+			}
+			if okWithText == 1 {
+				// Single usable response — offer thumbs-up/down rating.
+				a.responses = msg.responses
+				a.mode = modeRating
+				return a.withFeedRebuilt(true), nil
+			}
+			// okWithText >= 2: fall through to modeSelecting for text voting.
 		}
 
 		a.responses = msg.responses
@@ -383,7 +417,7 @@ func (a App) View() string {
 	case modeSelecting:
 		if !a.feedVP.AtBottom() {
 			hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).
-				Render(fmt.Sprintf("  ↑↓/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
+				Render(fmt.Sprintf("  scroll/↑↓/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
 			sb.WriteString(hint)
 			sb.WriteByte('\n')
 		}
@@ -396,6 +430,11 @@ func (a App) View() string {
 		sb.WriteString("\nchoice> ")
 		sb.WriteString(a.selection)
 
+	case modeRating:
+		ratingStyle := lipgloss.NewStyle().Bold(true)
+		sb.WriteString(ratingStyle.Render("  Rate this response:"))
+		sb.WriteString("  y = good  n = bad  s = skip\n")
+
 	case modeRunning:
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).
 			Render("  running…"))
@@ -403,7 +442,7 @@ func (a App) View() string {
 	case modeIdle:
 		if !a.feedVP.AtBottom() {
 			hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).
-				Render(fmt.Sprintf("  ↑/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
+				Render(fmt.Sprintf("  scroll/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
 			sb.WriteString(hint)
 			sb.WriteByte('\n')
 		}
@@ -441,10 +480,10 @@ func (a App) View() string {
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config, warnings []string) error {
-	app := New(adapters, prefPath, histPath, promptHistPath, sessionID, ".errata_tools", cfg)
+func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher) error {
+	app := New(adapters, prefPath, histPath, promptHistPath, sessionID, ".errata_tools", cfg, mcpDefs, mcpDispatchers)
 
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	app.SetProgram(p)
 
 	for _, w := range warnings {

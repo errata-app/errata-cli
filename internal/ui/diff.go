@@ -45,8 +45,6 @@ func RenderDiffs(responses []models.ModelResponse) string {
 		sb.WriteByte('\n')
 
 		if len(resp.ProposedWrites) == 0 {
-			sb.WriteString(contextStyle.Render("  (no file writes proposed)"))
-			sb.WriteByte('\n')
 			if resp.Text != "" {
 				for _, line := range strings.Split(resp.Text, "\n") {
 					sb.WriteString(contextStyle.Render("  " + line))
@@ -134,9 +132,22 @@ func renderFileDiff(fd diff.FileDiff) string {
 // RenderSelectionMenu returns the numbered selection prompt string.
 // Failed responses are shown as non-selectable; only OK responses get numbers.
 func RenderSelectionMenu(responses []models.ModelResponse) string {
+	anyWrites := false
+	for _, resp := range responses {
+		if resp.OK() && len(resp.ProposedWrites) > 0 {
+			anyWrites = true
+			break
+		}
+	}
+
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	var sb strings.Builder
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Render("Select a response to apply:"))
+
+	header := "Select a response to apply:"
+	if !anyWrites {
+		header = "Vote for a response:"
+	}
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Render(header))
 	sb.WriteByte('\n')
 
 	selIdx := 0
@@ -147,20 +158,26 @@ func RenderSelectionMenu(responses []models.ModelResponse) string {
 			continue
 		}
 		selIdx++
-		var files []string
-		for _, fw := range resp.ProposedWrites {
-			files = append(files, fw.Path)
-		}
-		fileStr := strings.Join(files, ", ")
-		if fileStr == "" {
-			fileStr = "(no writes)"
-		}
 		cost := ""
 		if resp.CostUSD > 0 {
 			cost = fmt.Sprintf("  $%.4f", resp.CostUSD)
 		}
-		line := fmt.Sprintf("  %d  %-30s (%dms%s)   →  %s",
-			selIdx, resp.ModelID, resp.LatencyMS, cost, fileStr)
+		var line string
+		if anyWrites {
+			var files []string
+			for _, fw := range resp.ProposedWrites {
+				files = append(files, fw.Path)
+			}
+			fileStr := strings.Join(files, ", ")
+			if fileStr == "" {
+				fileStr = "(no writes)"
+			}
+			line = fmt.Sprintf("  %d  %-30s (%dms%s)   →  %s",
+				selIdx, resp.ModelID, resp.LatencyMS, cost, fileStr)
+		} else {
+			line = fmt.Sprintf("  %d  %-30s (%dms%s)",
+				selIdx, resp.ModelID, resp.LatencyMS, cost)
+		}
 		sb.WriteString(line)
 		sb.WriteByte('\n')
 	}
