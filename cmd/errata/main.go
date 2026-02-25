@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/headless"
 	"github.com/suarezc/errata/internal/logging"
 	"github.com/suarezc/errata/internal/mcp"
 	"github.com/suarezc/errata/internal/models"
@@ -36,8 +38,19 @@ func main() {
 		RunE:  runStats,
 	}
 	statsCmd.Flags().Bool("detail", false, "Show detailed analytics (win rate, avg latency, avg cost)")
+
+	runCmd := &cobra.Command{
+		Use:   "run",
+		Short: "Run recipe tasks headlessly (no user interaction)",
+		RunE:  runHeadless,
+	}
+	runCmd.Flags().Bool("json", false, "Print report to stdout as JSON")
+	runCmd.Flags().String("output-dir", "", "Output directory (default: data/outputs/)")
+	runCmd.Flags().Bool("verbose", false, "Show model text events in progress")
+
 	root.AddCommand(
 		statsCmd,
+		runCmd,
 		&cobra.Command{
 			Use:   "serve",
 			Short: "Start web interface on localhost:8080",
@@ -147,6 +160,45 @@ func runServe(cmd *cobra.Command, args []string) error {
 	addr := ":8080"
 	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
 	return web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg, mcpDefs, mcpDispatchers, warnings, rec).Start(addr)
+}
+
+func runHeadless(cmd *cobra.Command, args []string) error {
+	rec := loadRecipe()
+	if len(rec.Tasks) == 0 {
+		return fmt.Errorf("recipe has no tasks — ## Tasks section is required for `errata run`")
+	}
+
+	cfg := config.Load()
+	rec.ApplyTo(&cfg)
+	applyProjectRoot(rec)
+
+	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
+	defer cleanup()
+
+	if len(ads) == 0 {
+		return fmt.Errorf("no models available — set at least one API key in .env")
+	}
+
+	for _, w := range warnings {
+		fmt.Fprintln(os.Stderr, "warning:", w)
+	}
+
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	outputDir, _ := cmd.Flags().GetString("output-dir")
+	verbose, _ := cmd.Flags().GetBool("verbose")
+
+	_, err := headless.Run(context.Background(), headless.Options{
+		Recipe:         rec,
+		Adapters:       ads,
+		SessionID:      sessionID,
+		Cfg:            cfg,
+		OutputDir:      outputDir,
+		Verbose:        verbose,
+		JSON:           jsonFlag,
+		MCPDefs:        mcpDefs,
+		MCPDispatchers: mcpDispatchers,
+	})
+	return err
 }
 
 func runStats(cmd *cobra.Command, args []string) error {
