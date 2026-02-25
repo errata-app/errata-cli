@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -36,6 +37,10 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			for _, resp := range a.responses {
 				if resp.OK() {
 					_ = preferences.Record(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses)
+					if a.lastReport != nil {
+						_ = output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "good")
+						a.lastReport = nil
+					}
 					setNote(fmt.Sprintf("Rated good: %s", resp.ModelID))
 					break
 				}
@@ -48,6 +53,10 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			for _, resp := range a.responses {
 				if resp.OK() {
 					_ = preferences.RecordBad(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses)
+					if a.lastReport != nil {
+						_ = output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "bad")
+						a.lastReport = nil
+					}
 					setNote(fmt.Sprintf("Rated bad: %s", resp.ModelID))
 					break
 				}
@@ -58,6 +67,7 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		case "s", "S":
 			setNote("Skipped.")
+			a.lastReport = nil
 			a.responses = nil
 			a.mode = modeIdle
 			return a.withFeedRebuilt(true), nil
@@ -103,6 +113,7 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) {
 
 	if strings.EqualFold(choice, "s") {
 		setNote("Skipped.")
+		a.lastReport = nil
 		a.responses = nil
 		a.mode = modeIdle
 		return a.withFeedRebuilt(true), nil
@@ -149,6 +160,15 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) {
 	}
 
 	_ = preferences.Record(a.prefPath, a.lastPrompt, selected.ModelID, a.sessionID, a.responses)
+
+	if a.lastReport != nil {
+		var appliedPaths []string
+		for _, fw := range selected.ProposedWrites {
+			appliedPaths = append(appliedPaths, fw.Path)
+		}
+		_ = output.RecordSelection(output.DefaultDir, a.lastReport, selected.ModelID, appliedPaths, "")
+		a.lastReport = nil
+	}
 
 	a.responses = nil
 	a.mode = modeIdle

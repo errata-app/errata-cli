@@ -16,6 +16,7 @@ import (
 	"github.com/suarezc/errata/internal/diff"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/runner"
@@ -105,6 +106,7 @@ type wsConn struct {
 	cancelRun      context.CancelFunc     // cancel for the most recent run; nil initially
 	lastRun        []models.ModelResponse // results of last completed run
 	lastPrompt     string
+	lastReport     *output.Report         // most recent output report; for selection recording
 	activeAdapters []models.ModelAdapter // nil = use all s.adapters
 	disabledTools  map[string]bool       // tools excluded from runs; nil = all enabled
 	seed           *int64               // pseudorandom seed; nil = not set
@@ -294,17 +296,27 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		if seed != nil {
 			toolCtx = tools.WithSeed(toolCtx, *seed)
 		}
+		collector := output.NewCollector()
 		rs := runner.RunAll(
 			toolCtx, ads, effectiveHistories, prompt,
-			func(modelID string, e models.AgentEvent) {
+			collector.WrapOnEvent(func(modelID string, e models.AgentEvent) {
 				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
-			},
+			}),
 			verbose,
 		)
 
 		if runCtx.Err() != nil {
 			wc.send(wsServerMsg{Type: "cancelled"})
 			return
+		}
+
+		toolNames := make([]string, len(activeDefs))
+		for i, d := range activeDefs {
+			toolNames[i] = d.Name
+		}
+		report := output.BuildReport(wc.s.sessionID, wc.s.rec, prompt, rs, collector, toolNames)
+		if _, err := output.Save(output.DefaultDir, report); err != nil {
+			log.Printf("web: could not save output report: %v", err)
 		}
 
 		adapterIDs := make([]string, len(ads))
@@ -314,6 +326,7 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		wc.mu.Lock()
 		wc.lastRun = rs
 		wc.lastPrompt = prompt
+		wc.lastReport = report
 		wc.mu.Unlock()
 
 		wc.s.histMu.Lock()
@@ -360,13 +373,20 @@ func (wc *wsConn) wsHandleSelect(msg wsClientMsg) {
 	}
 
 	wc.mu.Lock()
+	report := wc.lastReport
 	wc.lastRun = nil
+	wc.lastReport = nil
 	wc.mu.Unlock()
 
 	applied := make([]string, 0, len(selected.ProposedWrites))
 	for _, fw := range selected.ProposedWrites {
 		applied = append(applied, fw.Path)
 	}
+
+	if report != nil {
+		_ = output.RecordSelection(output.DefaultDir, report, msg.ModelID, applied, "")
+	}
+
 	wc.send(wsServerMsg{Type: "applied", Applied: applied})
 }
 
@@ -386,8 +406,14 @@ func (wc *wsConn) wsHandleRateBad(msg wsClientMsg) {
 	}
 
 	wc.mu.Lock()
+	report := wc.lastReport
 	wc.lastRun = nil
+	wc.lastReport = nil
 	wc.mu.Unlock()
+
+	if report != nil {
+		_ = output.RecordSelection(output.DefaultDir, report, msg.ModelID, nil, "bad")
+	}
 
 	wc.send(wsServerMsg{Type: "rated", ModelID: msg.ModelID})
 }
