@@ -24,6 +24,9 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
 		return a, tea.Quit
 
+	case tea.KeyCtrlO:
+		return a.toggleExpandLastRun()
+
 	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
 		var cmd tea.Cmd
 		a.feedVP, cmd = a.feedVP.Update(msg)
@@ -70,6 +73,9 @@ func (a App) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
 		return a, tea.Quit
+
+	case tea.KeyCtrlO:
+		return a.toggleExpandLastRun()
 
 	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
 		var cmd tea.Cmd

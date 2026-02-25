@@ -17,6 +17,9 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
 		return a, tea.Quit
 
+	case tea.KeyCtrlO:
+		return a.toggleExpandLastRun()
+
 	case tea.KeyCtrlR:
 		a.searchActive = true
 		a.searchQuery = ""
@@ -148,6 +151,33 @@ func (a App) currentSearchResult() string {
 		return ""
 	}
 	return r[a.searchResultIdx]
+}
+
+// toggleExpandLastRun finds the most recent completed run and toggles its panels
+// between expanded and collapsed views.
+func (a App) toggleExpandLastRun() (tea.Model, tea.Cmd) {
+	for i := len(a.feed) - 1; i >= 0; i-- {
+		item := &a.feed[i]
+		if item.kind != "run" || len(item.panels) == 0 {
+			continue
+		}
+		allDone := true
+		for _, p := range item.panels {
+			if !p.done {
+				allDone = false
+				break
+			}
+		}
+		if !allDone {
+			continue
+		}
+		newState := !item.panels[0].expanded
+		for _, p := range item.panels {
+			p.expanded = newState
+		}
+		return a.withFeedRebuilt(false), nil
+	}
+	return a, nil
 }
 
 // handleSearchKey processes keypresses while Ctrl-R search is active.
