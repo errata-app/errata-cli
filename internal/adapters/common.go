@@ -138,6 +138,20 @@ func DispatchTool(
 		query := args["query"]
 		onEvent(models.AgentEvent{Type: "reading", Data: "web_search: " + query})
 		return tools.ExecuteWebSearch(query), true
+
+	case tools.SpawnAgentToolName:
+		dispatcher := tools.SubagentDispatcherFromContext(ctx)
+		if dispatcher == nil {
+			return "[spawn_agent error: sub-agent spawning is not configured]", true
+		}
+		task := args["task"]
+		onEvent(models.AgentEvent{Type: "reading", Data: "spawn_agent: " + task})
+		text, writes, errMsg := dispatcher(ctx, args)
+		if errMsg != "" {
+			return errMsg, true
+		}
+		*proposed = append(*proposed, writes...)
+		return text, true
 	}
 	return "", false
 }

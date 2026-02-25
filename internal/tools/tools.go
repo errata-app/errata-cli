@@ -27,15 +27,16 @@ import (
 var webFetchGroup singleflight.Group
 
 const (
-	ReadToolName      = "read_file"
-	WriteToolName     = "write_file"
-	EditToolName      = "edit_file"
-	ListDirToolName   = "list_directory"
-	SearchFilesName   = "search_files"
-	SearchCodeName    = "search_code"
-	BashToolName      = "bash"
-	WebFetchToolName  = "web_fetch"
-	WebSearchToolName = "web_search"
+	ReadToolName       = "read_file"
+	WriteToolName      = "write_file"
+	EditToolName       = "edit_file"
+	ListDirToolName    = "list_directory"
+	SearchFilesName    = "search_files"
+	SearchCodeName     = "search_code"
+	BashToolName       = "bash"
+	WebFetchToolName   = "web_fetch"
+	WebSearchToolName  = "web_search"
+	SpawnAgentToolName = "spawn_agent"
 )
 
 // maxReadLines is the hard cap on lines returned by ExecuteRead.
@@ -188,6 +189,18 @@ var Definitions = []ToolDef{
 		},
 		Required: []string{"query"},
 	},
+	{
+		Name: SpawnAgentToolName,
+		Description: "Spawn a sub-agent to complete a specific task. The sub-agent runs its own " +
+			"agentic loop and returns its final response. Any file writes the sub-agent proposes " +
+			"are automatically included in the current run's proposals and shown in the diff view.",
+		Properties: map[string]ToolParam{
+			"task":     {Type: "string", Description: "The specific task for the sub-agent to complete."},
+			"role":     {Type: "string", Description: "Tool access role: 'explorer' (read-only search/file/web), 'planner' (explorer + bash), 'coder' (full tools, can propose writes). Default: coder"},
+			"model_id": {Type: "string", Description: "Model to use. Defaults to ERRATA_SUBAGENT_MODEL or the current model."},
+		},
+		Required: []string{"task"},
+	},
 }
 
 // activeToolsKey is the context key for the active tool set.
@@ -225,6 +238,99 @@ func WithMCPDispatchers(ctx context.Context, dispatchers map[string]MCPDispatche
 // or nil if no dispatchers were registered (MCP not configured).
 func MCPDispatchersFromContext(ctx context.Context) map[string]MCPDispatcher {
 	v, _ := ctx.Value(mcpDispatchersKey{}).(map[string]MCPDispatcher)
+	return v
+}
+
+// ─── Sub-agent support ────────────────────────────────────────────────────────
+
+// Sub-agent role names control which tools a spawned sub-agent can access.
+const (
+	// RoleExplorer provides read-only search, file, and web tools.
+	// Use for tasks that only need to gather information.
+	RoleExplorer = "explorer"
+	// RolePlanner provides explorer tools plus bash.
+	// Use for tasks that need to explore and run commands but not write files.
+	RolePlanner = "planner"
+	// RoleCoder provides all active parent tools (default role).
+	// The sub-agent can propose file writes that bubble up to the parent.
+	RoleCoder = "coder"
+	// RoleFull is an alias for RoleCoder.
+	RoleFull = "full"
+)
+
+// explorerToolNames is the allowlist for the explorer role.
+var explorerToolNames = map[string]bool{
+	ListDirToolName:   true,
+	SearchFilesName:   true,
+	SearchCodeName:    true,
+	ReadToolName:      true,
+	WebFetchToolName:  true,
+	WebSearchToolName: true,
+}
+
+// ToolsForRole returns the subset of tool definitions allowed for the given role.
+// parentDefs is the active tool set from the parent context (returned as-is for
+// coder/full or unknown roles). Explorer and planner roles filter from the
+// canonical Definitions list so they always get the read-only or read+bash sets,
+// regardless of what the parent has enabled.
+func ToolsForRole(role string, parentDefs []ToolDef) []ToolDef {
+	switch role {
+	case RoleExplorer:
+		var out []ToolDef
+		for _, d := range Definitions {
+			if explorerToolNames[d.Name] {
+				out = append(out, d)
+			}
+		}
+		return out
+	case RolePlanner:
+		var out []ToolDef
+		for _, d := range Definitions {
+			if explorerToolNames[d.Name] || d.Name == BashToolName {
+				out = append(out, d)
+			}
+		}
+		return out
+	default: // RoleCoder, RoleFull, or unknown — inherit all parent tools
+		return parentDefs
+	}
+}
+
+// SubagentDispatcher is a function that spawns a sub-agent to complete a task.
+// args contains the spawn_agent tool arguments (task, role, model_id).
+// It returns the sub-agent's text response, any proposed writes to bubble up,
+// and an error message string (empty on success).
+type SubagentDispatcher func(ctx context.Context, args map[string]string) (text string, writes []FileWrite, errMsg string)
+
+// subagentDispatcherKey is the context key for the sub-agent dispatcher.
+type subagentDispatcherKey struct{}
+
+// WithSubagentDispatcher returns a context carrying the given SubagentDispatcher.
+// Called when building the run context before passing to runner.RunAll.
+func WithSubagentDispatcher(ctx context.Context, d SubagentDispatcher) context.Context {
+	return context.WithValue(ctx, subagentDispatcherKey{}, d)
+}
+
+// SubagentDispatcherFromContext returns the SubagentDispatcher stored in ctx,
+// or nil if no dispatcher was registered.
+func SubagentDispatcherFromContext(ctx context.Context) SubagentDispatcher {
+	v, _ := ctx.Value(subagentDispatcherKey{}).(SubagentDispatcher)
+	return v
+}
+
+// subagentDepthKey is the context key for the current sub-agent recursion depth.
+type subagentDepthKey struct{}
+
+// WithSubagentDepth returns a context with the given sub-agent recursion depth.
+// The top-level run always starts at depth 0.
+func WithSubagentDepth(ctx context.Context, depth int) context.Context {
+	return context.WithValue(ctx, subagentDepthKey{}, depth)
+}
+
+// SubagentDepthFromContext returns the current sub-agent recursion depth from ctx.
+// Returns 0 if not set (top-level run).
+func SubagentDepthFromContext(ctx context.Context) int {
+	v, _ := ctx.Value(subagentDepthKey{}).(int)
 	return v
 }
 
@@ -283,6 +389,7 @@ Tool use guidance:
 - Use web_fetch to read documentation, GitHub issues, package READMEs, or any public URL.
 - Use web_search for quick factual lookups (definitions, Wikipedia summaries). For specific URLs, use web_fetch directly.
 - write_file and edit_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
+- Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.
 `
 	if systemPromptExtra == "" {
 		return base

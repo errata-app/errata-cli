@@ -19,6 +19,7 @@ import (
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/runner"
+	"github.com/suarezc/errata/internal/subagent"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -228,6 +229,13 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 
 		toolCtx := tools.WithActiveTools(runCtx, activeDefs)
 		toolCtx = tools.WithMCPDispatchers(toolCtx, mcpDispatchers)
+		toolCtx = tools.WithSubagentDispatcher(toolCtx, subagent.NewDispatcher(
+			ads, wc.s.cfg, mcpDispatchers,
+			func(modelID string, e models.AgentEvent) {
+				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+			},
+		))
+		toolCtx = tools.WithSubagentDepth(toolCtx, 0)
 		rs := runner.RunAll(
 			toolCtx, ads, effectiveHistories, prompt,
 			func(modelID string, e models.AgentEvent) {

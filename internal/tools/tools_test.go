@@ -851,3 +851,91 @@ func TestExecuteWebSearch_QueryForwardedToServer(t *testing.T) {
 	tools.ExecuteWebSearch("my test query")
 	assert.Equal(t, "my test query", receivedQuery)
 }
+
+// ─── ToolsForRole ─────────────────────────────────────────────────────────────
+
+func TestToolsForRole_Explorer(t *testing.T) {
+	defs := tools.ToolsForRole(tools.RoleExplorer, tools.Definitions)
+	names := toolNames(defs)
+	assert.Contains(t, names, tools.ReadToolName)
+	assert.Contains(t, names, tools.ListDirToolName)
+	assert.Contains(t, names, tools.SearchFilesName)
+	assert.Contains(t, names, tools.SearchCodeName)
+	assert.Contains(t, names, tools.WebFetchToolName)
+	assert.Contains(t, names, tools.WebSearchToolName)
+	// Explorer must not include write or bash tools.
+	assert.NotContains(t, names, tools.WriteToolName)
+	assert.NotContains(t, names, tools.EditToolName)
+	assert.NotContains(t, names, tools.BashToolName)
+	assert.NotContains(t, names, tools.SpawnAgentToolName)
+}
+
+func TestToolsForRole_Planner(t *testing.T) {
+	defs := tools.ToolsForRole(tools.RolePlanner, tools.Definitions)
+	names := toolNames(defs)
+	assert.Contains(t, names, tools.ReadToolName)
+	assert.Contains(t, names, tools.BashToolName)
+	// Planner must not include write tools.
+	assert.NotContains(t, names, tools.WriteToolName)
+	assert.NotContains(t, names, tools.EditToolName)
+	assert.NotContains(t, names, tools.SpawnAgentToolName)
+}
+
+func TestToolsForRole_Coder(t *testing.T) {
+	// Coder returns parentDefs unchanged.
+	parent := tools.Definitions
+	defs := tools.ToolsForRole(tools.RoleCoder, parent)
+	assert.Equal(t, parent, defs)
+}
+
+func TestToolsForRole_Full_AliasForCoder(t *testing.T) {
+	parent := tools.Definitions
+	coder := tools.ToolsForRole(tools.RoleCoder, parent)
+	full := tools.ToolsForRole(tools.RoleFull, parent)
+	assert.Equal(t, coder, full)
+}
+
+func TestToolsForRole_UnknownRole_DefaultsToCoder(t *testing.T) {
+	parent := tools.Definitions
+	defs := tools.ToolsForRole("mystery-role", parent)
+	assert.Equal(t, parent, defs)
+}
+
+// ─── Sub-agent context helpers ────────────────────────────────────────────────
+
+func TestSubagentDepth_RoundTrip(t *testing.T) {
+	ctx := tools.WithSubagentDepth(context.Background(), 3)
+	assert.Equal(t, 3, tools.SubagentDepthFromContext(ctx))
+}
+
+func TestSubagentDepth_DefaultZero(t *testing.T) {
+	assert.Equal(t, 0, tools.SubagentDepthFromContext(context.Background()))
+}
+
+func TestSubagentDispatcher_RoundTrip(t *testing.T) {
+	called := false
+	var d tools.SubagentDispatcher = func(_ context.Context, _ map[string]string) (string, []tools.FileWrite, string) {
+		called = true
+		return "ok", nil, ""
+	}
+	ctx := tools.WithSubagentDispatcher(context.Background(), d)
+	got := tools.SubagentDispatcherFromContext(ctx)
+	require.NotNil(t, got)
+	text, _, _ := got(context.Background(), nil)
+	assert.True(t, called)
+	assert.Equal(t, "ok", text)
+}
+
+func TestSubagentDispatcher_NilWhenAbsent(t *testing.T) {
+	got := tools.SubagentDispatcherFromContext(context.Background())
+	assert.Nil(t, got)
+}
+
+// toolNames extracts tool name strings from a ToolDef slice.
+func toolNames(defs []tools.ToolDef) []string {
+	names := make([]string, len(defs))
+	for i, d := range defs {
+		names[i] = d.Name
+	}
+	return names
+}

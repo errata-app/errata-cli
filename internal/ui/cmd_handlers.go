@@ -17,6 +17,7 @@ import (
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
+	"github.com/suarezc/errata/internal/subagent"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -233,6 +234,13 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 		}
 		runCtx := tools.WithActiveTools(context.Background(), activeDefs)
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
+		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
+			ads, a.cfg, mcpDispatchers,
+			func(modelID string, e models.AgentEvent) {
+				prog.Send(agentEventMsg{modelID: modelID, event: e})
+			},
+		))
+		runCtx = tools.WithSubagentDepth(runCtx, 0)
 		responses := runner.RunAll(
 			runCtx, ads, effectiveHistories, trimmed,
 			func(modelID string, event models.AgentEvent) {

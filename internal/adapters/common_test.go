@@ -365,3 +365,74 @@ func TestBuildErrorResponse_NoCacheTokens(t *testing.T) {
 	assert.Equal(t, int64(0), resp.CacheCreationTokens)
 	assert.GreaterOrEqual(t, resp.CostUSD, 0.0)
 }
+
+// ─── spawn_agent dispatch ─────────────────────────────────────────────────────
+
+func TestDispatchTool_SpawnAgent_CallsDispatcher(t *testing.T) {
+	called := false
+	var dispatcher tools.SubagentDispatcher = func(_ context.Context, args map[string]string) (string, []tools.FileWrite, string) {
+		called = true
+		return "sub result: " + args["task"], nil, ""
+	}
+	ctx := tools.WithSubagentDispatcher(context.Background(), dispatcher)
+
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(ctx, tools.SpawnAgentToolName,
+		map[string]string{"task": "find all errors"},
+		func(models.AgentEvent) {}, &proposed)
+
+	assert.True(t, ok)
+	assert.True(t, called)
+	assert.Equal(t, "sub result: find all errors", result)
+	assert.Empty(t, proposed)
+}
+
+func TestDispatchTool_SpawnAgent_MergesWrites(t *testing.T) {
+	writes := []tools.FileWrite{
+		{Path: "out.go", Content: "package main"},
+		{Path: "readme.md", Content: "# hi"},
+	}
+	var dispatcher tools.SubagentDispatcher = func(_ context.Context, _ map[string]string) (string, []tools.FileWrite, string) {
+		return "done", writes, ""
+	}
+	ctx := tools.WithSubagentDispatcher(context.Background(), dispatcher)
+
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(ctx, tools.SpawnAgentToolName,
+		map[string]string{"task": "write some files"},
+		func(models.AgentEvent) {}, &proposed)
+
+	assert.True(t, ok)
+	assert.Equal(t, "done", result)
+	require.Len(t, proposed, 2)
+	assert.Equal(t, "out.go", proposed[0].Path)
+	assert.Equal(t, "readme.md", proposed[1].Path)
+}
+
+func TestDispatchTool_SpawnAgent_NoDispatcherReturnsError(t *testing.T) {
+	// Without a dispatcher in context, spawn_agent returns a graceful error string.
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(context.Background(), tools.SpawnAgentToolName,
+		map[string]string{"task": "do something"},
+		func(models.AgentEvent) {}, &proposed)
+
+	assert.True(t, ok) // ok=true: the tool was recognised and handled
+	assert.Contains(t, result, "not configured")
+	assert.Empty(t, proposed)
+}
+
+func TestDispatchTool_SpawnAgent_DispatcherErrorPropagates(t *testing.T) {
+	var dispatcher tools.SubagentDispatcher = func(_ context.Context, _ map[string]string) (string, []tools.FileWrite, string) {
+		return "", nil, "[spawn_agent error: max depth reached]"
+	}
+	ctx := tools.WithSubagentDispatcher(context.Background(), dispatcher)
+
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(ctx, tools.SpawnAgentToolName,
+		map[string]string{"task": "recurse"},
+		func(models.AgentEvent) {}, &proposed)
+
+	assert.True(t, ok)
+	assert.Contains(t, result, "max depth reached")
+	assert.Empty(t, proposed)
+}

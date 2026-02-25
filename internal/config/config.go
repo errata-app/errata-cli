@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -50,6 +51,15 @@ type Config struct {
 	// or domain knowledge that should influence all models.
 	// Loaded from ERRATA_SYSTEM_PROMPT.
 	SystemPromptExtra string
+
+	// SubagentModel is the model ID used when spawning sub-agents via spawn_agent.
+	// Empty means use the same model as the parent. Loaded from ERRATA_SUBAGENT_MODEL.
+	SubagentModel string
+
+	// SubagentMaxDepth is the maximum spawn_agent recursion depth.
+	// 1 (default) means sub-agents cannot spawn further sub-agents.
+	// 0 disables spawn_agent entirely. Loaded from ERRATA_SUBAGENT_MAX_DEPTH.
+	SubagentMaxDepth int
 }
 
 // Load reads .env (if present) then environment variables and returns a Config.
@@ -70,6 +80,13 @@ func Load() Config {
 	cfg.DebugLogPath = os.Getenv("ERRATA_DEBUG_LOG")
 	cfg.MCPServers = os.Getenv("ERRATA_MCP_SERVERS")
 	cfg.SystemPromptExtra = os.Getenv("ERRATA_SYSTEM_PROMPT")
+	cfg.SubagentModel = os.Getenv("ERRATA_SUBAGENT_MODEL")
+	cfg.SubagentMaxDepth = 1 // default: sub-agents cannot spawn sub-agents
+	if v := os.Getenv("ERRATA_SUBAGENT_MAX_DEPTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.SubagentMaxDepth = n
+		}
+	}
 	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	cfg.GoogleAPIKey = os.Getenv("GOOGLE_API_KEY")
