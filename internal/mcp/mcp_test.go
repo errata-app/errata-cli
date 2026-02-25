@@ -393,12 +393,15 @@ func TestStartServers_FailedServer(t *testing.T) {
 	configs := []ServerConfig{
 		{Name: "nonexistent", Args: []string{"/nonexistent-binary-that-does-not-exist"}},
 	}
-	defs, dispatchers, mgr := StartServers(configs, nil)
+	defs, dispatchers, warnings, mgr := StartServers(configs, nil)
 	if len(defs) != 0 {
 		t.Errorf("expected 0 tool defs for failed server, got %d", len(defs))
 	}
 	if len(dispatchers) != 0 {
 		t.Errorf("expected 0 dispatchers for failed server, got %d", len(dispatchers))
+	}
+	if len(warnings) != 1 {
+		t.Errorf("expected 1 warning for failed server, got %d: %v", len(warnings), warnings)
 	}
 	if mgr == nil {
 		t.Fatal("mgr should not be nil even when all servers fail")

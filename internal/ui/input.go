@@ -58,6 +58,13 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyTab:
 		val := a.input.Value()
 		if len(val) > 0 && val[0] == '/' {
+			// Try argument completion first (e.g. /model gpt<TAB>).
+			if completed, ok := a.tryArgComplete(val); ok {
+				a.input.SetValue(completed)
+				a.input.CursorEnd()
+				return a, nil
+			}
+			// Fall back to command-name completion.
 			prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
 			for _, c := range commands.All {
 				if strings.HasPrefix(c.Name, prefix) {

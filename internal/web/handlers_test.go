@@ -26,7 +26,7 @@ func (s stubAdapter) RunAgent(_ context.Context, _ []models.ConversationTurn, _ 
 
 func newTestServer(t *testing.T, adapters []models.ModelAdapter, cfg config.Config) *Server {
 	t.Helper()
-	return New(adapters, t.TempDir()+"/pref.jsonl", t.TempDir()+"/hist.json", cfg, nil, nil)
+	return New(adapters, t.TempDir()+"/pref.jsonl", t.TempDir()+"/hist.json", cfg, nil, nil, nil)
 }
 
 func decodeJSON(t *testing.T, body *httptest.ResponseRecorder) map[string]any {

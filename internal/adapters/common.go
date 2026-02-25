@@ -49,7 +49,11 @@ func DispatchTool(
 	if dispatchers := tools.MCPDispatchersFromContext(ctx); len(dispatchers) > 0 {
 		if dispatcher, found := dispatchers[name]; found {
 			onEvent(models.AgentEvent{Type: "reading", Data: "[mcp] " + name})
-			return dispatcher(args), true
+			result := dispatcher(args)
+			if strings.HasPrefix(result, "[mcp error:") {
+				onEvent(models.AgentEvent{Type: "error", Data: result})
+			}
+			return result, true
 		}
 	}
 

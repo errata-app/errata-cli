@@ -142,6 +142,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// Deliver any startup warnings (e.g. MCP servers that failed to start)
+	// immediately so the user sees them without having to run a prompt.
+	for _, w := range s.startupWarnings {
+		wc.send(wsServerMsg{Type: "error", Message: "startup warning: " + w})
+	}
+
 	for {
 		var msg wsClientMsg
 		if err := wsjson.Read(ctx, conn, &msg); err != nil {

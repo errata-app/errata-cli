@@ -1,16 +1,18 @@
 # Errata
 
 A/B testing tool for agentic AI models. Send a prompt to multiple models simultaneously,
-watch each one read your files and propose changes live, pick the best proposal, and apply
-it to disk. Every choice is logged so you can see which models you actually prefer over time.
+watch each one navigate your codebase live, pick the best proposal, and apply it to disk.
+Every choice is logged so you can see which models you actually prefer over time.
 
 ---
 
 ## What it does
 
 1. You type a prompt in the Errata REPL
-2. All configured models receive it concurrently, each running as a coding agent
-3. Models navigate your codebase using a full tool set: list directories, search files by name or content, read files, run shell commands, and propose file changes
+2. All configured models receive it concurrently, each running as a full coding agent
+3. Models navigate your codebase using nine built-in tools: list directories, search files
+   by name or content, read files, run shell commands, fetch URLs, search the web, and
+   propose file changes — plus any tools exposed by MCP servers you configure
 4. Live panels show each model's tool activity in real time
 5. Once all models finish, a diff view shows exactly what each one wants to change
 6. You pick a winner by number — that model's writes are applied to disk
@@ -95,6 +97,7 @@ TUI and shares the same WebSocket-based backend.
 
 ```bash
 ./errata stats
+./errata stats --detail   # includes win rate, avg latency, avg cost
 ```
 
 Prints a ranked tally of how often each model has been selected across all past runs.
@@ -159,8 +162,8 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/clear` | Clear display history and wipe conversation context |
 | `/compact` | Summarize conversation history to free up context window |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
-| `/models` | List all available models from each configured provider with per-model pricing; OpenAI and Gemini show only chat-capable models ("N of M, chat only"); up to 10 per provider with "… and N more" if truncated |
-| `/tools` | Show current tool status (`on`/`off` for each tool) |
+| `/models` | List all available models from each configured provider with per-model pricing |
+| `/tools` | Show current tool status (`on`/`off`); MCP tools are labelled `(mcp)` |
 | `/tools off <name...>` | Disable one or more tools for this session (e.g. `/tools off bash`) |
 | `/tools on <name...>` | Re-enable specific tools |
 | `/tools reset` | Re-enable all tools |
@@ -215,15 +218,6 @@ ERRATA_ACTIVE_MODELS=litellm/claude-sonnet-4-6,litellm/gpt-4o
 ERRATA_ACTIVE_MODELS=claude-sonnet-4-6,anthropic/claude-opus-4-6
 ```
 
-The env var sets the starting set of active models; `/model` overrides it for the session.
-
-The web UI saves your active filter in `localStorage` and restores it automatically on
-reconnect, so your model selection persists across page reloads and server restarts.
-
-**Novel model names:** The web model panel includes provider information with each model ID.
-When you activate a model whose name doesn't match a known prefix (e.g. a newly released
-OpenAI model), Errata uses the provider hint to route it to the correct adapter automatically.
-
 ---
 
 ## Verbose mode
@@ -250,6 +244,127 @@ each call. Set `ERRATA_MAX_HISTORY_TURNS` in `.env` to override.
 summary of the conversation so far, then replaces the full history with that summary.
 This preserves continuity while freeing context. Compaction also triggers automatically
 when a model's estimated history fill reaches 80%.
+
+---
+
+## MCP tool servers
+
+Errata supports the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP),
+which lets you connect any MCP-compatible tool server (web search, code execution,
+databases, etc.) and expose its tools to every model in the comparison harness.
+
+### Configuration
+
+```bash
+# .env
+# Format: name:command arg1 arg2,...  (comma-separated for multiple servers)
+ERRATA_MCP_SERVERS=exa:npx @exa-ai/exa-mcp-server
+```
+
+Multiple servers:
+
+```bash
+ERRATA_MCP_SERVERS=exa:npx @exa-ai/exa-mcp-server,search:npx @modelcontextprotocol/server-brave-search
+```
+
+Each server is launched as a subprocess using stdio transport (the standard MCP deployment
+model). Errata performs the MCP handshake at startup, discovers all tools the server
+exposes, and registers them alongside the nine built-in tools.
+
+### Supported servers (examples)
+
+| Provider | Package | Tools exposed |
+|----------|---------|---------------|
+| Exa AI | `npx @exa-ai/exa-mcp-server` | `search`, `find_similar`, `get_contents` |
+| Brave Search | `npx @modelcontextprotocol/server-brave-search` | `brave_web_search` |
+| Tavily | `npx @tavily-ai/tavily-mcp` | `tavily_search` |
+| Filesystem | `npx @modelcontextprotocol/server-filesystem` | `read_file`, `write_file`, etc. |
+
+Any MCP server that uses stdio transport and exposes the `tools` capability will work.
+
+### Error handling
+
+If an MCP server fails to start or the handshake fails, Errata continues without it and
+emits a warning:
+
+- **TUI:** warning printed to stderr before the REPL starts
+- **Web UI:** warning delivered to the browser as an error message immediately on connect
+
+Runtime errors during a tool call (e.g. the MCP server crashes mid-run) are surfaced in
+the live panel as an error event so you can see the failure in context.
+
+### Managing MCP tools at runtime
+
+MCP tools appear in `/tools` listings labelled `(mcp)` and can be toggled like built-in tools:
+
+```
+/tools                     # list all tools including MCP
+/tools off exa_search      # disable a specific MCP tool for this session
+/tools on  exa_search      # re-enable it
+/tools reset               # re-enable everything
+```
+
+The web UI `GET /api/tools` endpoint returns the full tool list with `"source": "builtin"` or
+`"source": "mcp"` for each entry.
+
+---
+
+## Deployment configuration
+
+Errata exposes several environment variables for fine-tuning the harness to match your
+workflow or deployment environment.
+
+### Custom system prompt
+
+Append instructions to every model's system prompt without modifying source code:
+
+```bash
+# .env
+ERRATA_SYSTEM_PROMPT="This project uses Python 3.11 and pytest. Always run pytest before proposing changes. Follow PEP 8 strictly."
+```
+
+The extra text is appended after the built-in tool guidance in each model's system prompt.
+Use this for:
+- Project-specific coding conventions
+- Domain knowledge (e.g. "this is a financial system — never log PII")
+- Workflow constraints (e.g. "always write tests before implementation")
+
+### Tool management
+
+```bash
+# Disable bash execution for all sessions (can still be toggled at runtime)
+# Not yet a startup flag — use /tools off bash at the REPL
+```
+
+Tools can always be toggled per-session with `/tools off <name>` and `/tools on <name>`.
+
+### Model pinning
+
+```bash
+ERRATA_ACTIVE_MODELS=claude-opus-4-6,gpt-4o   # only these two models
+```
+
+### History and preferences paths
+
+```bash
+ERRATA_HISTORY_PATH=~/.errata/history.json          # default: data/history.json
+ERRATA_PREFERENCES_PATH=~/.errata/preferences.jsonl # default: data/preferences.jsonl
+```
+
+### Debug logging
+
+```bash
+ERRATA_DEBUG_LOG=data/log.jsonl   # append-only JSONL with full prompt/response content
+```
+
+Each log entry includes the model ID, session ID, all tool events, token counts, latency,
+and cost. Useful for auditing or building fine-tuning datasets.
+
+### Context window
+
+```bash
+ERRATA_MAX_HISTORY_TURNS=20   # default; reduce for smaller context windows
+```
 
 ---
 
@@ -306,17 +421,21 @@ errata/
 │   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
 │   ├── adapters/
 │   │   ├── registry.go      # NewAdapter(), ListAdapters() — routing by prefix/slash
+│   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildSuccessResponse
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
 │   │   ├── gemini.go        # GeminiAdapter.RunAgent()
 │   │   ├── openrouter.go    # OpenRouterAdapter — any model via "provider/model" IDs
 │   │   └── litellm.go       # LiteLLMAdapter — local/self-hosted proxy
+│   ├── mcp/
+│   │   ├── client.go        # JSON-RPC 2.0 stdio client (MCP protocol)
+│   │   └── manager.go       # subprocess lifecycle, tool discovery, dispatcher registry
 │   ├── pricing/
-│   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens() — OpenRouter fetch + fallback
+│   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens()
 │   ├── runner/
 │   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories()
 │   ├── tools/
-│   │   └── tools.go         # ToolDef, Definitions, ExecuteRead/ListDirectory/SearchFiles/SearchCode/Bash/ApplyWrites
+│   │   └── tools.go         # ToolDef, Definitions, Execute* functions, MCP context helpers
 │   ├── diff/
 │   │   └── diff.go          # Compute() → FileDiff (Myers algorithm via sergi/go-diff)
 │   ├── history/
@@ -335,7 +454,7 @@ errata/
 │   │   └── diff.go          # diff + selection menu rendering
 │   └── web/
 │       ├── server.go        # Server struct, route registration, embedded static assets
-│       ├── handlers.go      # WebSocket handler, REST handlers (/api/stats, /api/models)
+│       ├── handlers.go      # WebSocket handler, REST handlers
 │       └── static/
 │           ├── index.html
 │           ├── style.css

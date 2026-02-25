@@ -463,14 +463,37 @@ func (a App) View() string {
 		}
 		sb.WriteString(a.input.View())
 		if val := a.input.Value(); len(val) > 0 && val[0] == '/' {
-			prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
+			lower := strings.ToLower(val)
 			nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AFAF"))
 			descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-			for _, c := range commands.All {
-				if strings.HasPrefix(c.Name, prefix) {
-					sb.WriteByte('\n')
-					sb.WriteString(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)))
-					sb.WriteString(descStyle.Render("  " + c.Desc))
+
+			switch {
+			case strings.HasPrefix(lower, "/model "):
+				partial := lastWord(val[len("/model "):])
+				lp := strings.ToLower(partial)
+				for _, id := range a.modelIDCandidates() {
+					if strings.HasPrefix(strings.ToLower(id), lp) {
+						sb.WriteByte('\n')
+						sb.WriteString(nameStyle.Render("  " + id))
+					}
+				}
+
+			case strings.HasPrefix(lower, "/tools on "):
+				partial := lastWord(val[len("/tools on "):])
+				a.renderToolHints(&sb, partial, nameStyle, descStyle)
+
+			case strings.HasPrefix(lower, "/tools off "):
+				partial := lastWord(val[len("/tools off "):])
+				a.renderToolHints(&sb, partial, nameStyle, descStyle)
+
+			default:
+				prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
+				for _, c := range commands.All {
+					if strings.HasPrefix(c.Name, prefix) {
+						sb.WriteByte('\n')
+						sb.WriteString(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)))
+						sb.WriteString(descStyle.Render("  " + c.Desc))
+					}
 				}
 			}
 		}

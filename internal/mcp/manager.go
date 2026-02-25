@@ -71,12 +71,14 @@ type Manager struct {
 // and discovers their tools. Returns:
 //   - extra []tools.ToolDef: tool definitions to append to Errata's active set
 //   - dispatchers map[toolName]Dispatcher: call-time dispatch table
+//   - warnings []string: human-readable messages for servers that failed to start
 //
-// On per-server failure the error is logged and that server is skipped;
+// On per-server failure a warning is appended and that server is skipped;
 // the function never returns a fatal error so Errata can start without MCP.
 func StartServers(configs []ServerConfig, env []string) (
 	extra []tools.ToolDef,
 	dispatchers map[string]Dispatcher,
+	warnings []string,
 	mgr *Manager,
 ) {
 	dispatchers = make(map[string]Dispatcher)
@@ -85,7 +87,7 @@ func StartServers(configs []ServerConfig, env []string) (
 	for _, cfg := range configs {
 		defs, disp, srv, err := startOne(cfg, env)
 		if err != nil {
-			log.Printf("mcp: server %q failed to start: %v (skipped)", cfg.Name, err)
+			warnings = append(warnings, fmt.Sprintf("MCP server %q failed to start: %v — continuing without it", cfg.Name, err))
 			continue
 		}
 		extra = append(extra, defs...)
@@ -94,7 +96,7 @@ func StartServers(configs []ServerConfig, env []string) (
 		}
 		mgr.servers = append(mgr.servers, srv)
 	}
-	return extra, dispatchers, mgr
+	return
 }
 
 // startOne launches one MCP server and returns its tools and dispatchers.

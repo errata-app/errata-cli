@@ -81,7 +81,9 @@ func setupAdapters(cfg config.Config) (
 	// Start MCP servers (non-fatal — missing/broken servers are skipped with a warning).
 	if serverConfigs := mcp.ParseServerConfigs(cfg.MCPServers); len(serverConfigs) > 0 {
 		var mgr *mcp.Manager
-		mcpDefs, mcpDispatchers, mgr = mcp.StartServers(serverConfigs, os.Environ())
+		var mcpWarnings []string
+		mcpDefs, mcpDispatchers, mcpWarnings, mgr = mcp.StartServers(serverConfigs, os.Environ())
+		warnings = append(warnings, mcpWarnings...)
 		prev := cleanup
 		cleanup = func() { prev(); mgr.Shutdown() }
 	}
@@ -111,7 +113,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	_ = sessionID // web server creates its own session ID per connection
 	addr := ":8080"
 	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
-	return web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg, mcpDefs, mcpDispatchers).Start(addr)
+	return web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg, mcpDefs, mcpDispatchers, warnings).Start(addr)
 }
 
 func runStats(cmd *cobra.Command, args []string) error {
