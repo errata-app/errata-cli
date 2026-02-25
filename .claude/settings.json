@@ -14,7 +14,19 @@
       "Bash(git diff *)",
       "Bash(git log *)",
       "Bash(git branch *)",
-      "Bash(git show *)"
+      "Bash(git show *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(which *)",
+      "Bash(whereis *)",
+      "Bash(echo *)",
+      "Bash(env *)",
+      "Bash(printenv *)"
     ],
     "deny": [
       "Bash(git reset --hard *)",
