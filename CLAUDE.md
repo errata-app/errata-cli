@@ -12,6 +12,10 @@ Two user surfaces share the same core engine:
 - **TUI** (`./errata`) — bubbletea REPL for terminal use
 - **Web** (`./errata serve`) — browser UI over WebSocket, persists conversation history to `data/history.json`
 
+This is a Go-primary project. Default to Go idioms, conventions, and tooling (`go test`, `go vet`,
+`gofmt`) unless otherwise specified. JavaScript and CSS are used only for the web frontend
+(`internal/web/static/`).
+
 ---
 
 ## Stack
@@ -575,6 +579,9 @@ Table-driven tests preferred for config, preferences, and diff packages.
 - Any struct that is serialized to disk (JSON, JSONL) must have a round-trip test
   (write → read → assert values) to catch unexported-field and missing-json-tag bugs.
 - Run `go test ./...` before considering a task complete.
+- For diff/transformation output, use flexible assertions (check for key substrings or
+  structural properties) rather than exact string matching — output formats may vary
+  depending on the Myers diff algorithm's choice of common subsequence.
 
 ---
 
