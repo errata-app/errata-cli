@@ -20,6 +20,9 @@ import (
 type stubAdapter struct{ id string }
 
 func (s stubAdapter) ID() string { return s.id }
+func (s stubAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (s stubAdapter) RunAgent(_ context.Context, _ []models.ConversationTurn, _ string, _ func(models.AgentEvent)) (models.ModelResponse, error) {
 	return models.ModelResponse{ModelID: s.id}, nil
 }

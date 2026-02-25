@@ -41,6 +41,7 @@ type scalarField struct {
 var interactiveSections = []string{
 	"models", "system-prompt", "tools", "mcp-servers",
 	"parameters", "constraints", "context", "sub-agent", "sandbox",
+	"reminders", "hooks", "output-processing", "context-summarization",
 }
 
 // ── section builders ────────────────────────────────────────────────────────
@@ -59,6 +60,10 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 		{Name: "context", Summary: summarizeContext(rec), Kind: "scalar"},
 		{Name: "sub-agent", Summary: summarizeSubAgent(rec), Kind: "scalar"},
 		{Name: "sandbox", Summary: summarizeSandbox(rec), Kind: "scalar"},
+		{Name: "reminders", Summary: summarizeReminders(rec), Kind: "list"},
+		{Name: "hooks", Summary: summarizeHooks(rec), Kind: "list"},
+		{Name: "output-processing", Summary: summarizeOutputProcessing(rec), Kind: "scalar"},
+		{Name: "context-summarization", Summary: summarizeContextSummarization(rec), Kind: "text"},
 	}
 }
 
@@ -199,6 +204,51 @@ func summarizeSandbox(rec *recipe.Recipe) string {
 	return strings.Join(parts, ", ")
 }
 
+func summarizeReminders(rec *recipe.Recipe) string {
+	if len(rec.SystemReminders) == 0 {
+		return "(none)"
+	}
+	var names []string
+	for _, r := range rec.SystemReminders {
+		names = append(names, r.Name)
+	}
+	return fmt.Sprintf("%d configured (%s)", len(names), strings.Join(names, ", "))
+}
+
+func summarizeHooks(rec *recipe.Recipe) string {
+	if len(rec.Hooks) == 0 {
+		return "(none)"
+	}
+	var names []string
+	for _, h := range rec.Hooks {
+		names = append(names, h.Name)
+	}
+	return fmt.Sprintf("%d configured (%s)", len(names), strings.Join(names, ", "))
+}
+
+func summarizeOutputProcessing(rec *recipe.Recipe) string {
+	if len(rec.OutputProcessing) == 0 {
+		return "(none)"
+	}
+	var names []string
+	for name := range rec.OutputProcessing {
+		names = append(names, name)
+	}
+	return fmt.Sprintf("%d rules (%s)", len(names), strings.Join(names, ", "))
+}
+
+func summarizeContextSummarization(rec *recipe.Recipe) string {
+	if rec.SummarizationPrompt == "" {
+		return "(default)"
+	}
+	preview := rec.SummarizationPrompt
+	if runes := []rune(preview); len(runes) > 50 {
+		preview = string(runes[:50]) + "..."
+	}
+	preview = strings.ReplaceAll(preview, "\n", " ")
+	return fmt.Sprintf("%q (%d chars)", preview, len(rec.SummarizationPrompt))
+}
+
 // ── list/scalar data builders ───────────────────────────────────────────────
 
 func buildModelsList(rec *recipe.Recipe, adapters []models.ModelAdapter, activeAdapters []models.ModelAdapter) []listItem {
@@ -220,6 +270,30 @@ func buildToolsList(disabled map[string]bool) []listItem {
 	var items []listItem
 	for _, d := range tools.Definitions {
 		items = append(items, listItem{Label: d.Name, Active: !disabled[d.Name]})
+	}
+	return items
+}
+
+func buildRemindersList(rec *recipe.Recipe) []listItem {
+	var items []listItem
+	for _, r := range rec.SystemReminders {
+		label := r.Name
+		if r.Trigger != "" {
+			label += " (" + r.Trigger + ")"
+		}
+		items = append(items, listItem{Label: label, Active: true})
+	}
+	return items
+}
+
+func buildHooksList(rec *recipe.Recipe) []listItem {
+	var items []listItem
+	for _, h := range rec.Hooks {
+		label := h.Name + " [" + h.Event + "]"
+		if h.Matcher != "" {
+			label += " matcher=" + h.Matcher
+		}
+		items = append(items, listItem{Label: label, Active: true})
 	}
 	return items
 }
@@ -254,6 +328,28 @@ func buildScalarFields(sectionName string, rec *recipe.Recipe) []scalarField {
 			{Key: "filesystem", Path: "sandbox.filesystem", Value: configPathGet(rec, "sandbox.filesystem")},
 			{Key: "network", Path: "sandbox.network", Value: configPathGet(rec, "sandbox.network")},
 		}
+	case "output-processing":
+		// Build scalar fields for each configured output rule.
+		var fields []scalarField
+		for toolName, rule := range rec.OutputProcessing {
+			prefix := "output." + toolName
+			if rule.MaxLines > 0 {
+				fields = append(fields, scalarField{
+					Key: toolName + ".max_lines", Path: prefix + ".max_lines",
+					Value: strconv.Itoa(rule.MaxLines),
+				})
+			}
+			if rule.Truncation != "" {
+				fields = append(fields, scalarField{
+					Key: toolName + ".truncation", Path: prefix + ".truncation",
+					Value: rule.Truncation,
+				})
+			}
+		}
+		if len(fields) == 0 {
+			fields = append(fields, scalarField{Key: "(no rules)", Path: "", Value: ""})
+		}
+		return fields
 	}
 	return nil
 }
@@ -450,6 +546,13 @@ var configPaths = map[string]configPathEntry{
 				return fmt.Errorf("invalid positive integer %q", v)
 			}
 			r.ModelParams.MaxTokens = &n
+			return nil
+		},
+	},
+	"context_summarization.prompt": {
+		Get: func(r *recipe.Recipe) string { return r.SummarizationPrompt },
+		Set: func(r *recipe.Recipe, v string) error {
+			r.SummarizationPrompt = v
 			return nil
 		},
 	},
@@ -719,6 +822,10 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					items = append(items, listItem{Label: s.Name + ": " + s.Command, Active: true})
 				}
 				a.configListItems = items
+			case "reminders":
+				a.configListItems = buildRemindersList(a.sessionRecipe)
+			case "hooks":
+				a.configListItems = buildHooksList(a.sessionRecipe)
 			}
 			a.configListCursor = 0
 		case "scalar":
@@ -726,7 +833,12 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.configScalarCursor = 0
 			a.configEditBuf = ""
 		case "text":
-			a.configEditBuf = a.sessionRecipe.SystemPrompt
+			switch sec.Name {
+			case "system-prompt":
+				a.configEditBuf = a.sessionRecipe.SystemPrompt
+			case "context-summarization":
+				a.configEditBuf = a.sessionRecipe.SummarizationPrompt
+			}
 		}
 		return a, nil
 	case tea.KeyRunes:

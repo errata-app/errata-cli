@@ -11,6 +11,7 @@ import (
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/pricing"
+	"github.com/suarezc/errata/internal/prompt"
 )
 
 const agentTimeout = 5 * time.Minute
@@ -228,13 +229,13 @@ func ShouldAutoCompact(histories map[string][]models.ConversationTurn, adapterID
 	return float64(est)/float64(cw) >= threshold
 }
 
-const compactPrompt = `Please write a complete but concise summary of our conversation so far.
-Include all code discussed, decisions made, file paths involved, and any context needed to
-continue seamlessly. Reply with ONLY the summary — no preamble.`
-
 // CompactHistories calls each adapter to summarise its own conversation history.
 // On success the full history is replaced with a single compact context pair.
 // Adapters with no history, or whose compaction call fails, are left unchanged.
+//
+// The summarization prompt is resolved per-model from the context (via
+// prompt.ResolveSummarizationPrompt). If no payload is configured, it falls
+// back to DefaultSummarizationPrompt.
 func CompactHistories(
 	ctx      context.Context,
 	adapters []models.ModelAdapter,
@@ -246,7 +247,8 @@ func CompactHistories(
 		if len(h) == 0 {
 			continue
 		}
-		resp, err := adapter.RunAgent(ctx, h, compactPrompt, func(e models.AgentEvent) {
+		sumPrompt := prompt.ResolveSummarizationPrompt(ctx, adapter.ID())
+		resp, err := adapter.RunAgent(ctx, h, sumPrompt, func(e models.AgentEvent) {
 			if onEvent != nil {
 				onEvent(adapter.ID(), e)
 			}

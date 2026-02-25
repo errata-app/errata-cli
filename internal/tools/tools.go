@@ -448,12 +448,8 @@ var systemPromptExtra string
 // Subsequent calls overwrite the previous value.
 func SetSystemPromptExtra(s string) { systemPromptExtra = s }
 
-// SystemPromptSuffix returns guidance text appended to each adapter's system prompt
-// so models understand how to use the available tool set effectively.
-// If SetSystemPromptExtra has been called, that text is appended after the
-// built-in guidance so project-specific context reaches every model.
-func SystemPromptSuffix() string {
-	base := `
+// toolUseGuidance is the fixed guidance text that teaches models how to use tools.
+const toolUseGuidance = `
 Tool use guidance:
 - Use list_directory to explore the project structure before reading specific files.
 - Use search_files to find files by name pattern (e.g. search_files("**/*.go")).
@@ -466,10 +462,24 @@ Tool use guidance:
 - write_file and edit_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
 - Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.
 `
+
+// SystemPromptGuidance returns the fixed tool-use guidance text.
+// This is the same guidance as in SystemPromptSuffix but without the
+// user-authored extra. Used by adapters that read their system prompt
+// from a PromptPayload instead.
+func SystemPromptGuidance() string {
+	return toolUseGuidance
+}
+
+// SystemPromptSuffix returns guidance text appended to each adapter's system prompt
+// so models understand how to use the available tool set effectively.
+// If SetSystemPromptExtra has been called, that text is appended after the
+// built-in guidance so project-specific context reaches every model.
+func SystemPromptSuffix() string {
 	if systemPromptExtra == "" {
-		return base
+		return toolUseGuidance
 	}
-	return base + "\n" + systemPromptExtra
+	return toolUseGuidance + "\n" + systemPromptExtra
 }
 
 // ExecuteRead reads a file relative to cwd.

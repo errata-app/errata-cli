@@ -28,6 +28,10 @@ type mockAdapter struct {
 
 func (m *mockAdapter) ID() string { return m.id }
 
+func (m *mockAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
+
 func (m *mockAdapter) RunAgent(
 	ctx context.Context,
 	history []models.ConversationTurn,

@@ -26,6 +26,9 @@ type scenarioAdapter struct {
 }
 
 func (s *scenarioAdapter) ID() string { return s.id }
+func (s *scenarioAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (s *scenarioAdapter) RunAgent(
 	_ context.Context,
 	_ []models.ConversationTurn,

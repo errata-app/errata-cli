@@ -9,7 +9,9 @@ import (
 
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
+	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -41,6 +43,10 @@ func NewLiteLLMAdapter(modelID, apiKey, baseURL string) *LiteLLMAdapter {
 
 func (a *LiteLLMAdapter) ID() string { return a.modelID }
 
+func (a *LiteLLMAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return capabilities.DefaultCapabilities("litellm", a.modelID)
+}
+
 func (a *LiteLLMAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,
@@ -57,9 +63,19 @@ func (a *LiteLLMAdapter) RunAgent(
 	}
 	client := openai.NewClient(opts...)
 
-	toolParams := buildOpenAITools(ctx)
+	// Resolve system prompt: prefer payload from context, fall back to built-in.
+	var systemMsg string
+	var toolDescOverrides map[string]string
+	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
+		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
+		toolDescOverrides = payload.ToolDescriptions
+	} else {
+		systemMsg = tools.SystemPromptSuffix()
+	}
+
+	toolParams := buildOpenAITools(ctx, toolDescOverrides)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
-	messages = append(messages, openai.SystemMessage(tools.SystemPromptSuffix()))
+	messages = append(messages, openai.SystemMessage(systemMsg))
 	for _, turn := range history {
 		switch turn.Role {
 		case "user":

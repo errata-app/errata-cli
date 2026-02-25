@@ -52,10 +52,49 @@ type ModelResponse struct {
 // OK returns true when the response carries no error.
 func (r ModelResponse) OK() bool { return r.Error == "" }
 
+// CapabilitySource indicates where a capability value was determined.
+type CapabilitySource int
+
+const (
+	SourceDefault CapabilitySource = iota // hardcoded fallback
+	SourceConfig                          // user override from recipe ModelProfiles
+	SourceAPI                             // discovered from provider API
+)
+
+// ToolFormat describes how a model receives tool definitions.
+type ToolFormat int
+
+const (
+	ToolFormatNone         ToolFormat = iota // no tool support
+	ToolFormatNative                         // Anthropic-style (tool blocks in content)
+	ToolFormatFunctionCall                   // OpenAI-style (function_call / tool_call)
+	ToolFormatTextInPrompt                   // no API support; described in system prompt
+)
+
+// ModelCapabilities describes a model's known capabilities, used by the prompt
+// assembler to produce model-specific payloads.
+type ModelCapabilities struct {
+	ModelID             string
+	Provider            string
+	ContextWindow       int
+	MaxOutputTokens     int
+	ToolFormat          ToolFormat
+	ParallelToolCalls   bool
+	SystemRole          bool     // model accepts a system role message
+	MidConvoSystem      bool     // model accepts system messages mid-conversation
+	SupportedInputMedia []string // e.g. ["text", "image", "pdf"]
+	ContextWindowSource CapabilitySource
+	ToolFormatSource    CapabilitySource
+}
+
 // ModelAdapter is the interface every provider adapter must implement.
 type ModelAdapter interface {
 	// ID returns the model identifier (e.g. "claude-sonnet-4-6").
 	ID() string
+
+	// Capabilities returns the model's known capabilities.
+	// Called once at session startup; results are cached and merged with user overrides.
+	Capabilities(ctx context.Context) ModelCapabilities
 
 	// RunAgent runs the multi-turn agentic tool-use loop.
 	// history contains prior (user, assistant) turns for this model; nil = fresh conversation.
