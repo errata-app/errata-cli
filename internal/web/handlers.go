@@ -196,7 +196,9 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 	wc.s.histMu.RLock()
 	histSnapshot := make(map[string][]models.ConversationTurn, len(wc.s.histories))
 	for k, v := range wc.s.histories {
-		histSnapshot[k] = v
+		cp := make([]models.ConversationTurn, len(v))
+		copy(cp, v)
+		histSnapshot[k] = cp
 	}
 	wc.s.histMu.RUnlock()
 

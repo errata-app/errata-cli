@@ -117,7 +117,13 @@ function connectWS() {
     }
   };
 
-  ws.onmessage = e => handleServerMessage(JSON.parse(e.data));
+  ws.onmessage = e => {
+    try {
+      handleServerMessage(JSON.parse(e.data));
+    } catch (err) {
+      console.error('bad server message:', err);
+    }
+  };
 
   ws.onclose = () => {
     ws = null;
@@ -277,6 +283,7 @@ function handleServerMessage(msg) {
 async function loadCommands() {
   try {
     const res = await fetch('/api/commands');
+    if (!res.ok) return;
     slashCommands = await res.json();
   } catch (e) {
     console.warn('Could not load commands:', e);
@@ -901,7 +908,14 @@ function updateSlashCompletions() {
   matches.forEach((cmd, i) => {
     const row = document.createElement('div');
     row.className = 'slash-item' + (i === activeSlashIdx ? ' active' : '');
-    row.innerHTML = `<span class="slash-item-name">${cmd.name}</span><span class="slash-item-desc">${cmd.desc}</span>`;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'slash-item-name';
+    nameSpan.textContent = cmd.name;
+    const descSpan = document.createElement('span');
+    descSpan.className = 'slash-item-desc';
+    descSpan.textContent = cmd.desc;
+    row.appendChild(nameSpan);
+    row.appendChild(descSpan);
     row.addEventListener('mousedown', e => {
       e.preventDefault(); // don't blur textarea
       inputEl.value = cmd.name + ' ';

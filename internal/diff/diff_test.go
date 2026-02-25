@@ -118,6 +118,73 @@ func TestCompute_WordSpans_NewFileNoSpans(t *testing.T) {
 	}
 }
 
+func TestCompute_EmptyNewContent(t *testing.T) {
+	// Replacing a file with empty content should produce only Remove lines.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "doomed.txt")
+	require.NoError(t, os.WriteFile(file, []byte("line1\nline2\n"), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	fd := diff.Compute("doomed.txt", "")
+	assert.Equal(t, 0, fd.Adds)
+	assert.Equal(t, 2, fd.Removes)
+	for _, line := range fd.Lines {
+		assert.NotEqual(t, diff.Add, line.Kind)
+	}
+}
+
+func TestCompute_BothEmpty(t *testing.T) {
+	// Nonexistent file + empty new content = no diff.
+	fd := diff.Compute("nonexistent_empty.txt", "")
+	assert.True(t, fd.IsNew)
+	assert.Equal(t, 0, fd.Adds)
+	assert.Equal(t, 0, fd.Removes)
+	assert.Empty(t, fd.Lines)
+}
+
+func TestCompute_CRLFLineEndings(t *testing.T) {
+	// CRLF content should still produce meaningful diffs.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "crlf.txt")
+	require.NoError(t, os.WriteFile(file, []byte("line1\r\nline2\r\n"), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	fd := diff.Compute("crlf.txt", "line1\r\nchanged\r\n")
+	assert.Greater(t, fd.Adds, 0)
+	assert.Greater(t, fd.Removes, 0)
+}
+
+func TestCompute_SingleLineNoNewline(t *testing.T) {
+	// File and new content with no trailing newline.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "single.txt")
+	require.NoError(t, os.WriteFile(file, []byte("hello"), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	fd := diff.Compute("single.txt", "world")
+	assert.Greater(t, fd.Adds, 0)
+	assert.Greater(t, fd.Removes, 0)
+}
+
+func TestCompute_ContentPrefixCharacters(t *testing.T) {
+	// Every DiffLine.Content should start with '+', '-', or ' '.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "prefix.txt")
+	require.NoError(t, os.WriteFile(file, []byte("old\n"), 0o644))
+	require.NoError(t, os.Chdir(dir))
+
+	fd := diff.Compute("prefix.txt", "new\n")
+	for _, line := range fd.Lines {
+		if line.Kind == diff.Hunk {
+			continue
+		}
+		require.NotEmpty(t, line.Content, "line content should not be empty")
+		prefix := line.Content[0]
+		assert.True(t, prefix == '+' || prefix == '-' || prefix == ' ',
+			"unexpected prefix %q in content %q", string(prefix), line.Content)
+	}
+}
+
 func TestCompute_WordSpans_SpanTextReconstructsLine(t *testing.T) {
 	// Concatenating span texts should equal the line content minus the leading prefix char.
 	dir := t.TempDir()

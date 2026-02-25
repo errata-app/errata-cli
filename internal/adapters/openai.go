@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	openai "github.com/openai/openai-go"
@@ -89,7 +90,11 @@ func (a *OpenAIAdapter) RunAgent(
 
 		for _, tc := range msg.ToolCalls {
 			var input map[string]any
-			_ = json.Unmarshal([]byte(tc.Function.Arguments), &input)
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
+				onEvent(models.AgentEvent{Type: "error", Data: fmt.Sprintf("bad tool args for %s: %v", tc.Function.Name, err)})
+				messages = append(messages, openai.ToolMessage(fmt.Sprintf("error parsing arguments: %v", err), tc.ID))
+				continue
+			}
 			result, ok := DispatchTool(ctx, tc.Function.Name, extractStringMap(input), onEvent, &proposed)
 			if ok {
 				messages = append(messages, openai.ToolMessage(result, tc.ID))

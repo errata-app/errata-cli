@@ -40,7 +40,10 @@ func newPanelState(modelID string, idx int) *panelState {
 func (p *panelState) addEvent(e models.AgentEvent) {
 	p.events = append(p.events, e)
 	if len(p.events) > maxPanelEvents {
-		p.events = p.events[len(p.events)-maxPanelEvents:]
+		// Copy into a fresh slice so the old backing array can be GC'd.
+		trimmed := make([]models.AgentEvent, maxPanelEvents)
+		copy(trimmed, p.events[len(p.events)-maxPanelEvents:])
+		p.events = trimmed
 	}
 }
 

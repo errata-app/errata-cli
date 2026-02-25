@@ -87,10 +87,17 @@ func renderFileDiff(fd diff.FileDiff) string {
 	sb.WriteByte('\n')
 
 	for _, line := range fd.Lines {
+		// line.Content includes a leading prefix character (+/-/ ) from
+		// diff.Compute; strip it so the rendering prefix is not doubled.
+		body := line.Content
+		if len(body) > 0 {
+			body = body[1:]
+		}
+
 		switch line.Kind {
 		case diff.Add:
 			if len(line.Spans) > 0 {
-				sb.WriteString(addStyle.Render("    + " + string(line.Content[0])))
+				sb.WriteString(addStyle.Render("    + "))
 				for _, sp := range line.Spans {
 					if sp.Changed {
 						sb.WriteString(addHighlight.Render(sp.Text))
@@ -99,11 +106,11 @@ func renderFileDiff(fd diff.FileDiff) string {
 					}
 				}
 			} else {
-				sb.WriteString(addStyle.Render("    + " + line.Content))
+				sb.WriteString(addStyle.Render("    + " + body))
 			}
 		case diff.Remove:
 			if len(line.Spans) > 0 {
-				sb.WriteString(removeStyle.Render("    - " + string(line.Content[0])))
+				sb.WriteString(removeStyle.Render("    - "))
 				for _, sp := range line.Spans {
 					if sp.Changed {
 						sb.WriteString(removeHighlight.Render(sp.Text))
@@ -112,12 +119,12 @@ func renderFileDiff(fd diff.FileDiff) string {
 					}
 				}
 			} else {
-				sb.WriteString(removeStyle.Render("    - " + line.Content))
+				sb.WriteString(removeStyle.Render("    - " + body))
 			}
 		case diff.Hunk:
 			sb.WriteString(hunkStyle.Render("    " + line.Content))
 		default:
-			sb.WriteString(contextStyle.Render("      " + line.Content))
+			sb.WriteString(contextStyle.Render("      " + body))
 		}
 		sb.WriteByte('\n')
 	}

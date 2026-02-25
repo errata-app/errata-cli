@@ -102,6 +102,26 @@ func TestRenderDiffs_MultipleResponses(t *testing.T) {
 	assert.Less(t, strings.Index(out, "model-a"), strings.Index(out, "model-b"))
 }
 
+func TestRenderDiffs_NoDuplicatePrefix(t *testing.T) {
+	// Regression: diff.Compute stores "+line" in Content; the TUI renderer
+	// must strip the leading prefix to avoid showing "++line" or "--line".
+	responses := []models.ModelResponse{
+		{
+			ModelID:   "test-model",
+			LatencyMS: 100,
+			ProposedWrites: []tools.FileWrite{
+				{Path: "/tmp/_errata_test_noexist_" + t.Name(), Content: "hello\nworld\n"},
+			},
+		},
+	}
+	out := ui.RenderDiffs(responses)
+	// The rendered output should contain "+ hello" (prefix + content) but never "++".
+	assert.NotContains(t, out, "++")
+	assert.NotContains(t, out, "--")
+	assert.Contains(t, out, "hello")
+	assert.Contains(t, out, "world")
+}
+
 // --- RenderSelectionMenu ---
 
 func TestRenderSelectionMenu_ContainsSkipOption(t *testing.T) {

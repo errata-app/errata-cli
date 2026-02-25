@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -81,7 +82,11 @@ func (a *AnthropicAdapter) RunAgent(
 			case "tool_use":
 				tu := block.AsToolUse()
 				var input map[string]any
-				_ = json.Unmarshal(tu.Input, &input)
+				if err := json.Unmarshal(tu.Input, &input); err != nil {
+					onEvent(models.AgentEvent{Type: "error", Data: fmt.Sprintf("bad tool args for %s: %v", tu.Name, err)})
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, fmt.Sprintf("error parsing arguments: %v", err), true))
+					continue
+				}
 				result, ok := DispatchTool(ctx, tu.Name, extractStringMap(input), onEvent, &proposed)
 				if ok {
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, result, false))

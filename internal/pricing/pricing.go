@@ -195,8 +195,10 @@ type orModelsResp struct {
 	Data []struct {
 		ID      string `json:"id"`
 		Pricing struct {
-			Prompt     string `json:"prompt"`
-			Completion string `json:"completion"`
+			Prompt          string `json:"prompt"`
+			Completion      string `json:"completion"`
+			InputCacheRead  string `json:"input_cache_read"`
+			InputCacheWrite string `json:"input_cache_write"`
 		} `json:"pricing"`
 		ContextLength int64 `json:"context_length"`
 	} `json:"data"`
@@ -229,11 +231,19 @@ func fetchOpenRouterPricing() (map[string]modelPricing, error) {
 			continue // skip free / unknown-price models
 		}
 		// OpenRouter prices are per-token; convert to per-million-token.
-		table[m.ID] = modelPricing{
+		p := modelPricing{
 			InputPMT:      inp * 1_000_000,
 			OutputPMT:     out * 1_000_000,
 			ContextWindow: m.ContextLength,
 		}
+		// Cache rates are optional — only populated when the provider exposes them.
+		if cr, err := strconv.ParseFloat(m.Pricing.InputCacheRead, 64); err == nil && cr > 0 {
+			p.CacheReadPMT = cr * 1_000_000
+		}
+		if cw, err := strconv.ParseFloat(m.Pricing.InputCacheWrite, 64); err == nil && cw > 0 {
+			p.CacheWritePMT = cw * 1_000_000
+		}
+		table[m.ID] = p
 	}
 	return table, nil
 }
