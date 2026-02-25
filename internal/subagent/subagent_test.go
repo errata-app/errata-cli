@@ -20,6 +20,9 @@ type stubAdapter struct {
 }
 
 func (s *stubAdapter) ID() string { return s.id }
+func (s *stubAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (s *stubAdapter) RunAgent(_ context.Context, _ []models.ConversationTurn, prompt string, _ func(models.AgentEvent)) (models.ModelResponse, error) {
 	r := s.response
 	r.ModelID = s.id
@@ -180,6 +183,9 @@ type checkingAdapter struct {
 }
 
 func (c *checkingAdapter) ID() string { return c.id }
+func (c *checkingAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (c *checkingAdapter) RunAgent(ctx context.Context, _ []models.ConversationTurn, _ string, _ func(models.AgentEvent)) (models.ModelResponse, error) {
 	r := c.fn(ctx)
 	r.ModelID = c.id

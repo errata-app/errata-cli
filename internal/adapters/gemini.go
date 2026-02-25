@@ -2,11 +2,14 @@ package adapters
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"google.golang.org/genai"
 
+	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
+	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -23,6 +26,33 @@ func NewGeminiAdapter(modelID, apiKey string) *GeminiAdapter {
 
 func (a *GeminiAdapter) ID() string { return a.modelID }
 
+// Capabilities queries the Gemini models API for context/output token limits,
+// falling back to hardcoded defaults on error.
+func (a *GeminiAdapter) Capabilities(ctx context.Context) models.ModelCapabilities {
+	caps := capabilities.DefaultCapabilities("google", a.modelID)
+
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: a.apiKey})
+	if err != nil {
+		log.Printf("capabilities: gemini client creation failed for %s: %v", a.modelID, err)
+		return caps
+	}
+
+	info, err := client.Models.Get(ctx, a.modelID, nil)
+	if err != nil {
+		log.Printf("capabilities: gemini API lookup failed for %s: %v", a.modelID, err)
+		return caps
+	}
+
+	if info.InputTokenLimit > 0 {
+		caps.ContextWindow = int(info.InputTokenLimit)
+		caps.ContextWindowSource = models.SourceAPI
+	}
+	if info.OutputTokenLimit > 0 {
+		caps.MaxOutputTokens = int(info.OutputTokenLimit)
+	}
+	return caps
+}
+
 func (a *GeminiAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,
@@ -35,9 +65,19 @@ func (a *GeminiAdapter) RunAgent(
 		return BuildErrorResponse(a.modelID, "google/"+a.modelID, start, 0, 0, err), err
 	}
 
+	// Resolve system prompt: prefer payload from context, fall back to built-in.
+	var systemMsg string
+	var toolDescOverrides map[string]string
+	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
+		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
+		toolDescOverrides = payload.ToolDescriptions
+	} else {
+		systemMsg = tools.SystemPromptSuffix()
+	}
+
 	config := &genai.GenerateContentConfig{
-		Tools:             buildGeminiTools(ctx),
-		SystemInstruction: genai.NewContentFromText(tools.SystemPromptSuffix(), ""),
+		Tools:             buildGeminiTools(ctx, toolDescOverrides),
+		SystemInstruction: genai.NewContentFromText(systemMsg, ""),
 	}
 	if seed, ok := tools.SeedFromContext(ctx); ok {
 		s := int32(seed)
@@ -107,7 +147,7 @@ func (a *GeminiAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "google/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
 }
 
-func buildGeminiTools(ctx context.Context) []*genai.Tool {
+func buildGeminiTools(ctx context.Context, descOverrides map[string]string) []*genai.Tool {
 	var decls []*genai.FunctionDeclaration
 	for _, def := range tools.ActiveToolsFromContext(ctx) {
 		props := map[string]*genai.Schema{}
@@ -123,9 +163,15 @@ func buildGeminiTools(ctx context.Context) []*genai.Tool {
 		}
 		required := make([]string, len(def.Required))
 		copy(required, def.Required)
+
+		desc := def.Description
+		if d, ok := descOverrides[def.Name]; ok {
+			desc = d
+		}
+
 		decls = append(decls, &genai.FunctionDeclaration{
 			Name:        def.Name,
-			Description: def.Description,
+			Description: desc,
 			Parameters: &genai.Schema{
 				Type:       genai.TypeObject,
 				Properties: props,

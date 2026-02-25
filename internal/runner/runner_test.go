@@ -3,14 +3,14 @@ package runner_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
-
-	"strings"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -22,6 +22,9 @@ type stubAdapter struct {
 }
 
 func (s *stubAdapter) ID() string { return s.id }
+func (s *stubAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (s *stubAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,
@@ -41,6 +44,9 @@ type errorAdapter struct {
 }
 
 func (e *errorAdapter) ID() string { return e.id }
+func (e *errorAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (e *errorAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,
@@ -57,6 +63,9 @@ type historyCapturingAdapter struct {
 }
 
 func (h *historyCapturingAdapter) ID() string { return h.id }
+func (h *historyCapturingAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (h *historyCapturingAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,
@@ -459,6 +468,9 @@ type compactStub struct {
 }
 
 func (s compactStub) ID() string { return s.id }
+func (s compactStub) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (s compactStub) RunAgent(_ context.Context, hist []models.ConversationTurn, prompt string, onEvent func(models.AgentEvent)) (models.ModelResponse, error) {
 	return models.ModelResponse{ModelID: s.id, Text: s.summary}, nil
 }
@@ -521,6 +533,9 @@ type snapshotAdapter struct {
 }
 
 func (s *snapshotAdapter) ID() string { return s.id }
+func (s *snapshotAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (s *snapshotAdapter) RunAgent(
 	ctx context.Context,
 	history []models.ConversationTurn,
@@ -553,4 +568,50 @@ func TestRunAll_SnapshotEventsNotForwarded(t *testing.T) {
 	assert.Len(t, received, 2)
 	assert.Equal(t, "reading", received[0].Type)
 	assert.Equal(t, "writing", received[1].Type)
+}
+
+// ─── Summarization prompt ───────────────────────────────────────────────────
+
+// promptCapturingStub captures the prompt passed to RunAgent for verification.
+type promptCapturingStub struct {
+	id             string
+	summary        string
+	capturedMu     sync.Mutex
+	capturedPrompt string
+}
+
+func (s *promptCapturingStub) ID() string { return s.id }
+func (s *promptCapturingStub) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
+func (s *promptCapturingStub) RunAgent(_ context.Context, hist []models.ConversationTurn, p string, onEvent func(models.AgentEvent)) (models.ModelResponse, error) {
+	s.capturedMu.Lock()
+	s.capturedPrompt = p
+	s.capturedMu.Unlock()
+	return models.ModelResponse{ModelID: s.id, Text: s.summary}, nil
+}
+
+func TestCompactHistories_UsesCustomSummarizationPrompt(t *testing.T) {
+	ad := &promptCapturingStub{id: "model-x", summary: "compact summary"}
+	payloads := map[string]prompt.PromptPayload{
+		"model-x": {SummarizationPrompt: "Custom: summarize now!"},
+	}
+	ctx := prompt.WithPayloads(context.Background(), payloads)
+	h := map[string][]models.ConversationTurn{
+		"model-x": makeTurns("user", "hello", "assistant", "hi"),
+	}
+	runner.CompactHistories(ctx, []models.ModelAdapter{ad}, h, func(_ string, _ models.AgentEvent) {})
+
+	assert.Equal(t, "Custom: summarize now!", ad.capturedPrompt)
+}
+
+func TestCompactHistories_FallsBackToDefaultSummarizationPrompt(t *testing.T) {
+	ad := &promptCapturingStub{id: "model-y", summary: "compact summary"}
+	h := map[string][]models.ConversationTurn{
+		"model-y": makeTurns("user", "hello", "assistant", "hi"),
+	}
+	// No payloads in context → should use DefaultSummarizationPrompt.
+	runner.CompactHistories(context.Background(), []models.ModelAdapter{ad}, h, func(_ string, _ models.AgentEvent) {})
+
+	assert.Equal(t, prompt.DefaultSummarizationPrompt, ad.capturedPrompt)
 }

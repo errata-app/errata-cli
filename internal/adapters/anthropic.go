@@ -8,7 +8,9 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
+	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -25,6 +27,10 @@ func NewAnthropicAdapter(modelID, apiKey string) *AnthropicAdapter {
 
 func (a *AnthropicAdapter) ID() string { return a.modelID }
 
+func (a *AnthropicAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return capabilities.DefaultCapabilities("anthropic", a.modelID)
+}
+
 func (a *AnthropicAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,
@@ -33,7 +39,17 @@ func (a *AnthropicAdapter) RunAgent(
 ) (models.ModelResponse, error) {
 	client := anthropic.NewClient(option.WithAPIKey(a.apiKey))
 
-	toolParams := buildAnthropicTools(ctx)
+	// Resolve system prompt: prefer payload from context, fall back to built-in.
+	var systemMsg string
+	var toolDescOverrides map[string]string
+	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
+		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
+		toolDescOverrides = payload.ToolDescriptions
+	} else {
+		systemMsg = tools.SystemPromptSuffix()
+	}
+
+	toolParams := buildAnthropicTools(ctx, toolDescOverrides)
 	messages := make([]anthropic.MessageParam, 0, len(history)+1)
 	for _, turn := range history {
 		switch turn.Role {
@@ -62,7 +78,7 @@ func (a *AnthropicAdapter) RunAgent(
 		params := anthropic.MessageNewParams{
 			Model:     anthropic.Model(a.modelID),
 			MaxTokens: 8096,
-			System:    []anthropic.TextBlockParam{{Text: tools.SystemPromptSuffix()}},
+			System:    []anthropic.TextBlockParam{{Text: systemMsg}},
 			Tools:     toolParams,
 			Messages:  messages,
 		}
@@ -120,7 +136,7 @@ func (a *AnthropicAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, totalCacheCreation, totalOutput, proposed), nil
 }
 
-func buildAnthropicTools(ctx context.Context) []anthropic.ToolUnionParam {
+func buildAnthropicTools(ctx context.Context, descOverrides map[string]string) []anthropic.ToolUnionParam {
 	var out []anthropic.ToolUnionParam
 	for _, def := range tools.ActiveToolsFromContext(ctx) {
 		props := map[string]any{}
@@ -133,9 +149,14 @@ func buildAnthropicTools(ctx context.Context) []anthropic.ToolUnionParam {
 		required := make([]string, len(def.Required))
 		copy(required, def.Required)
 
+		desc := def.Description
+		if d, ok := descOverrides[def.Name]; ok {
+			desc = d
+		}
+
 		tp := anthropic.ToolParam{
 			Name:        def.Name,
-			Description: anthropic.String(def.Description),
+			Description: anthropic.String(desc),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: props,
 				Required:   required,

@@ -16,6 +16,9 @@ type stubAdapter struct {
 }
 
 func (s *stubAdapter) ID() string { return s.id }
+func (s *stubAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (s *stubAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,

@@ -23,6 +23,7 @@ import (
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/internal/reminders"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -144,6 +145,10 @@ type App struct {
 	// recipe holds the full recipe configuration; used for output reports.
 	recipe *recipe.Recipe
 
+	// reminderState tracks conditional mid-conversation injection state.
+	// nil when no reminders are configured in the recipe.
+	reminderState *reminders.State
+
 	// lastReport is the most recent output report; used by selection/rating
 	// handlers to call RecordSelection after the user picks a winner.
 	lastReport *output.Report
@@ -217,6 +222,20 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		app.sandboxFilesystem = rec.Sandbox.Filesystem
 		app.sandboxNetwork = rec.Sandbox.Network
 		app.projectRoot = rec.Metadata.ProjectRoot
+		if len(rec.SystemReminders) > 0 {
+			var rs []reminders.Reminder
+			for _, cfg := range rec.SystemReminders {
+				tr, err := reminders.ParseTrigger(cfg.Trigger)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: skipping reminder %q: %v\n", cfg.Name, err)
+					continue
+				}
+				rs = append(rs, reminders.Reminder{Name: cfg.Name, Trigger: tr, Content: cfg.Content})
+			}
+			if len(rs) > 0 {
+				app.reminderState = reminders.NewState(rs)
+			}
+		}
 	}
 	return app
 }

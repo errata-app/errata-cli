@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/pricing"
+	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -28,6 +32,32 @@ func NewOpenRouterAdapter(modelID, apiKey string) *OpenRouterAdapter {
 
 func (a *OpenRouterAdapter) ID() string { return a.modelID }
 
+// Capabilities infers capabilities from the sub-provider in the model ID
+// (e.g. "anthropic/claude-sonnet-4-6" → anthropic defaults) and uses the
+// context window from pricing data when available.
+func (a *OpenRouterAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	var caps models.ModelCapabilities
+
+	// OpenRouter model IDs are "provider/model" — infer from sub-provider.
+	if i := strings.Index(a.modelID, "/"); i >= 0 {
+		subProvider := a.modelID[:i]
+		subModel := a.modelID[i+1:]
+		caps = capabilities.DefaultCapabilities(subProvider, subModel)
+		caps.ModelID = a.modelID
+		caps.Provider = "openrouter"
+	} else {
+		caps = capabilities.DefaultCapabilities("openrouter", a.modelID)
+	}
+
+	// Use context window from pricing data if available (sourced from OpenRouter API).
+	if cw := pricing.ContextWindowTokens(a.modelID); cw > 0 {
+		caps.ContextWindow = int(cw)
+		caps.ContextWindowSource = models.SourceAPI
+	}
+
+	return caps
+}
+
 func (a *OpenRouterAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,
@@ -39,9 +69,19 @@ func (a *OpenRouterAdapter) RunAgent(
 		option.WithBaseURL(openRouterBaseURL),
 	)
 
-	toolParams := buildOpenAITools(ctx)
+	// Resolve system prompt: prefer payload from context, fall back to built-in.
+	var systemMsg string
+	var toolDescOverrides map[string]string
+	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
+		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
+		toolDescOverrides = payload.ToolDescriptions
+	} else {
+		systemMsg = tools.SystemPromptSuffix()
+	}
+
+	toolParams := buildOpenAITools(ctx, toolDescOverrides)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
-	messages = append(messages, openai.SystemMessage(tools.SystemPromptSuffix()))
+	messages = append(messages, openai.SystemMessage(systemMsg))
 	for _, turn := range history {
 		switch turn.Role {
 		case "user":

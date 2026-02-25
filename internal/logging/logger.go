@@ -135,6 +135,10 @@ type loggingAdapter struct {
 
 func (a *loggingAdapter) ID() string { return a.inner.ID() }
 
+func (a *loggingAdapter) Capabilities(ctx context.Context) models.ModelCapabilities {
+	return a.inner.Capabilities(ctx)
+}
+
 func (a *loggingAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,

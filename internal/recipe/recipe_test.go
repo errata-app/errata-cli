@@ -501,3 +501,560 @@ func TestDefault_IsNonNil(t *testing.T) {
 	assert.Equal(t, 1, r.SubAgent.MaxDepth)
 	assert.Equal(t, 5*time.Minute, r.Constraints.Timeout)
 }
+
+// ─── Gap 1: System Prompt Variants/Overrides ─────────────────────────────────
+
+func TestParse_SystemPromptVariants(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## System Prompt
+Full system prompt here.
+
+## System Prompt Variants
+### concise
+Short prompt.
+
+### minimal
+Tiny prompt.
+`))
+	require.NoError(t, err)
+	assert.Equal(t, "Full system prompt here.", r.SystemPrompt)
+	require.Len(t, r.SystemPromptVariants, 2)
+	assert.Equal(t, "Short prompt.", r.SystemPromptVariants["concise"])
+	assert.Equal(t, "Tiny prompt.", r.SystemPromptVariants["minimal"])
+}
+
+func TestParse_SystemPromptOverrides(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## System Prompt Overrides
+### gpt-4o
+Custom GPT-4o prompt.
+
+### gemini-2.0-flash
+concise
+`))
+	require.NoError(t, err)
+	require.Len(t, r.SystemPromptOverrides, 2)
+	assert.Equal(t, "Custom GPT-4o prompt.", r.SystemPromptOverrides["gpt-4o"])
+	assert.Equal(t, "concise", r.SystemPromptOverrides["gemini-2.0-flash"])
+}
+
+func TestRecipe_SystemPromptVS(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## System Prompt
+Default prompt.
+
+## System Prompt Variants
+### concise
+Short.
+
+## System Prompt Overrides
+### gpt-4o
+concise
+`))
+	require.NoError(t, err)
+	vs := r.SystemPromptVS()
+	assert.Equal(t, "Default prompt.", vs.Default)
+
+	content, src := vs.Resolve("gpt-4o", "openai", "")
+	assert.Equal(t, "Short.", content)
+	assert.Contains(t, src, "variant:concise")
+
+	content, _ = vs.Resolve("unknown", "", "")
+	assert.Equal(t, "Default prompt.", content)
+}
+
+// ─── Gap 2: Tool Descriptions ────────────────────────────────────────────────
+
+func TestParse_ToolDescriptions(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Tool Descriptions
+### bash
+Use bash for tests and builds.
+Always check exit codes.
+
+### read_file
+Read files to understand code.
+`))
+	require.NoError(t, err)
+	require.Len(t, r.ToolDescriptions, 2)
+	assert.Contains(t, r.ToolDescriptions["bash"], "Always check exit codes")
+	assert.Contains(t, r.ToolDescriptions["read_file"], "Read files")
+}
+
+func TestParse_ToolDescriptionVariants(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Tool Description Variants
+### bash
+#### concise
+Run shell commands. Check exit codes.
+#### minimal
+Shell access.
+`))
+	require.NoError(t, err)
+	require.Contains(t, r.ToolDescriptionVariants, "bash")
+	assert.Equal(t, "Run shell commands. Check exit codes.", r.ToolDescriptionVariants["bash"]["concise"])
+	assert.Equal(t, "Shell access.", r.ToolDescriptionVariants["bash"]["minimal"])
+}
+
+func TestParse_ToolDescriptionOverrides(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Tool Description Overrides
+### gpt-4o
+#### bash
+GPT-4o specific bash description.
+`))
+	require.NoError(t, err)
+	require.Contains(t, r.ToolDescriptionOverrides, "gpt-4o")
+	assert.Equal(t, "GPT-4o specific bash description.", r.ToolDescriptionOverrides["gpt-4o"]["bash"])
+}
+
+func TestRecipe_ToolDescriptionVS(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Tool Descriptions
+### bash
+Default bash description.
+
+## Tool Description Variants
+### bash
+#### concise
+Short bash.
+
+## Tool Description Overrides
+### gpt-4o
+#### bash
+concise
+`))
+	require.NoError(t, err)
+	vs := r.ToolDescriptionVS("bash")
+	assert.Equal(t, "Default bash description.", vs.Default)
+
+	content, _ := vs.Resolve("gpt-4o", "openai", "")
+	assert.Equal(t, "Short bash.", content)
+
+	content, _ = vs.Resolve("unknown", "", "")
+	assert.Equal(t, "Default bash description.", content)
+}
+
+// ─── Gap 3: Sub-Agent Modes ─────────────────────────────────────────────────
+
+func TestParse_SubAgentModes(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sub-Agent Modes
+### explore
+You are a codebase exploration specialist. READ-ONLY mode.
+
+### plan
+You are a planning specialist. Do NOT make changes.
+`))
+	require.NoError(t, err)
+	require.Len(t, r.SubAgentModes, 2)
+	assert.Contains(t, r.SubAgentModes["explore"], "READ-ONLY")
+	assert.Contains(t, r.SubAgentModes["plan"], "planning specialist")
+}
+
+func TestParse_SubAgentModeVariants(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sub-Agent Mode Variants
+### explore
+#### concise
+Read-only codebase search. Return file paths and findings.
+`))
+	require.NoError(t, err)
+	require.Contains(t, r.SubAgentModeVariants, "explore")
+	assert.Contains(t, r.SubAgentModeVariants["explore"]["concise"], "Read-only codebase search")
+}
+
+// ─── Gap 4: System Reminders ─────────────────────────────────────────────────
+
+func TestParse_SystemReminders(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## System Reminders
+### context_warning
+trigger: context_usage > 0.75
+
+Approaching context limit. Be concise.
+
+### tool_failure
+trigger: last_tool_call_failed
+
+Analyze the error before retrying.
+`))
+	require.NoError(t, err)
+	require.Len(t, r.SystemReminders, 2)
+
+	assert.Equal(t, "context_warning", r.SystemReminders[0].Name)
+	assert.Equal(t, "context_usage > 0.75", r.SystemReminders[0].Trigger)
+	assert.Contains(t, r.SystemReminders[0].Content, "Approaching context limit")
+
+	assert.Equal(t, "tool_failure", r.SystemReminders[1].Name)
+	assert.Equal(t, "last_tool_call_failed", r.SystemReminders[1].Trigger)
+	assert.Contains(t, r.SystemReminders[1].Content, "Analyze the error")
+}
+
+// ─── Gap 5: Hooks ────────────────────────────────────────────────────────────
+
+func TestParse_Hooks(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Hooks
+### post_edit_vet
+event: post_tool_use
+matcher: edit_file
+command: go vet ./... 2>&1 | head -20
+timeout: 30s
+inject_output: true
+
+### response_logger
+event: post_response
+command: echo 'done' >> /tmp/log.txt
+timeout: 5s
+`))
+	require.NoError(t, err)
+	require.Len(t, r.Hooks, 2)
+
+	h0 := r.Hooks[0]
+	assert.Equal(t, "post_edit_vet", h0.Name)
+	assert.Equal(t, "post_tool_use", h0.Event)
+	assert.Equal(t, "edit_file", h0.Matcher)
+	assert.Equal(t, "go vet ./... 2>&1 | head -20", h0.Command)
+	assert.Equal(t, "30s", h0.Timeout)
+	assert.True(t, h0.InjectOutput)
+	assert.Equal(t, "command", h0.Action) // default action
+
+	h1 := r.Hooks[1]
+	assert.Equal(t, "response_logger", h1.Name)
+	assert.Equal(t, "post_response", h1.Event)
+	assert.Equal(t, "", h1.Matcher)
+	assert.False(t, h1.InjectOutput)
+}
+
+// ─── Gap 6: Summarization Prompt ─────────────────────────────────────────────
+
+func TestParse_SummarizationPrompt(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Context Summarization Prompt
+Summarize for context continuity. Preserve: file paths, decisions.
+`))
+	require.NoError(t, err)
+	assert.Contains(t, r.SummarizationPrompt, "context continuity")
+}
+
+func TestParse_SummarizationPromptVariants(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Context Summarization Prompt Variants
+### concise
+Summarize. Keep: file paths, decisions.
+`))
+	require.NoError(t, err)
+	require.Len(t, r.SummarizationPromptVariants, 1)
+	assert.Contains(t, r.SummarizationPromptVariants["concise"], "Summarize")
+}
+
+// ─── Gap 7: Output Processing ────────────────────────────────────────────────
+
+func TestParse_OutputProcessing(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Output Processing
+### bash
+max_lines: 200
+truncation: tail
+truncation_message: [Truncated to last 200 lines. Full output: {line_count} lines]
+
+### web_fetch
+max_tokens: 5000
+truncation: head
+`))
+	require.NoError(t, err)
+	require.Len(t, r.OutputProcessing, 2)
+
+	bash := r.OutputProcessing["bash"]
+	assert.Equal(t, 200, bash.MaxLines)
+	assert.Equal(t, "tail", bash.Truncation)
+	assert.Contains(t, bash.TruncationMessage, "{line_count}")
+
+	wf := r.OutputProcessing["web_fetch"]
+	assert.Equal(t, 5000, wf.MaxTokens)
+	assert.Equal(t, "head", wf.Truncation)
+}
+
+func TestParse_OutputProcessingOverrides(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Output Processing Overrides
+### gemini-2.0-flash
+#### bash
+max_lines: 50
+truncation: tail
+`))
+	require.NoError(t, err)
+	require.Contains(t, r.OutputProcessingOverrides, "gemini-2.0-flash")
+	assert.Equal(t, 50, r.OutputProcessingOverrides["gemini-2.0-flash"]["bash"].MaxLines)
+}
+
+// ─── Model Profiles ──────────────────────────────────────────────────────────
+
+func TestParse_ModelProfiles(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Model Profiles
+### gpt-4o
+context_budget: 32000
+tool_format: function_calling
+mid_convo_system: false
+
+### gemini-2.0-flash
+tier: minimal
+`))
+	require.NoError(t, err)
+	require.Len(t, r.ModelProfiles, 2)
+
+	gpt := r.ModelProfiles["gpt-4o"]
+	assert.Equal(t, 32000, gpt.ContextBudget)
+	assert.Equal(t, "function_calling", gpt.ToolFormat)
+	require.NotNil(t, gpt.MidConvoSystem)
+	assert.False(t, *gpt.MidConvoSystem)
+
+	gemini := r.ModelProfiles["gemini-2.0-flash"]
+	assert.Equal(t, "minimal", gemini.Tier)
+	assert.Equal(t, 0, gemini.ContextBudget)
+}
+
+// ─── Backward Compatibility ──────────────────────────────────────────────────
+
+func TestParse_FullRecipe_BackwardCompat(t *testing.T) {
+	// All new sections alongside existing sections — nothing should break.
+	r, err := recipe.Parse(writeRecipe(t, `
+# Full Test Recipe
+
+## Models
+- claude-sonnet-4-6
+- gpt-4o
+- gemini-2.0-flash
+
+## System Prompt
+You are working on a Go monorepo.
+
+## System Prompt Variants
+### concise
+Go monorepo. Test after changes.
+
+## System Prompt Overrides
+### gpt-4o
+Custom GPT prompt.
+
+## Tools
+- read_file
+- bash(go test *, go vet *)
+
+## Tool Descriptions
+### bash
+Use bash for tests.
+
+## Model Profiles
+### gpt-4o
+context_budget: 32000
+
+## Constraints
+timeout: 10m
+max_steps: 50
+
+## Context
+max_history_turns: 30
+strategy: auto_compact
+compact_threshold: 0.75
+
+## Sub-Agent
+model: claude-sonnet-4-6
+max_depth: 2
+
+## Sub-Agent Modes
+### explore
+Read-only exploration.
+
+## System Reminders
+### context_warning
+trigger: context_usage > 0.75
+
+Be concise.
+
+## Hooks
+### vet_check
+event: post_tool_use
+matcher: edit_file
+command: go vet ./...
+timeout: 30s
+
+## Context Summarization Prompt
+Keep file paths and decisions.
+
+## Output Processing
+### bash
+max_lines: 200
+truncation: tail
+
+## Sandbox
+filesystem: project_only
+network: full
+
+## Model Parameters
+seed: 42
+`))
+	require.NoError(t, err)
+
+	// Existing sections still work.
+	assert.Len(t, r.Models, 3)
+	assert.Contains(t, r.SystemPrompt, "Go monorepo")
+	require.NotNil(t, r.Tools)
+	assert.Contains(t, r.Tools.Allowlist, "bash")
+	assert.Equal(t, 10*time.Minute, r.Constraints.Timeout)
+	assert.Equal(t, 50, r.Constraints.MaxSteps)
+	assert.Equal(t, 30, r.Context.MaxHistoryTurns)
+	assert.Equal(t, "auto_compact", r.Context.Strategy)
+	assert.Equal(t, "claude-sonnet-4-6", r.SubAgent.Model)
+	assert.Equal(t, 2, r.SubAgent.MaxDepth)
+	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
+	require.NotNil(t, r.ModelParams.Seed)
+	assert.Equal(t, int64(42), *r.ModelParams.Seed)
+
+	// New sections also parsed.
+	assert.Len(t, r.SystemPromptVariants, 1)
+	assert.Len(t, r.SystemPromptOverrides, 1)
+	assert.Len(t, r.ToolDescriptions, 1)
+	assert.Len(t, r.ModelProfiles, 1)
+	assert.Len(t, r.SubAgentModes, 1)
+	assert.Len(t, r.SystemReminders, 1)
+	assert.Len(t, r.Hooks, 1)
+	assert.NotEmpty(t, r.SummarizationPrompt)
+	assert.Len(t, r.OutputProcessing, 1)
+}
+
+// ─── Empty new sections ─────────────────────────────────────────────────────
+
+func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
+	// Parse the full example recipe and verify every new section is populated.
+	examplePath := filepath.Join("..", "..", "recipe.example.md")
+	r, err := recipe.Parse(examplePath)
+	require.NoError(t, err)
+
+	assert.Equal(t, "My Project Recipe", r.Name)
+	assert.Len(t, r.Models, 3)
+
+	// System Prompt Variants
+	require.NotNil(t, r.SystemPromptVariants)
+	assert.Contains(t, r.SystemPromptVariants, "concise")
+	assert.Contains(t, r.SystemPromptVariants, "minimal")
+	assert.Contains(t, r.SystemPromptVariants["concise"], "Go monorepo")
+
+	// System Prompt Overrides
+	require.NotNil(t, r.SystemPromptOverrides)
+	assert.Contains(t, r.SystemPromptOverrides, "gpt-4o")
+	assert.Contains(t, r.SystemPromptOverrides, "gemini-2.0-flash")
+	assert.Equal(t, "concise", r.SystemPromptOverrides["gemini-2.0-flash"])
+
+	// Tool Descriptions
+	require.NotNil(t, r.ToolDescriptions)
+	assert.Contains(t, r.ToolDescriptions, "bash")
+	assert.Contains(t, r.ToolDescriptions, "read_file")
+	assert.Contains(t, r.ToolDescriptions, "search_code")
+	assert.Contains(t, r.ToolDescriptions["bash"], "exit codes")
+
+	// Tool Description Variants
+	require.NotNil(t, r.ToolDescriptionVariants)
+	assert.Contains(t, r.ToolDescriptionVariants["bash"], "concise")
+	assert.Contains(t, r.ToolDescriptionVariants["search_code"], "concise")
+
+	// Tool Description Overrides
+	require.NotNil(t, r.ToolDescriptionOverrides)
+	assert.Contains(t, r.ToolDescriptionOverrides, "gemini-2.0-flash")
+	assert.Contains(t, r.ToolDescriptionOverrides["gemini-2.0-flash"], "bash")
+	assert.Contains(t, r.ToolDescriptionOverrides["gemini-2.0-flash"], "search_code")
+
+	// Sub-Agent Modes
+	require.NotNil(t, r.SubAgentModes)
+	assert.Contains(t, r.SubAgentModes, "explore")
+	assert.Contains(t, r.SubAgentModes, "plan")
+	assert.Contains(t, r.SubAgentModes["explore"], "read-only")
+
+	// Sub-Agent Mode Variants
+	require.NotNil(t, r.SubAgentModeVariants)
+	assert.Contains(t, r.SubAgentModeVariants["explore"], "concise")
+
+	// Context Summarization Prompt
+	assert.Contains(t, r.SummarizationPrompt, "Summarize this conversation")
+
+	// Context Summarization Prompt Variants
+	require.NotNil(t, r.SummarizationPromptVariants)
+	assert.Contains(t, r.SummarizationPromptVariants, "concise")
+
+	// System Reminders
+	require.Len(t, r.SystemReminders, 4)
+	assert.Equal(t, "context_warning", r.SystemReminders[0].Name)
+	assert.Equal(t, "context_usage > 0.75", r.SystemReminders[0].Trigger)
+	assert.Contains(t, r.SystemReminders[0].Content, "context limit")
+	assert.Equal(t, "many_turns", r.SystemReminders[1].Name)
+	assert.Equal(t, "tool_failure", r.SystemReminders[2].Name)
+	assert.Equal(t, "focus_reminder", r.SystemReminders[3].Name)
+	assert.Equal(t, "manual", r.SystemReminders[3].Trigger)
+	assert.Contains(t, r.SystemReminders[3].Content, "focus on the specific task")
+
+	// Hooks
+	require.Len(t, r.Hooks, 3)
+	assert.Equal(t, "post_edit_vet", r.Hooks[0].Name)
+	assert.Equal(t, "post_tool_use", r.Hooks[0].Event)
+	assert.Equal(t, "edit_file", r.Hooks[0].Matcher)
+	assert.Contains(t, r.Hooks[0].Command, "go vet")
+	assert.Equal(t, "30s", r.Hooks[0].Timeout)
+	assert.True(t, r.Hooks[0].InjectOutput)
+
+	assert.Equal(t, "post_edit_test", r.Hooks[1].Name)
+	assert.Equal(t, "session_start_check", r.Hooks[2].Name)
+	assert.Equal(t, "session_start", r.Hooks[2].Event)
+
+	// Output Processing
+	require.NotNil(t, r.OutputProcessing)
+	assert.Equal(t, 200, r.OutputProcessing["bash"].MaxLines)
+	assert.Equal(t, "tail", r.OutputProcessing["bash"].Truncation)
+	assert.Contains(t, r.OutputProcessing["bash"].TruncationMessage, "{max_lines}")
+	assert.Equal(t, 100, r.OutputProcessing["search_code"].MaxLines)
+	assert.Equal(t, "head_tail", r.OutputProcessing["search_code"].Truncation)
+	assert.Equal(t, 500, r.OutputProcessing["read_file"].MaxLines)
+
+	// Output Processing Overrides
+	require.NotNil(t, r.OutputProcessingOverrides)
+	geminiRules := r.OutputProcessingOverrides["gemini-2.0-flash"]
+	require.NotNil(t, geminiRules)
+	assert.Equal(t, 50, geminiRules["bash"].MaxLines)
+	assert.Equal(t, 30, geminiRules["search_code"].MaxLines)
+
+	// Model Profiles
+	require.NotNil(t, r.ModelProfiles)
+	gpt := r.ModelProfiles["gpt-4o"]
+	assert.Equal(t, 128000, gpt.ContextBudget)
+	assert.Equal(t, "function_calling", gpt.ToolFormat)
+
+	gemini := r.ModelProfiles["gemini-2.0-flash"]
+	assert.Equal(t, 1000000, gemini.ContextBudget)
+	assert.Equal(t, "concise", gemini.Tier)
+
+	llama := r.ModelProfiles["local-llama"]
+	assert.Equal(t, 8192, llama.ContextBudget)
+	assert.Equal(t, "text_in_prompt", llama.ToolFormat)
+	assert.Equal(t, "minimal", llama.Tier)
+	require.NotNil(t, llama.MidConvoSystem)
+	assert.False(t, *llama.MidConvoSystem)
+}
+
+func TestParse_EmptyNewSections(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## System Prompt Variants
+## System Prompt Overrides
+## Tool Descriptions
+## Model Profiles
+## System Reminders
+## Hooks
+`))
+	require.NoError(t, err)
+	assert.Nil(t, r.SystemPromptVariants)
+	assert.Nil(t, r.SystemPromptOverrides)
+	assert.Nil(t, r.ToolDescriptions)
+	assert.Nil(t, r.ModelProfiles)
+	assert.Empty(t, r.SystemReminders)
+	assert.Empty(t, r.Hooks)
+}

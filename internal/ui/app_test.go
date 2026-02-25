@@ -18,6 +18,9 @@ import (
 type uiStub struct{ id string }
 
 func (s uiStub) ID() string { return s.id }
+func (s uiStub) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
 func (s uiStub) RunAgent(_ context.Context, _ []models.ConversationTurn, _ string, _ func(models.AgentEvent)) (models.ModelResponse, error) {
 	return models.ModelResponse{ModelID: s.id}, nil
 }

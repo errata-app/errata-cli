@@ -50,6 +50,9 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	if lower == "/set" || strings.HasPrefix(lower, "/set ") {
 		return a.handleSetCommand(strings.TrimSpace(trimmed[len("/set"):]))
 	}
+	if lower == "/remind" || strings.HasPrefix(lower, "/remind ") {
+		return a.handleRemindCommand(strings.TrimSpace(trimmed[len("/remind"):]))
+	}
 	switch lower {
 	case "/exit", "/quit":
 		return a, tea.Quit
@@ -763,6 +766,26 @@ func (a App) handleSetCommand(args string) (tea.Model, tea.Cmd) {
 	a.recipeModified = true
 	a.applySessionRecipe()
 	return a.withMessage(fmt.Sprintf("Set %s = %s", path, value)), nil
+}
+
+func (a App) handleRemindCommand(args string) (tea.Model, tea.Cmd) {
+	if a.reminderState == nil {
+		return a.withMessage("No reminders configured in recipe."), nil
+	}
+	if args == "" {
+		// Bare /remind: list available reminders.
+		names := a.reminderState.ReminderNames()
+		if len(names) == 0 {
+			return a.withMessage("No reminders configured."), nil
+		}
+		return a.withMessage("Available reminders:\n  " + strings.Join(names, "\n  ")), nil
+	}
+	// Fire a specific reminder by name.
+	r, ok := a.reminderState.FireManual(args)
+	if !ok {
+		return a.withMessage(fmt.Sprintf("Reminder %q not found. Use /remind to list available.", args)), nil
+	}
+	return a.withMessage(fmt.Sprintf("[reminder: %s fired]\n%s", r.Name, r.Content)), nil
 }
 
 func (a App) handleSeedCommand(args string) (tea.Model, tea.Cmd) {

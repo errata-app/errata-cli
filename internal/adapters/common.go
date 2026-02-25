@@ -9,6 +9,7 @@ import (
 
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/pricing"
+	"github.com/suarezc/errata/internal/tooloutput"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -73,7 +74,7 @@ func DispatchTool(
 			}
 		}
 		onEvent(models.AgentEvent{Type: "reading", Data: path})
-		return tools.ExecuteRead(path, offset, limit), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteRead(path, offset, limit)), true
 
 	case tools.WriteToolName:
 		path := args["path"]
@@ -100,13 +101,13 @@ func DispatchTool(
 			}
 		}
 		onEvent(models.AgentEvent{Type: "reading", Data: path})
-		return tools.ExecuteListDirectory(path, depth), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteListDirectory(path, depth)), true
 
 	case tools.SearchFilesName:
 		pattern := args["pattern"]
 		basePath := args["base_path"]
 		onEvent(models.AgentEvent{Type: "reading", Data: pattern})
-		return tools.ExecuteSearchFiles(pattern, basePath), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteSearchFiles(pattern, basePath)), true
 
 	case tools.SearchCodeName:
 		pattern := args["pattern"]
@@ -119,7 +120,7 @@ func DispatchTool(
 			}
 		}
 		onEvent(models.AgentEvent{Type: "reading", Data: pattern})
-		return tools.ExecuteSearchCode(pattern, path, fileGlob, contextLines), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteSearchCode(pattern, path, fileGlob, contextLines)), true
 
 	case tools.BashToolName:
 		command := args["command"]
@@ -128,17 +129,17 @@ func DispatchTool(
 			desc = command
 		}
 		onEvent(models.AgentEvent{Type: "bash", Data: desc})
-		return tools.ExecuteBash(ctx, command), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteBash(ctx, command)), true
 
 	case tools.WebFetchToolName:
 		rawURL := args["url"]
 		onEvent(models.AgentEvent{Type: "reading", Data: rawURL})
-		return tools.ExecuteWebFetch(rawURL), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteWebFetch(rawURL)), true
 
 	case tools.WebSearchToolName:
 		query := args["query"]
 		onEvent(models.AgentEvent{Type: "reading", Data: "web_search: " + query})
-		return tools.ExecuteWebSearch(query), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteWebSearch(query)), true
 
 	case tools.SpawnAgentToolName:
 		dispatcher := tools.SubagentDispatcherFromContext(ctx)
@@ -152,7 +153,7 @@ func DispatchTool(
 			return errMsg, true
 		}
 		*proposed = append(*proposed, writes...)
-		return text, true
+		return applyOutputProcessing(ctx, name, text), true
 	}
 	return "", false
 }
@@ -175,6 +176,17 @@ func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
 		return
 	}
 	onEvent(models.AgentEvent{Type: "snapshot", Data: string(data)})
+}
+
+// applyOutputProcessing truncates tool output according to the rule for the
+// named tool, if one exists in the context. Returns the output unchanged
+// when no rule applies.
+func applyOutputProcessing(ctx context.Context, toolName, output string) string {
+	rule := tooloutput.RuleForTool(ctx, toolName)
+	if rule.MaxLines <= 0 && rule.MaxTokens <= 0 {
+		return output
+	}
+	return tooloutput.Process(output, rule)
 }
 
 // BuildErrorResponse constructs a ModelResponse for an API error encountered mid-loop.

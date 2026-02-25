@@ -9,7 +9,9 @@ import (
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/shared"
+	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
+	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -26,6 +28,10 @@ func NewOpenAIAdapter(modelID, apiKey string) *OpenAIAdapter {
 
 func (a *OpenAIAdapter) ID() string { return a.modelID }
 
+func (a *OpenAIAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return capabilities.DefaultCapabilities("openai", a.modelID)
+}
+
 func (a *OpenAIAdapter) RunAgent(
 	ctx     context.Context,
 	history []models.ConversationTurn,
@@ -34,9 +40,19 @@ func (a *OpenAIAdapter) RunAgent(
 ) (models.ModelResponse, error) {
 	client := openai.NewClient(option.WithAPIKey(a.apiKey))
 
-	toolParams := buildOpenAITools(ctx)
+	// Resolve system prompt: prefer payload from context, fall back to built-in.
+	var systemMsg string
+	var toolDescOverrides map[string]string
+	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
+		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
+		toolDescOverrides = payload.ToolDescriptions
+	} else {
+		systemMsg = tools.SystemPromptSuffix()
+	}
+
+	toolParams := buildOpenAITools(ctx, toolDescOverrides)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
-	messages = append(messages, openai.SystemMessage(tools.SystemPromptSuffix()))
+	messages = append(messages, openai.SystemMessage(systemMsg))
 	for _, turn := range history {
 		switch turn.Role {
 		case "user":
@@ -113,7 +129,7 @@ func (a *OpenAIAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "openai/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
 }
 
-func buildOpenAITools(ctx context.Context) []openai.ChatCompletionToolParam {
+func buildOpenAITools(ctx context.Context, descOverrides map[string]string) []openai.ChatCompletionToolParam {
 	var out []openai.ChatCompletionToolParam
 	for _, def := range tools.ActiveToolsFromContext(ctx) {
 		props := map[string]any{}
@@ -126,6 +142,11 @@ func buildOpenAITools(ctx context.Context) []openai.ChatCompletionToolParam {
 		required := make([]string, len(def.Required))
 		copy(required, def.Required)
 
+		desc := def.Description
+		if d, ok := descOverrides[def.Name]; ok {
+			desc = d
+		}
+
 		params := shared.FunctionParameters{
 			"type":       "object",
 			"properties": props,
@@ -133,7 +154,7 @@ func buildOpenAITools(ctx context.Context) []openai.ChatCompletionToolParam {
 		}
 		fd := shared.FunctionDefinitionParam{
 			Name:        def.Name,
-			Description: openai.String(def.Description),
+			Description: openai.String(desc),
 			Parameters:  params,
 		}
 		out = append(out, openai.ChatCompletionToolParam{
