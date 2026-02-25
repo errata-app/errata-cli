@@ -18,6 +18,8 @@ import (
 
 	"golang.org/x/net/html"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/suarezc/errata/internal/sandbox"
 )
 
 // webFetchGroup deduplicates concurrent web_fetch calls for the same URL.
@@ -579,12 +581,27 @@ func ExecuteEditFile(path, oldString, newString string) (string, string) {
 }
 
 // ApplyWrites writes each FileWrite to disk, creating parent directories as needed.
+// All paths are validated against the current working directory; writes that
+// would escape it via ".." sequences are rejected with an error.
 func ApplyWrites(writes []FileWrite) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("could not determine working directory: %w", err)
+	}
+	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
+
 	for _, fw := range writes {
-		if err := os.MkdirAll(filepath.Dir(fw.Path), 0o755); err != nil {
+		abs, err := filepath.Abs(fw.Path)
+		if err != nil {
+			return fmt.Errorf("invalid write path %q: %w", fw.Path, err)
+		}
+		if !strings.HasPrefix(filepath.Clean(abs)+string(filepath.Separator), cwdClean) {
+			return fmt.Errorf("proposed write to %q is outside the working directory", fw.Path)
+		}
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 			return fmt.Errorf("mkdir for %q: %w", fw.Path, err)
 		}
-		if err := os.WriteFile(fw.Path, []byte(fw.Content), 0o644); err != nil {
+		if err := os.WriteFile(abs, []byte(fw.Content), 0o644); err != nil {
 			return fmt.Errorf("write %q: %w", fw.Path, err)
 		}
 	}
@@ -738,6 +755,8 @@ func ExecuteSearchFiles(pattern, basePath string) string {
 // stdout and stderr are combined; output is capped at bashOutputLimit bytes.
 // If ctx carries a bash prefix allowlist (via WithBashPrefixes), the command must
 // match one of the allowed prefixes or an error string is returned instead.
+// If ctx carries a sandbox Config (via sandbox.WithConfig), the subprocess is
+// wrapped with OS-level sandboxing appropriate for the current platform.
 func ExecuteBash(ctx context.Context, command string) string {
 	if prefixes := BashPrefixesFromContext(ctx); len(prefixes) > 0 {
 		allowed := false
@@ -756,7 +775,17 @@ func ExecuteBash(ctx context.Context, command string) string {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, "sh", "-c", command)
+	// Build subprocess, wrapping with OS-level sandbox when configured.
+	var cmd *exec.Cmd
+	if sbCfg, ok := sandbox.ConfigFromContext(ctx); ok && sbCfg.Active() {
+		if sbCfg.ProjectRoot == "" {
+			sbCfg.ProjectRoot, _ = os.Getwd()
+		}
+		cmd = sandbox.BuildCmd(timeoutCtx, sbCfg, "sh", "-c", command)
+	} else {
+		cmd = exec.CommandContext(timeoutCtx, "sh", "-c", command)
+	}
+
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

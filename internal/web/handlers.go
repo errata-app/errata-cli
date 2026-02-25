@@ -19,6 +19,7 @@ import (
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/runner"
+	"github.com/suarezc/errata/internal/sandbox"
 	"github.com/suarezc/errata/internal/subagent"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -224,6 +225,7 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 	contextStrategy := ""
 	sandboxFilesystem := ""
 	sandboxNetwork := ""
+	projectRoot := ""
 	if wc.s.rec != nil {
 		if wc.s.rec.Tools != nil {
 			toolAllowlist = wc.s.rec.Tools.Allowlist
@@ -232,6 +234,7 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		contextStrategy = wc.s.rec.Context.Strategy
 		sandboxFilesystem = wc.s.rec.Sandbox.Filesystem
 		sandboxNetwork = wc.s.rec.Sandbox.Network
+		projectRoot = wc.s.rec.Metadata.ProjectRoot
 	}
 	activeDefs := tools.DefinitionsAllowed(toolAllowlist, wc.disabledTools)
 	activeDefs = append(activeDefs, tools.FilterDefs(wc.s.mcpDefs, wc.disabledTools)...)
@@ -271,6 +274,11 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		toolCtx := tools.WithActiveTools(runCtx, activeDefs)
 		toolCtx = tools.WithMCPDispatchers(toolCtx, mcpDispatchers)
 		toolCtx = tools.WithBashPrefixes(toolCtx, bashPrefixes)
+		toolCtx = sandbox.WithConfig(toolCtx, sandbox.Config{
+			Filesystem:  sandboxFilesystem,
+			Network:     sandboxNetwork,
+			ProjectRoot: projectRoot,
+		})
 		toolCtx = runner.WithRunOptions(toolCtx, runner.RunOptions{
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,

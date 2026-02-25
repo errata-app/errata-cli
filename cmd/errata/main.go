@@ -61,6 +61,18 @@ func loadRecipe() *recipe.Recipe {
 	return rec
 }
 
+// applyProjectRoot changes the process working directory to rec.Metadata.ProjectRoot
+// when it is set. All cwd-based path guards in file tools then automatically
+// enforce the project boundary without further changes.
+func applyProjectRoot(rec *recipe.Recipe) {
+	if rec == nil || rec.Metadata.ProjectRoot == "" {
+		return
+	}
+	if err := os.Chdir(rec.Metadata.ProjectRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not set project_root %q: %v\n", rec.Metadata.ProjectRoot, err)
+	}
+}
+
 // setupAdapters loads config, pricing, adapters, and MCP servers.
 // Returns adapters, session ID, warnings, MCP state (defs + dispatchers),
 // and a cleanup function the caller must defer.
@@ -109,6 +121,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	rec := loadRecipe()
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
+	applyProjectRoot(rec)
 	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
 	defer cleanup()
 	if len(ads) == 0 {
@@ -121,6 +134,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	rec := loadRecipe()
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
+	applyProjectRoot(rec)
 	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
 	defer cleanup()
 	if len(ads) == 0 {

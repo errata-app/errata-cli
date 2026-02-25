@@ -18,6 +18,7 @@ import (
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
+	"github.com/suarezc/errata/internal/sandbox"
 	"github.com/suarezc/errata/internal/subagent"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -233,6 +234,9 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
 	contextStrategy := a.contextStrategy
+	sandboxFilesystem := a.sandboxFilesystem
+	sandboxNetwork := a.sandboxNetwork
+	projectRoot := a.projectRoot
 	cfg := a.cfg
 	seed := a.seed
 
@@ -259,6 +263,11 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 		runCtx := tools.WithActiveTools(context.Background(), activeDefs)
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
+		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
+			Filesystem:  sandboxFilesystem,
+			Network:     sandboxNetwork,
+			ProjectRoot: projectRoot,
+		})
 		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
