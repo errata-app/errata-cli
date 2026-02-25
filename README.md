@@ -171,6 +171,7 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict subsequent runs to specific model(s) |
 | `/model` | Reset model filter — all configured models run again |
+| `/resume` | Resume an interrupted run — re-runs only interrupted models |
 | `/exit` or `/quit` | Exit |
 | `Ctrl-D` | Exit |
 
@@ -178,6 +179,7 @@ Pick a number — that model's writes are applied to disk immediately.
 
 | Key | Action |
 |-----|--------|
+| `ESC` or `Ctrl-C` | Cancel the current run (partial results are preserved; use `/resume` to continue) |
 | `↑` (line 0) | Recall previous prompt (cycle backward through history) |
 | `↓` (while navigating) | Cycle forward; at newest restores original typed input |
 | `Ctrl-R` | Open reverse-i-search: type a substring to filter history; `Ctrl-R` again for next match; `Enter` to select; `Escape` to cancel |
@@ -244,6 +246,38 @@ each call. Set `ERRATA_MAX_HISTORY_TURNS` in `.env` to override.
 summary of the conversation so far, then replaces the full history with that summary.
 This preserves continuity while freeing context. Compaction also triggers automatically
 when a model's estimated history fill reaches 80%.
+
+---
+
+## Interruption and resume
+
+You can cancel a running prompt at any time. Partial results (text generated so far,
+proposed file writes, token counts) are preserved — nothing is thrown away.
+
+**How to cancel:**
+
+| Surface | Method |
+|---------|--------|
+| TUI | Press `ESC` or `Ctrl-C` while models are running |
+| Web | Click the Cancel button |
+| Headless (`errata run`) | Send `SIGINT` (Ctrl-C) or `SIGTERM` |
+
+When a run is cancelled, models that had already finished keep their full results. Models
+that were still in progress are marked as "interrupted" with whatever partial output they
+had accumulated.
+
+A checkpoint is automatically saved to `data/checkpoint.json`. To pick up where you left
+off, use `/resume` — this re-runs only the interrupted models from scratch while keeping
+the completed models' results intact.
+
+```
+> /resume
+[resume] Read src/utils/retry.py and add exponential backoff...
+```
+
+If you interrupt again during a resume, the checkpoint is updated and you can `/resume`
+once more. The checkpoint is cleared automatically after any successful (non-interrupted)
+run completes.
 
 ---
 
@@ -421,7 +455,7 @@ errata/
 │   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
 │   ├── adapters/
 │   │   ├── registry.go      # NewAdapter(), ListAdapters() — routing by prefix/slash
-│   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildSuccessResponse
+│   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildInterruptedResponse, BuildSuccessResponse
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
 │   │   ├── gemini.go        # GeminiAdapter.RunAgent()
@@ -433,7 +467,7 @@ errata/
 │   ├── pricing/
 │   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens()
 │   ├── runner/
-│   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories()
+│   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories(), HasInterrupted()
 │   ├── tools/
 │   │   └── tools.go         # ToolDef, Definitions, Execute* functions, MCP context helpers
 │   ├── diff/
@@ -444,6 +478,8 @@ errata/
 │   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
 │   ├── preferences/
 │   │   └── preferences.go   # Record(), LoadAll(), Summarize()
+│   ├── checkpoint/
+│   │   └── checkpoint.go    # Save/Load/Clear/Build — interrupted run state for /resume
 │   ├── commands/
 │   │   └── commands.go      # canonical slash command registry (TUI + web)
 │   ├── prompthistory/

@@ -33,6 +33,7 @@ type ModelResponse struct {
 	CostUSD             float64
 	ProposedWrites      []tools.FileWrite
 	Error               string // empty = success
+	Interrupted         bool   // true when run was cancelled mid-flight (partial data preserved)
 }
 
 // OK returns true when the response carries no error.

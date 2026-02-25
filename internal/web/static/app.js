@@ -272,10 +272,30 @@ function handleServerMessage(msg) {
       appendHistoryMsg('Conversation history cleared.', '');
       break;
 
-    case 'cancelled':
+    case 'cancelled': {
       savedRunData = null;
-      toIdle('Cancelled.');
+      // Show partial results and offer resume if any models were interrupted.
+      const hasInterrupted = msg.responses && msg.responses.some(r => r.interrupted);
+      if (hasInterrupted && msg.responses) {
+        toIdle('Cancelled. Partial results preserved.');
+        // Append a resume button to the chat.
+        const resumeArea = document.createElement('div');
+        resumeArea.className = 'resume-area';
+        const resumeBtn = document.createElement('button');
+        resumeBtn.className = 'btn-resume';
+        resumeBtn.textContent = 'Resume interrupted models';
+        resumeBtn.addEventListener('click', () => {
+          resumeArea.remove();
+          wsSend({ type: 'resume' });
+        });
+        resumeArea.appendChild(resumeBtn);
+        mainEl.appendChild(resumeArea);
+        mainEl.scrollTop = mainEl.scrollHeight;
+      } else {
+        toIdle('Cancelled.');
+      }
       break;
+    }
 
     case 'error':
       savedRunData = null;

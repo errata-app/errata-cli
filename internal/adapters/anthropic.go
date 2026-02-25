@@ -71,6 +71,9 @@ func (a *AnthropicAdapter) RunAgent(
 		}
 		resp, err := client.Messages.New(ctx, params)
 		if err != nil {
+			if ctx.Err() != nil {
+				return BuildInterruptedResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalRegularInput+totalCacheRead+totalCacheCreation, totalOutput, proposed, err), err
+			}
 			return BuildErrorResponse(a.modelID, "anthropic/"+a.modelID, start, totalRegularInput+totalCacheRead+totalCacheCreation, totalOutput, err), err
 		}
 		// Anthropic's InputTokens = regular (non-cached) tokens only.

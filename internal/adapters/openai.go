@@ -63,6 +63,9 @@ func (a *OpenAIAdapter) RunAgent(
 		}
 		resp, err := client.Chat.Completions.New(ctx, params)
 		if err != nil {
+			if ctx.Err() != nil {
+				return BuildInterruptedResponse(a.modelID, "openai/"+a.modelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed, err), err
+			}
 			return BuildErrorResponse(a.modelID, "openai/"+a.modelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}
 

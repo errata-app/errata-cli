@@ -61,6 +61,9 @@ func (a *GeminiAdapter) RunAgent(
 	for {
 		resp, err := client.Models.GenerateContent(ctx, a.modelID, contents, config)
 		if err != nil {
+			if ctx.Err() != nil {
+				return BuildInterruptedResponse(a.modelID, "google/"+a.modelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed, err), err
+			}
 			return BuildErrorResponse(a.modelID, "google/"+a.modelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}
 

@@ -2,16 +2,20 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/suarezc/errata/internal/adapters"
+	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
@@ -104,9 +108,10 @@ type App struct {
 	feedVP viewport.Model
 
 	// current run
-	panels   []*panelState
-	panelIdx map[string]int
-	prog     *tea.Program
+	panels    []*panelState
+	panelIdx  map[string]int
+	prog      *tea.Program
+	cancelRun context.CancelFunc // cancels running agents; nil when idle
 
 	// selecting
 	responses    []models.ModelResponse
@@ -331,12 +336,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch a.mode {
 		case modeIdle:
 			return a.handleIdleKey(msg)
+		case modeRunning:
+			if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlC {
+				if a.cancelRun != nil {
+					a.cancelRun()
+					a.cancelRun = nil
+				}
+				return a, nil
+			}
+			return a, nil
 		case modeSelecting:
 			return a.handleSelectKey(msg)
 		case modeRating:
 			return a.handleRatingKey(msg)
 		}
-		// modeRunning: ignore all key input
 		return a, nil
 
 	case agentEventMsg:
@@ -367,6 +380,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.withMessage("History compacted."), nil
 
 	case runCompleteMsg:
+		a.cancelRun = nil
 		a.lastReport = msg.report
 
 		// Mark panels done. runner.RunAll preserves adapter order, so results[i] == panels[i].
@@ -383,7 +397,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.costUSD = resp.CostUSD
 			a.totalCostUSD += resp.CostUSD
 			a.sessionCostPerModel[resp.ModelID] += resp.CostUSD
-			if resp.Error != "" {
+			if resp.Interrupted {
+				p.errMsg = "interrupted"
+			} else if resp.Error != "" {
 				p.errMsg = resp.Error
 				if runner.IsContextOverflowError(resp.Error) {
 					p.errMsg = "context limit reached — use /clear or /compact to reset"
@@ -413,6 +429,27 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].responses = msg.responses
 		}
+
+		// If any models were interrupted, show a message and return to idle.
+		if runner.HasInterrupted(msg.responses) {
+			var names []string
+			for _, r := range msg.responses {
+				if r.Interrupted {
+					names = append(names, r.ModelID)
+				}
+			}
+			if len(a.feed) > 0 {
+				a.feed[len(a.feed)-1].note = fmt.Sprintf(
+					"Interrupted (%s). /resume to continue.",
+					strings.Join(names, ", "),
+				)
+			}
+			a.mode = modeIdle
+			return a.withFeedRebuilt(true), nil
+		}
+
+		// Successful completion — clear any stale checkpoint.
+		_ = checkpoint.Clear(checkpoint.DefaultPath)
 
 		hasWrites := false
 		for _, resp := range msg.responses {
@@ -501,7 +538,7 @@ func (a App) View() string {
 
 	case modeRunning:
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).
-			Render("  running…"))
+			Render("  running… (ESC to cancel)"))
 
 	case modeIdle:
 		if a.configOverlayActive {
@@ -628,6 +665,15 @@ func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	app.SetProgram(p)
+
+	// Handle SIGTERM for graceful shutdown. Bubbletea already handles SIGINT
+	// (Ctrl-C) by sending tea.KeyCtrlC through the event loop.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		p.Quit()
+	}()
 
 	for _, w := range warnings {
 		fmt.Fprintln(os.Stderr, "warning:", w)

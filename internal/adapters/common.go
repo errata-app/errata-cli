@@ -171,6 +171,24 @@ func BuildErrorResponse(modelID, qualifiedID string, start time.Time, totalInput
 	}
 }
 
+// BuildInterruptedResponse constructs a ModelResponse for a run that was cancelled mid-flight.
+// It preserves the partial text, proposed writes, and token counts accumulated before cancellation.
+func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
+	start time.Time, totalInput, totalOutput int64,
+	proposed []tools.FileWrite, err error) models.ModelResponse {
+	return models.ModelResponse{
+		ModelID:        modelID,
+		Text:           join(textParts),
+		LatencyMS:      time.Since(start).Milliseconds(),
+		InputTokens:    totalInput,
+		OutputTokens:   totalOutput,
+		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
+		ProposedWrites: proposed,
+		Error:          err.Error(),
+		Interrupted:    true,
+	}
+}
+
 // BuildSuccessResponse constructs a ModelResponse after a completed agentic loop.
 // qualifiedID is the provider-prefixed model ID passed to CostUSD.
 //

@@ -44,7 +44,7 @@ errata/
 │   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
 │   ├── adapters/
 │   │   ├── registry.go      # NewAdapter(), NewAdapterForProvider(), ListAdapters() — routing
-│   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildSuccessResponse — shared helpers
+│   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildInterruptedResponse, BuildSuccessResponse — shared helpers
 │   │   ├── list.go          # ListAvailableModels(), ProviderModels — per-provider model catalogue fetch
 │   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
@@ -54,7 +54,7 @@ errata/
 │   ├── pricing/
 │   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens() — OpenRouter fetch + hardcoded fallback
 │   ├── runner/
-│   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories()
+│   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories(), HasInterrupted()
 │   ├── mcp/
 │   │   ├── client.go        # JSON-RPC 2.0 stdio client (Content-Length framing)
 │   │   └── manager.go       # MCP server subprocess lifecycle, tool discovery, dispatcher registry
@@ -68,6 +68,8 @@ errata/
 │   │   └── history.go       # Load(), Save(), Clear() — conversation history persistence
 │   ├── logging/
 │   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
+│   ├── checkpoint/
+│   │   └── checkpoint.go    # Save(), Load(), Clear(), Build() — interrupted run state persistence
 │   ├── commands/
 │   │   └── commands.go      # Command{Name,Desc,TUIOnly}; All, Web() — canonical slash command registry
 │   ├── prompthistory/
@@ -122,6 +124,7 @@ Both the TUI and the web textarea accept slash commands.
 | `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
 | `/model` | Reset model filter back to all configured models |
+| `/resume` | Resume an interrupted run — re-runs only the interrupted models, preserving completed results |
 | `/exit` or `/quit` | Exit (TUI only) |
 | `Ctrl-D` | Exit (TUI only) |
 
@@ -171,6 +174,12 @@ Both surfaces derive their lists from this single source; web commands are serve
 9. Preference entry appended to `data/preferences.jsonl`
 
 Agent timeout: **5 minutes** per adapter (`context.WithTimeout`).
+
+**Interruption:** Users can cancel a running prompt with ESC or Ctrl-C (TUI), the Cancel
+button (web), or SIGINT/SIGTERM (headless). Cancellation propagates via `context.WithCancel`
+through all active adapter API calls. Partial results (accumulated text, proposed writes,
+token counts) are preserved in the response with `Interrupted: true`. A checkpoint is saved
+to `data/checkpoint.json` so the run can be resumed with `/resume`.
 
 ---
 
@@ -305,6 +314,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 | `select` | `model_id` | Apply a model's proposed writes |
 | `cancel` | — | Cancel the running agents |
 | `set_models` | `model_ids` | Set model filter (empty = reset to all); elements are `{id, provider}` objects (`ModelSpec`); `provider` enables routing of novel IDs via `NewAdapterForProvider` |
+| `resume` | — | Resume an interrupted run (re-run only interrupted models) |
 | `compact` | — | Summarize conversation history to free context window |
 | `clear_history` | — | Wipe server-side conversation history and delete `data/history.json` |
 
@@ -315,7 +325,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 | `agent_event` | `model_id`, `event_type`, `data` | Streaming tool event |
 | `complete` | `responses[]` | All agents finished; payload includes diffs, tokens, cost |
 | `applied` | `applied[]` | File writes applied successfully |
-| `cancelled` | — | Run was cancelled |
+| `cancelled` | `responses[]` | Run was cancelled; includes partial results with `interrupted` flag per response |
 | `compact_complete` | — | History compaction finished |
 | `history_cleared` | — | Confirms server-side history was wiped |
 | `models_set` | `models[]` | Confirms new active model filter |
@@ -355,14 +365,15 @@ models         ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
 config         ← stdlib only
 commands       ← stdlib only
 prompthistory  ← stdlib only
+checkpoint     ← models, tools (for FileWrite conversion)
 adapters       ← models, pricing, tools, config, provider SDKs
 runner         ← models, pricing
 diff           ← os, strings, sergi/go-diff
 history        ← models, encoding/json, os
 logging        ← models (ModelAdapter, ModelResponse), stdlib
 preferences    ← models (for ModelResponse latency/ID), encoding/json, os
-ui             ← models, pricing, tools, runner, diff, history, adapters, config, commands, prompthistory, bubbletea, lipgloss
-web            ← models, runner, tools, diff, preferences, logging, history, adapters, config, commands, coder/websocket
+ui             ← models, pricing, tools, runner, diff, history, adapters, config, commands, prompthistory, checkpoint, bubbletea, lipgloss
+web            ← models, runner, tools, diff, preferences, logging, history, adapters, config, commands, checkpoint, coder/websocket
 cmd/errata     ← config, adapters, pricing, logging, ui, web, mcp, tools
 ```
 
@@ -476,13 +487,16 @@ The TUI uses the Elm architecture: `Model → View`, `Update` on messages.
 ### Modes (state machine)
 ```
 idle → running → selecting → idle
-                    ↓
-                 (skip / no writes)
+          ↓          ↓
+       (cancel)   (skip / no writes)
 ```
 
 - **idle**: `textarea` visible, slash commands handled, history shown
-- **running**: agent panels rendered live; goroutines send `agentEventMsg` via `prog.Send()`
+- **running**: agent panels rendered live; goroutines send `agentEventMsg` via `prog.Send()`;
+  ESC or Ctrl-C cancels the run and returns to idle with partial results preserved
 - **selecting**: diff view + numbered menu; key input collected character by character
+- **cancel shortcut**: if user presses ESC/Ctrl-C during running, `cancelRun()` fires, checkpoint
+  is saved, and the TUI returns to idle with "Interrupted (models). /resume to continue."
 - **no-writes shortcut**: if no adapter proposed any writes, skip selecting and return to idle
 
 ### Goroutine → TUI communication
@@ -753,4 +767,5 @@ Table-driven tests preferred for config, preferences, and diff packages.
 - `data/log.jsonl` (contains full prompt + response content)
 - `data/history.json` (contains full conversation context)
 - `data/prompt_history.jsonl` (contains submitted prompts for Up-arrow / Ctrl-R recall)
+- `data/checkpoint.json` (transient interrupted run state for `/resume`)
 - `dist/` (compiled binaries from `make build-all`)

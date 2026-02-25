@@ -86,12 +86,17 @@ func RunAll(
 			resp.ModelID = a.ID() // enforce: ModelID always matches the configured adapter ID
 
 			if err != nil {
-				filtered(models.AgentEvent{Type: "error", Data: err.Error()})
-				results[i] = models.ModelResponse{
-					ModelID:   a.ID(),
-					LatencyMS: time.Since(start).Milliseconds(),
-					Error:     err.Error(),
+				resp.ModelID = a.ID()
+				if resp.LatencyMS == 0 {
+					resp.LatencyMS = time.Since(start).Milliseconds()
 				}
+				if resp.Error == "" {
+					resp.Error = err.Error()
+				}
+				if !resp.Interrupted {
+					filtered(models.AgentEvent{Type: "error", Data: err.Error()})
+				}
+				results[i] = resp
 				return
 			}
 			results[i] = resp
@@ -223,4 +228,14 @@ func CompactHistories(
 		}
 	}
 	return histories
+}
+
+// HasInterrupted reports whether any response in the slice has Interrupted set.
+func HasInterrupted(responses []models.ModelResponse) bool {
+	for _, r := range responses {
+		if r.Interrupted {
+			return true
+		}
+	}
+	return false
 }

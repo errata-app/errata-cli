@@ -86,6 +86,9 @@ func (a *LiteLLMAdapter) RunAgent(
 		}
 		resp, err := client.Chat.Completions.New(ctx, params)
 		if err != nil {
+			if ctx.Err() != nil {
+				return BuildInterruptedResponse(a.modelID, a.bareModelID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed, err), err
+			}
 			return BuildErrorResponse(a.modelID, a.bareModelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}
 
