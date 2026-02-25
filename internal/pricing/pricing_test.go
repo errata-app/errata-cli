@@ -281,3 +281,131 @@ func TestLoadPricing_MissingCache_FallsBackToHardcoded(t *testing.T) {
 	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0, 0, 0)
 	assert.Greater(t, cost, 0.0, "hardcoded fallback must provide non-zero price")
 }
+
+// ─── stripDateSuffix ────────────────────────────────────────────────────────
+
+func TestStripDateSuffix(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"YYYYMMDD suffix", "claude-sonnet-4-6-20250714", "claude-sonnet-4-6"},
+		{"YYYY-MM-DD suffix", "gpt-4o-2024-08-06", "gpt-4o"},
+		{"no suffix", "claude-sonnet-4-6", "claude-sonnet-4-6"},
+		{"no suffix short", "o1", "o1"},
+		{"no suffix gpt-4o-mini", "gpt-4o-mini", "gpt-4o-mini"},
+		{"no suffix o3-mini", "o3-mini", "o3-mini"},
+		{"no suffix gemini version", "gemini-2.0-flash", "gemini-2.0-flash"},
+		{"qualified YYYYMMDD", "anthropic/claude-sonnet-4-6-20250714", "anthropic/claude-sonnet-4-6"},
+		{"qualified YYYY-MM-DD", "openai/gpt-4o-2024-08-06", "openai/gpt-4o"},
+		{"qualified no suffix", "anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-6"},
+		{"empty string", "", ""},
+		{"trailing 7 digits not stripped", "model-1234567", "model-1234567"},
+		{"trailing 9 digits not stripped", "model-123456789", "model-123456789"},
+		{"mini with date", "gpt-4o-mini-2024-07-18", "gpt-4o-mini"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expect, stripDateSuffix(tt.input))
+		})
+	}
+}
+
+// ─── Date-suffix fallback: CostUSD ─────────────────────────────────────────
+
+// TestCostUSD_DateSuffix_YYYYMMDD verifies that a date-suffixed Anthropic model
+// falls back to the base model's pricing in the hardcoded table.
+func TestCostUSD_DateSuffix_YYYYMMDD(t *testing.T) {
+	resetDynamicPricing(t)
+	cost := CostUSD("anthropic/claude-sonnet-4-6-20250714", 1_000_000, 0, 0, 1_000_000)
+	assert.InDelta(t, 18.0, cost, 0.001) // $3 in + $15 out
+}
+
+// TestCostUSD_DateSuffix_ISO verifies the OpenAI YYYY-MM-DD date format.
+func TestCostUSD_DateSuffix_ISO(t *testing.T) {
+	resetDynamicPricing(t)
+	cost := CostUSD("openai/gpt-4o-2024-08-06", 1_000_000, 0, 0, 1_000_000)
+	assert.InDelta(t, 12.50, cost, 0.001) // $2.50 in + $10 out
+}
+
+// TestCostUSD_DateSuffix_BareID verifies fallback works without a provider prefix.
+func TestCostUSD_DateSuffix_BareID(t *testing.T) {
+	resetDynamicPricing(t)
+	cost := CostUSD("claude-sonnet-4-6-20250714", 1_000_000, 0, 0, 1_000_000)
+	assert.InDelta(t, 18.0, cost, 0.001)
+}
+
+// TestCostUSD_DateSuffix_ExactMatchTakesPrecedence verifies that a date-suffixed
+// model with its own explicit pricing entry uses that entry, not the stripped base.
+func TestCostUSD_DateSuffix_ExactMatchTakesPrecedence(t *testing.T) {
+	resetDynamicPricing(t)
+	// "claude-haiku-4-5-20251001" has its own entry in the hardcoded table.
+	cost := CostUSD("claude-haiku-4-5-20251001", 1_000_000, 0, 0, 1_000_000)
+	expected := 0.80 + 4.00 // InputPMT + OutputPMT for 1M each
+	assert.InDelta(t, expected, cost, 0.001)
+}
+
+// TestCostUSD_DateSuffix_DynamicExactMatchTakesPrecedence verifies that a
+// date-suffixed model with dynamic pricing uses the dynamic entry, not the
+// stripped fallback.
+func TestCostUSD_DateSuffix_DynamicExactMatchTakesPrecedence(t *testing.T) {
+	resetDynamicPricing(t)
+	pricingMu.Lock()
+	dynamicPricing = map[string]modelPricing{
+		"openai/gpt-4o-2024-08-06": {InputPMT: 99.0, OutputPMT: 99.0},
+	}
+	pricingMu.Unlock()
+	defer resetDynamicPricing(t)
+
+	cost := CostUSD("openai/gpt-4o-2024-08-06", 1_000_000, 0, 0, 1_000_000)
+	assert.InDelta(t, 198.0, cost, 0.001, "dynamic exact match should take precedence")
+}
+
+// TestCostUSD_DateSuffix_NoBaseMatch verifies that stripping still returns 0
+// when the base model is also unknown.
+func TestCostUSD_DateSuffix_NoBaseMatch(t *testing.T) {
+	resetDynamicPricing(t)
+	cost := CostUSD("unknown/mystery-model-20250714", 1_000_000, 0, 0, 1_000_000)
+	assert.Equal(t, 0.0, cost)
+}
+
+// TestCostUSD_NonDateSuffix_NotStripped ensures that non-date suffixes like
+// "mini" are not accidentally stripped.
+func TestCostUSD_NonDateSuffix_NotStripped(t *testing.T) {
+	resetDynamicPricing(t)
+	cost := CostUSD("gpt-4o-mini", 1_000_000, 0, 0, 1_000_000)
+	assert.InDelta(t, 0.75, cost, 0.001) // $0.15 in + $0.60 out
+}
+
+// ─── Date-suffix fallback: PricingFor ───────────────────────────────────────
+
+func TestPricingFor_DateSuffix_YYYYMMDD(t *testing.T) {
+	resetDynamicPricing(t)
+	in, out, ok := PricingFor("anthropic/claude-sonnet-4-6-20250714")
+	assert.True(t, ok)
+	assert.InDelta(t, 3.0, in, 0.001)
+	assert.InDelta(t, 15.0, out, 0.001)
+}
+
+func TestPricingFor_DateSuffix_ISO(t *testing.T) {
+	resetDynamicPricing(t)
+	in, out, ok := PricingFor("openai/gpt-4o-2024-08-06")
+	assert.True(t, ok)
+	assert.InDelta(t, 2.50, in, 0.001)
+	assert.InDelta(t, 10.0, out, 0.001)
+}
+
+// ─── Date-suffix fallback: ContextWindowTokens ──────────────────────────────
+
+func TestContextWindowTokens_DateSuffix_YYYYMMDD(t *testing.T) {
+	resetDynamicPricing(t)
+	cw := ContextWindowTokens("anthropic/claude-sonnet-4-6-20250714")
+	assert.Equal(t, int64(200_000), cw)
+}
+
+func TestContextWindowTokens_DateSuffix_ISO(t *testing.T) {
+	resetDynamicPricing(t)
+	cw := ContextWindowTokens("openai/gpt-4o-2024-08-06")
+	assert.Equal(t, int64(128_000), cw)
+}
