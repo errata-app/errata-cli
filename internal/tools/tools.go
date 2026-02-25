@@ -266,6 +266,24 @@ func MCPDispatchersFromContext(ctx context.Context) map[string]MCPDispatcher {
 	return v
 }
 
+// ─── Seed support ─────────────────────────────────────────────────────────────
+
+// seedKey is the context key for the pseudorandom seed.
+type seedKey struct{}
+
+// WithSeed returns a context carrying the given seed value.
+// Adapters call SeedFromContext to retrieve it for API calls.
+func WithSeed(ctx context.Context, seed int64) context.Context {
+	return context.WithValue(ctx, seedKey{}, seed)
+}
+
+// SeedFromContext returns the seed stored in ctx and true,
+// or (0, false) if no seed was set.
+func SeedFromContext(ctx context.Context) (int64, bool) {
+	v, ok := ctx.Value(seedKey{}).(int64)
+	return v, ok
+}
+
 // ─── Sub-agent support ────────────────────────────────────────────────────────
 
 // Sub-agent role names control which tools a spawned sub-agent can access.

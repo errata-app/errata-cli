@@ -76,11 +76,15 @@ func (a *LiteLLMAdapter) RunAgent(
 	start := time.Now()
 
 	for {
-		resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		params := openai.ChatCompletionNewParams{
 			Model:    openai.ChatModel(a.bareModelID),
 			Tools:    toolParams,
 			Messages: messages,
-		})
+		}
+		if seed, ok := tools.SeedFromContext(ctx); ok {
+			params.Seed = openai.Int(seed)
+		}
+		resp, err := client.Chat.Completions.New(ctx, params)
 		if err != nil {
 			return BuildErrorResponse(a.modelID, a.bareModelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}

@@ -129,6 +129,9 @@ type App struct {
 	// cumulative cost across all runs this session
 	totalCostUSD        float64
 	sessionCostPerModel map[string]float64 // per-model cumulative cost this session
+
+	// seed for reproducible model sampling; nil = not set
+	seed *int64
 }
 
 // New creates the App model.
@@ -174,6 +177,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		cfg:                   cfg,
 		mcpDefs:               mcpDefs,
 		mcpDispatchers:        mcpDispatchers,
+		seed:                  cfg.Seed,
 	}
 	if rec != nil {
 		if rec.Tools != nil {

@@ -35,6 +35,9 @@ small and focused; prefer table-driven tests.
 - exa: npx @exa-ai/exa-mcp-server
 - brave: npx @modelcontextprotocol/server-brave-search
 
+## Model Parameters
+seed: 42
+
 ## Constraints
 timeout: 10m
 max_steps: 50

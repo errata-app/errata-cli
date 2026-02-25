@@ -71,6 +71,7 @@ type MCPServerEntry struct {
 type ModelParamsConfig struct {
 	Temperature *float64
 	MaxTokens   *int
+	Seed        *int64
 }
 
 // ConstraintsConfig limits agentic loop execution.
@@ -318,6 +319,11 @@ func parseModelParams(body string) ModelParamsConfig {
 			cfg.MaxTokens = &n
 		}
 	}
+	if v, ok := m["seed"]; ok {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.Seed = &n
+		}
+	}
 	return cfg
 }
 
@@ -513,5 +519,8 @@ func (r *Recipe) ApplyTo(cfg *config.Config) {
 	}
 	if r.Context.CompactThreshold > 0 {
 		cfg.CompactThreshold = r.Context.CompactThreshold
+	}
+	if r.ModelParams.Seed != nil {
+		cfg.Seed = r.ModelParams.Seed
 	}
 }

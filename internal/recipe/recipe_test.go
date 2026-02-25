@@ -395,6 +395,63 @@ func TestApplyTo_CompactThreshold(t *testing.T) {
 	assert.Equal(t, 0.60, cfg.CompactThreshold)
 }
 
+func TestParse_ModelParamsSeed(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Model Parameters
+seed: 42
+`))
+	require.NoError(t, err)
+	require.NotNil(t, r.ModelParams.Seed)
+	assert.Equal(t, int64(42), *r.ModelParams.Seed)
+}
+
+func TestParse_ModelParamsSeedZero(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Model Parameters
+seed: 0
+`))
+	require.NoError(t, err)
+	require.NotNil(t, r.ModelParams.Seed, "seed: 0 should be set, not nil")
+	assert.Equal(t, int64(0), *r.ModelParams.Seed)
+}
+
+func TestParse_ModelParamsSeedNegative(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Model Parameters
+seed: -1
+`))
+	require.NoError(t, err)
+	require.NotNil(t, r.ModelParams.Seed)
+	assert.Equal(t, int64(-1), *r.ModelParams.Seed)
+}
+
+func TestParse_ModelParamsSeedAbsent(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Model Parameters
+temperature: 0.5
+`))
+	require.NoError(t, err)
+	assert.Nil(t, r.ModelParams.Seed, "absent seed should be nil")
+}
+
+func TestApplyTo_Seed(t *testing.T) {
+	r, _ := recipe.Parse(writeRecipe(t, "## Model Parameters\nseed: 42\n"))
+	cfg := defaultCfg()
+	r.ApplyTo(&cfg)
+	require.NotNil(t, cfg.Seed)
+	assert.Equal(t, int64(42), *cfg.Seed)
+}
+
+func TestApplyTo_SeedNil_DoesNotOverwrite(t *testing.T) {
+	r, _ := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	cfg := defaultCfg()
+	existing := int64(99)
+	cfg.Seed = &existing
+	r.ApplyTo(&cfg)
+	require.NotNil(t, cfg.Seed)
+	assert.Equal(t, int64(99), *cfg.Seed, "absent seed must not clear existing config")
+}
+
 func TestDefault_IsNonNil(t *testing.T) {
 	r := recipe.Default()
 	require.NotNil(t, r)

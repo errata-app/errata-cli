@@ -50,14 +50,26 @@ func (a *AnthropicAdapter) RunAgent(
 	var totalRegularInput, totalOutput, totalCacheRead, totalCacheCreation int64
 	start := time.Now()
 
+	// Anthropic does not support a seed parameter. If a seed is set,
+	// use temperature 0 as a best-effort approximation for determinism.
+	var temperature *float64
+	if _, hasSeed := tools.SeedFromContext(ctx); hasSeed {
+		zero := 0.0
+		temperature = &zero
+	}
+
 	for {
-		resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
+		params := anthropic.MessageNewParams{
 			Model:     anthropic.Model(a.modelID),
 			MaxTokens: 8096,
 			System:    []anthropic.TextBlockParam{{Text: tools.SystemPromptSuffix()}},
 			Tools:     toolParams,
 			Messages:  messages,
-		})
+		}
+		if temperature != nil {
+			params.Temperature = anthropic.Float(*temperature)
+		}
+		resp, err := client.Messages.New(ctx, params)
 		if err != nil {
 			return BuildErrorResponse(a.modelID, "anthropic/"+a.modelID, start, totalRegularInput+totalCacheRead+totalCacheCreation, totalOutput, err), err
 		}

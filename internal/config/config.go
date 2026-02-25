@@ -76,6 +76,11 @@ type Config struct {
 	// Load() sets this to 20 by default; ERRATA_MAX_HISTORY_TURNS overrides it.
 	// A recipe can further override via ## Context max_history_turns:.
 	MaxHistoryTurns int
+
+	// Seed is the pseudorandom seed passed to model APIs for reproducible sampling.
+	// nil means not set (provider default); non-nil is passed through even if 0.
+	// Set via ERRATA_SEED env var, recipe ## Model Parameters seed:, or /seed command.
+	Seed *int64
 }
 
 // Load reads .env (if present) then environment variables and returns a Config.
@@ -112,6 +117,11 @@ func Load() Config {
 	if v := os.Getenv("ERRATA_AGENT_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.AgentTimeout = d
+		}
+	}
+	if v := os.Getenv("ERRATA_SEED"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.Seed = &n
 		}
 	}
 

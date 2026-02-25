@@ -34,12 +34,13 @@ type ModelSpec struct {
 
 // wsClientMsg is a message sent from the browser to the server.
 type wsClientMsg struct {
-	Type       string      `json:"type"`              // "run" | "select" | "cancel" | "set_models" | "set_tools"
+	Type       string      `json:"type"`              // "run" | "select" | "cancel" | "set_models" | "set_tools" | "set_seed"
 	Prompt     string      `json:"prompt,omitempty"`
 	ModelID    string      `json:"model_id,omitempty"`
 	ModelSpecs []ModelSpec `json:"model_ids,omitempty"`
 	Verbose    bool        `json:"verbose,omitempty"`
 	Disabled   []string    `json:"disabled,omitempty"` // for set_tools: list of disabled tool names
+	Seed       *int64      `json:"seed,omitempty"`     // for set_seed: nil = clear, non-nil = set
 }
 
 // wsServerMsg is a message sent from the server to the browser.
@@ -52,6 +53,7 @@ type wsServerMsg struct {
 	Applied   []string       `json:"applied,omitempty"`
 	Message   string         `json:"message,omitempty"`
 	Models    []string       `json:"models,omitempty"`
+	Seed      *int64         `json:"seed,omitempty"`
 }
 
 // ─── Diff / response serialisation types (unchanged from SSE version) ─────────
@@ -104,6 +106,7 @@ type wsConn struct {
 	lastPrompt     string
 	activeAdapters []models.ModelAdapter // nil = use all s.adapters
 	disabledTools  map[string]bool       // tools excluded from runs; nil = all enabled
+	seed           *int64               // pseudorandom seed; nil = not set
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -135,8 +138,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	wc := &wsConn{
-		s:   s,
-		ctx: ctx,
+		s:    s,
+		ctx:  ctx,
+		seed: s.cfg.Seed,
 		send: func(msg wsServerMsg) {
 			select {
 			case writeCh <- msg:
@@ -173,6 +177,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			wc.wsHandleClearHistory()
 		case "set_tools":
 			wc.wsHandleSetTools(msg)
+		case "set_seed":
+			wc.wsHandleSetSeed(msg)
 		}
 	}
 }
@@ -242,6 +248,7 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		})
 	}
 	mcpDispatchers := wc.s.mcpDispatchers
+	seed := wc.seed
 
 	go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, ads []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
 		defer cancel()
@@ -276,6 +283,9 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 			},
 		))
 		toolCtx = tools.WithSubagentDepth(toolCtx, 0)
+		if seed != nil {
+			toolCtx = tools.WithSeed(toolCtx, *seed)
+		}
 		rs := runner.RunAll(
 			toolCtx, ads, effectiveHistories, prompt,
 			func(modelID string, e models.AgentEvent) {
@@ -440,6 +450,11 @@ func (wc *wsConn) wsHandleSetTools(msg wsClientMsg) {
 		names[i] = d.Name
 	}
 	wc.send(wsServerMsg{Type: "tools_set", Models: names})
+}
+
+func (wc *wsConn) wsHandleSetSeed(msg wsClientMsg) {
+	wc.seed = msg.Seed
+	wc.send(wsServerMsg{Type: "seed_set", Seed: wc.seed})
 }
 
 func (wc *wsConn) wsHandleCancel() {

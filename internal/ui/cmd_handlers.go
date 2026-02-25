@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,9 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	}
 	if lower == "/tools" || strings.HasPrefix(lower, "/tools ") {
 		return a.handleToolsCommand(strings.TrimSpace(trimmed[len("/tools"):]))
+	}
+	if lower == "/seed" || strings.HasPrefix(lower, "/seed ") {
+		return a.handleSeedCommand(strings.TrimSpace(trimmed[len("/seed"):]))
 	}
 	switch lower {
 	case "/exit", "/quit":
@@ -230,6 +234,7 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	bashPrefixes := a.bashPrefixes
 	contextStrategy := a.contextStrategy
 	cfg := a.cfg
+	seed := a.seed
 
 	return a, func() tea.Msg {
 		effectiveHistories := histories
@@ -266,6 +271,9 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 			},
 		))
 		runCtx = tools.WithSubagentDepth(runCtx, 0)
+		if seed != nil {
+			runCtx = tools.WithSeed(runCtx, *seed)
+		}
 		responses := runner.RunAll(
 			runCtx, ads, effectiveHistories, trimmed,
 			func(modelID string, event models.AgentEvent) {
@@ -396,6 +404,19 @@ func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {
 		ids = append(ids, ad.ID())
 	}
 	return a.withMessage("Active models: " + strings.Join(ids, ", ")), nil
+}
+
+func (a App) handleSeedCommand(args string) (tea.Model, tea.Cmd) {
+	if args == "" {
+		a.seed = nil
+		return a.withMessage("Seed cleared."), nil
+	}
+	n, err := strconv.ParseInt(args, 10, 64)
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Invalid seed %q — must be an integer.", args)), nil
+	}
+	a.seed = &n
+	return a.withMessage(fmt.Sprintf("Seed set to %d.", n)), nil
 }
 
 func helpText() string {

@@ -53,11 +53,15 @@ func (a *OpenAIAdapter) RunAgent(
 	start := time.Now()
 
 	for {
-		resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		params := openai.ChatCompletionNewParams{
 			Model:    openai.ChatModel(a.modelID),
 			Tools:    toolParams,
 			Messages: messages,
-		})
+		}
+		if seed, ok := tools.SeedFromContext(ctx); ok {
+			params.Seed = openai.Int(seed)
+		}
+		resp, err := client.Chat.Completions.New(ctx, params)
 		if err != nil {
 			return BuildErrorResponse(a.modelID, "openai/"+a.modelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}

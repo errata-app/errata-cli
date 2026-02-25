@@ -39,6 +39,10 @@ func (a *GeminiAdapter) RunAgent(
 		Tools:             buildGeminiTools(ctx),
 		SystemInstruction: genai.NewContentFromText(tools.SystemPromptSuffix(), ""),
 	}
+	if seed, ok := tools.SeedFromContext(ctx); ok {
+		s := int32(seed)
+		config.Seed = &s
+	}
 	contents := make([]*genai.Content, 0, len(history)+1)
 	for _, turn := range history {
 		switch turn.Role {

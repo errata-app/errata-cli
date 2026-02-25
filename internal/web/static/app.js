@@ -258,6 +258,12 @@ function handleServerMessage(msg) {
       break;
     }
 
+    case 'seed_set': {
+      const text = msg.seed != null ? 'Seed set to ' + msg.seed + '.' : 'Seed cleared.';
+      appendHistoryMsg(text, '');
+      break;
+    }
+
     case 'compact_complete':
       appendHistoryMsg('History compacted.', '');
       break;
@@ -1039,6 +1045,23 @@ function handleSend() {
     }
     // Unknown /tools sub-command — show help inline.
     handleLocalCommand('Usage: /tools  |  /tools off <name...>  |  /tools on <name...>  |  /tools reset');
+    return;
+  }
+
+  // Handle /seed slash command.
+  if (/^\/seed(\s|$)/i.test(prompt)) {
+    inputEl.value = '';
+    const arg = prompt.slice(5).trim();
+    if (arg === '') {
+      wsSend({ type: 'set_seed', seed: null });
+    } else {
+      const n = parseInt(arg, 10);
+      if (isNaN(n)) {
+        handleLocalCommand('Invalid seed "' + arg + '" \u2014 must be an integer.');
+        return;
+      }
+      wsSend({ type: 'set_seed', seed: n });
+    }
     return;
   }
 

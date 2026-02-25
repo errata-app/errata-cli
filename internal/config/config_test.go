@@ -71,6 +71,39 @@ func TestResolvedActiveModels_AllProviders(t *testing.T) {
 	assert.Contains(t, resolved, "gemini-2.0-flash")
 }
 
+func TestLoad_SeedFromEnv(t *testing.T) {
+	os.Setenv("ERRATA_SEED", "42")
+	defer os.Unsetenv("ERRATA_SEED")
+
+	cfg := config.Load()
+	assert.NotNil(t, cfg.Seed)
+	assert.Equal(t, int64(42), *cfg.Seed)
+}
+
+func TestLoad_SeedZeroFromEnv(t *testing.T) {
+	os.Setenv("ERRATA_SEED", "0")
+	defer os.Unsetenv("ERRATA_SEED")
+
+	cfg := config.Load()
+	assert.NotNil(t, cfg.Seed, "seed 0 should be distinguishable from not set")
+	assert.Equal(t, int64(0), *cfg.Seed)
+}
+
+func TestLoad_SeedAbsent(t *testing.T) {
+	os.Unsetenv("ERRATA_SEED")
+
+	cfg := config.Load()
+	assert.Nil(t, cfg.Seed)
+}
+
+func TestLoad_SeedInvalid(t *testing.T) {
+	os.Setenv("ERRATA_SEED", "not-a-number")
+	defer os.Unsetenv("ERRATA_SEED")
+
+	cfg := config.Load()
+	assert.Nil(t, cfg.Seed, "invalid ERRATA_SEED should be ignored")
+}
+
 func TestLoad_DefaultModelNames(t *testing.T) {
 	os.Unsetenv("ANTHROPIC_API_KEY")
 	os.Unsetenv("OPENAI_API_KEY")
