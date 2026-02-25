@@ -303,3 +303,199 @@ func TestEvaluate_EmptyReminders(t *testing.T) {
 	fired := s.Evaluate(reminders.EvalContext{ContextUsage: 0.99})
 	assert.Empty(t, fired)
 }
+
+// ─── Operator coverage (table-driven) ────────────────────────────────────────
+
+func TestEvaluate_AllOperators_ContextUsage(t *testing.T) {
+	tests := []struct {
+		name  string
+		op    string
+		value string
+		usage float64
+		want  bool
+	}{
+		{"gt_true", ">", "0.5", 0.6, true},
+		{"gt_false", ">", "0.5", 0.5, false},
+		{"gte_equal", ">=", "0.5", 0.5, true},
+		{"gte_below", ">=", "0.5", 0.4, false},
+		{"eq_true", "==", "0.5", 0.5, true},
+		{"eq_false", "==", "0.5", 0.6, false},
+		{"lt_true", "<", "0.5", 0.4, true},
+		{"lt_false", "<", "0.5", 0.5, false},
+		{"lte_equal", "<=", "0.5", 0.5, true},
+		{"lte_above", "<=", "0.5", 0.6, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := reminders.Reminder{
+				Name:    "test",
+				Trigger: reminders.Trigger{Kind: "context_usage", Operator: tt.op, Value: tt.value},
+				Content: "test",
+			}
+			s := reminders.NewState([]reminders.Reminder{r})
+			fired := s.Evaluate(reminders.EvalContext{ContextUsage: tt.usage})
+			if tt.want {
+				assert.Len(t, fired, 1)
+			} else {
+				assert.Empty(t, fired)
+			}
+		})
+	}
+}
+
+func TestEvaluate_AllOperators_TurnCount(t *testing.T) {
+	tests := []struct {
+		name  string
+		op    string
+		value string
+		turns int
+		want  bool
+	}{
+		{"gt_true", ">", "5", 6, true},
+		{"gt_false", ">", "5", 5, false},
+		{"eq_true", "==", "5", 5, true},
+		{"lt_true", "<", "5", 4, true},
+		{"lte_equal", "<=", "5", 5, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := reminders.Reminder{
+				Name:    "test",
+				Trigger: reminders.Trigger{Kind: "turn_count", Operator: tt.op, Value: tt.value},
+				Content: "test",
+			}
+			s := reminders.NewState([]reminders.Reminder{r})
+			fired := s.Evaluate(reminders.EvalContext{TurnCount: tt.turns})
+			if tt.want {
+				assert.Len(t, fired, 1)
+			} else {
+				assert.Empty(t, fired)
+			}
+		})
+	}
+}
+
+// ─── tool_used with unsupported operator ─────────────────────────────────────
+
+func TestEvaluate_ToolUsed_NonEqualOperator(t *testing.T) {
+	r := reminders.Reminder{
+		Name:    "test",
+		Trigger: reminders.Trigger{Kind: "tool_used", Operator: ">", Value: "bash"},
+		Content: "test",
+	}
+	s := reminders.NewState([]reminders.Reminder{r})
+	fired := s.Evaluate(reminders.EvalContext{LastToolName: "bash"})
+	assert.Empty(t, fired, "tool_used only supports ==; other operators should not fire")
+}
+
+// ─── last_tool_call_failed with explicit false ───────────────────────────────
+
+func TestEvaluate_LastToolCallFailed_ExplicitFalse(t *testing.T) {
+	r := reminders.Reminder{
+		Name:    "test",
+		Trigger: reminders.Trigger{Kind: "last_tool_call_failed", Operator: "==", Value: "false"},
+		Content: "test",
+	}
+	s := reminders.NewState([]reminders.Reminder{r})
+
+	// When tool has NOT failed, "== false" should fire.
+	fired := s.Evaluate(reminders.EvalContext{LastToolFailed: false})
+	assert.Len(t, fired, 1)
+}
+
+// ─── Invalid thresholds for all numeric types ────────────────────────────────
+
+func TestEvaluate_InvalidThreshold_TurnCount(t *testing.T) {
+	r := reminders.Reminder{
+		Name:    "bad",
+		Trigger: reminders.Trigger{Kind: "turn_count", Operator: ">", Value: "abc"},
+		Content: "test",
+	}
+	s := reminders.NewState([]reminders.Reminder{r})
+	fired := s.Evaluate(reminders.EvalContext{TurnCount: 999})
+	assert.Empty(t, fired)
+}
+
+func TestEvaluate_InvalidThreshold_LastResponseTokens(t *testing.T) {
+	r := reminders.Reminder{
+		Name:    "bad",
+		Trigger: reminders.Trigger{Kind: "last_response_tokens", Operator: ">", Value: "xyz"},
+		Content: "test",
+	}
+	s := reminders.NewState([]reminders.Reminder{r})
+	fired := s.Evaluate(reminders.EvalContext{LastResponseTokens: 999})
+	assert.Empty(t, fired)
+}
+
+// ─── ParseTrigger: multi-word values ─────────────────────────────────────────
+
+func TestParseTrigger_MultiWordValue(t *testing.T) {
+	tr, err := reminders.ParseTrigger("tool_used == bash command")
+	require.NoError(t, err)
+	assert.Equal(t, "bash command", tr.Value)
+}
+
+// ─── FireManual on non-manual trigger type ───────────────────────────────────
+
+func TestFireManual_WorksForAnyTriggerType(t *testing.T) {
+	r := reminders.Reminder{
+		Name:    "auto_reminder",
+		Trigger: reminders.Trigger{Kind: "context_usage", Operator: ">", Value: "0.5"},
+		Content: "content",
+	}
+	s := reminders.NewState([]reminders.Reminder{r})
+	got, ok := s.FireManual("auto_reminder")
+	assert.True(t, ok, "FireManual should find any reminder by name")
+	assert.Equal(t, "content", got.Content)
+}
+
+// ─── Unknown trigger kind in evalTrigger ─────────────────────────────────────
+
+func TestEvaluate_AllOperators_LastResponseTokens(t *testing.T) {
+	tests := []struct {
+		name   string
+		op     string
+		value  string
+		tokens int64
+		want   bool
+	}{
+		{"gt_true", ">", "100", 200, true},
+		{"gt_false", ">", "100", 100, false},
+		{"gte_equal", ">=", "100", 100, true},
+		{"gte_below", ">=", "100", 50, false},
+		{"eq_true", "==", "100", 100, true},
+		{"eq_false", "==", "100", 200, false},
+		{"lt_true", "<", "100", 50, true},
+		{"lt_false", "<", "100", 100, false},
+		{"lte_equal", "<=", "100", 100, true},
+		{"lte_above", "<=", "100", 200, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := reminders.Reminder{
+				Name:    "test",
+				Trigger: reminders.Trigger{Kind: "last_response_tokens", Operator: tt.op, Value: tt.value},
+				Content: "test",
+			}
+			s := reminders.NewState([]reminders.Reminder{r})
+			fired := s.Evaluate(reminders.EvalContext{LastResponseTokens: tt.tokens})
+			if tt.want {
+				assert.Len(t, fired, 1)
+			} else {
+				assert.Empty(t, fired)
+			}
+		})
+	}
+}
+
+func TestEvaluate_UnknownTriggerKind_NoFire(t *testing.T) {
+	// Bypass ParseTrigger validation by constructing directly.
+	r := reminders.Reminder{
+		Name:    "test",
+		Trigger: reminders.Trigger{Kind: "unknown_kind", Operator: "==", Value: "1"},
+		Content: "test",
+	}
+	s := reminders.NewState([]reminders.Reminder{r})
+	fired := s.Evaluate(reminders.EvalContext{})
+	assert.Empty(t, fired)
+}
