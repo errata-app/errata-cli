@@ -23,14 +23,16 @@ type AgentEvent struct {
 
 // ModelResponse is the final result from one agent run.
 type ModelResponse struct {
-	ModelID        string
-	Text           string
-	LatencyMS      int64
-	InputTokens    int64
-	OutputTokens   int64
-	CostUSD        float64
-	ProposedWrites []tools.FileWrite
-	Error          string // empty = success
+	ModelID             string
+	Text                string
+	LatencyMS           int64
+	InputTokens         int64 // total input tokens displayed (regular + cache read + cache creation)
+	OutputTokens        int64
+	CacheReadTokens     int64 // tokens served from cache at a discounted rate (subset of InputTokens)
+	CacheCreationTokens int64 // tokens written to cache at a premium rate (Anthropic only; subset of InputTokens)
+	CostUSD             float64
+	ProposedWrites      []tools.FileWrite
+	Error               string // empty = success
 }
 
 // OK returns true when the response carries no error.

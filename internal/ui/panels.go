@@ -20,16 +20,17 @@ func colorFor(idx int) string {
 
 // panelState holds the live state of one model's panel.
 type panelState struct {
-	modelID      string
-	color        string
-	events       []models.AgentEvent
-	done         bool
-	errMsg       string // non-empty when run errored
-	latencyMS    int64
-	inputTokens  int64
-	outputTokens int64
-	costUSD      float64
-	histTokens   int64 // estimated history tokens at run start (for fill % display)
+	modelID         string
+	color           string
+	events          []models.AgentEvent
+	done            bool
+	errMsg          string // non-empty when run errored
+	latencyMS       int64
+	inputTokens     int64
+	outputTokens    int64
+	cacheReadTokens int64 // tokens served from cache at a discount; 0 when none
+	costUSD         float64
+	histTokens      int64 // estimated history tokens at run start (for fill % display)
 }
 
 func newPanelState(modelID string, idx int) *panelState {
@@ -67,10 +68,14 @@ func renderPanel(p *panelState, width int) string {
 			status = "error: " + short
 		} else {
 			tok := fmtTokens(p.inputTokens + p.outputTokens)
+			tokStr := tok + " tok"
+			if p.cacheReadTokens > 0 {
+				tokStr += fmt.Sprintf(" (%s↩)", fmtTokens(p.cacheReadTokens))
+			}
 			if p.costUSD > 0 {
-				status = fmt.Sprintf("done  %dms  ·  %s tok  ·  $%.4f", p.latencyMS, tok, p.costUSD)
+				status = fmt.Sprintf("done  %dms  ·  %s  ·  $%.4f", p.latencyMS, tokStr, p.costUSD)
 			} else {
-				status = fmt.Sprintf("done  %dms  ·  %s tok", p.latencyMS, tok)
+				status = fmt.Sprintf("done  %dms  ·  %s", p.latencyMS, tokStr)
 			}
 			if cw := pricing.ContextWindowTokens(p.modelID); cw > 0 && p.histTokens > 0 {
 				pct := float64(p.histTokens) / float64(cw) * 100

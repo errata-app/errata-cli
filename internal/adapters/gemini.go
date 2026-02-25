@@ -52,17 +52,20 @@ func (a *GeminiAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
-	var totalInput, totalOutput int64
+	var totalRegularInput, totalOutput, totalCacheRead int64
 
 	for {
 		resp, err := client.Models.GenerateContent(ctx, a.modelID, contents, config)
 		if err != nil {
-			return BuildErrorResponse(a.modelID, "google/"+a.modelID, start, totalInput, totalOutput, err), err
+			return BuildErrorResponse(a.modelID, "google/"+a.modelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}
 
 		if resp.UsageMetadata != nil {
-			totalInput += int64(resp.UsageMetadata.PromptTokenCount)
+			// Gemini's PromptTokenCount = total including cached. CachedContentTokenCount is a subset.
+			cached := int64(resp.UsageMetadata.CachedContentTokenCount)
+			totalRegularInput += int64(resp.UsageMetadata.PromptTokenCount) - cached
 			totalOutput += int64(resp.UsageMetadata.CandidatesTokenCount)
+			totalCacheRead += cached
 		}
 
 		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
@@ -93,7 +96,7 @@ func (a *GeminiAdapter) RunAgent(
 		contents = append(contents, genai.NewContentFromParts(toolResults, genai.RoleUser))
 	}
 
-	return BuildSuccessResponse(a.modelID, "google/"+a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
+	return BuildSuccessResponse(a.modelID, "google/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
 }
 
 func buildGeminiTools(ctx context.Context) []*genai.Tool {

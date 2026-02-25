@@ -81,6 +81,8 @@ type responseData struct {
 	LatencyMS           int64       `json:"latency_ms"`
 	InputTokens         int64       `json:"input_tokens"`
 	OutputTokens        int64       `json:"output_tokens"`
+	CacheReadTokens     int64       `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64       `json:"cache_creation_tokens,omitempty"`
 	CostUSD             float64     `json:"cost_usd"`
 	ContextWindowTokens int64       `json:"context_window_tokens"`
 	Error               string      `json:"error,omitempty"`
@@ -593,6 +595,8 @@ func buildCompletePayload(responses []models.ModelResponse) []responseData {
 			LatencyMS:           resp.LatencyMS,
 			InputTokens:         resp.InputTokens,
 			OutputTokens:        resp.OutputTokens,
+			CacheReadTokens:     resp.CacheReadTokens,
+			CacheCreationTokens: resp.CacheCreationTokens,
 			CostUSD:             resp.CostUSD,
 			ContextWindowTokens: pricing.ContextWindowTokens(resp.ModelID),
 			Error:               errText,

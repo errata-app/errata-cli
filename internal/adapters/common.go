@@ -145,27 +145,40 @@ func DispatchTool(
 // BuildErrorResponse constructs a ModelResponse for an API error encountered mid-loop.
 // qualifiedID is the provider-prefixed model ID passed to CostUSD
 // (e.g. "anthropic/claude-sonnet-4-6"); pass the bare modelID for OpenRouter/LiteLLM.
+// Cache tokens are not tracked for error responses (partial run); all input charged at standard rate.
 func BuildErrorResponse(modelID, qualifiedID string, start time.Time, totalInput, totalOutput int64, err error) models.ModelResponse {
 	return models.ModelResponse{
 		ModelID:      modelID,
 		LatencyMS:    time.Since(start).Milliseconds(),
 		InputTokens:  totalInput,
 		OutputTokens: totalOutput,
-		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, totalOutput),
+		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
 		Error:        err.Error(),
 	}
 }
 
 // BuildSuccessResponse constructs a ModelResponse after a completed agentic loop.
 // qualifiedID is the provider-prefixed model ID passed to CostUSD.
-func BuildSuccessResponse(modelID, qualifiedID string, textParts []string, start time.Time, totalInput, totalOutput int64, proposed []tools.FileWrite) models.ModelResponse {
+//
+// regularInput = non-cached input tokens.
+// cacheRead    = tokens served from cache at a discounted rate.
+// cacheCreation = tokens written to cache at a premium rate (Anthropic only; 0 for others).
+// totalOutput  = output tokens.
+//
+// InputTokens in the response is the total (regularInput + cacheRead + cacheCreation)
+// for display purposes; cost is computed using provider-specific cache rates.
+func BuildSuccessResponse(modelID, qualifiedID string, textParts []string, start time.Time,
+	regularInput, cacheRead, cacheCreation, totalOutput int64,
+	proposed []tools.FileWrite) models.ModelResponse {
 	return models.ModelResponse{
-		ModelID:        modelID,
-		Text:           join(textParts),
-		LatencyMS:      time.Since(start).Milliseconds(),
-		InputTokens:    totalInput,
-		OutputTokens:   totalOutput,
-		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, totalOutput),
-		ProposedWrites: proposed,
+		ModelID:             modelID,
+		Text:                join(textParts),
+		LatencyMS:           time.Since(start).Milliseconds(),
+		InputTokens:         regularInput + cacheRead + cacheCreation,
+		OutputTokens:        totalOutput,
+		CacheReadTokens:     cacheRead,
+		CacheCreationTokens: cacheCreation,
+		CostUSD:             pricing.CostUSD(qualifiedID, regularInput, cacheRead, cacheCreation, totalOutput),
+		ProposedWrites:      proposed,
 	}
 }

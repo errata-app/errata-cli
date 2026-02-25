@@ -71,7 +71,7 @@ func (a *LiteLLMAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
-	var totalInput, totalOutput int64
+	var totalRegularInput, totalOutput, totalCacheRead int64
 	start := time.Now()
 
 	for {
@@ -81,12 +81,15 @@ func (a *LiteLLMAdapter) RunAgent(
 			Messages: messages,
 		})
 		if err != nil {
-			return BuildErrorResponse(a.modelID, a.bareModelID, start, totalInput, totalOutput, err), err
+			return BuildErrorResponse(a.modelID, a.bareModelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}
 
 		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
-			totalInput += resp.Usage.PromptTokens
+			// OpenAI-compat API: PromptTokens = total including cached. CachedTokens is a subset.
+			cached := resp.Usage.PromptTokensDetails.CachedTokens
+			totalRegularInput += resp.Usage.PromptTokens - cached
 			totalOutput += resp.Usage.CompletionTokens
+			totalCacheRead += cached
 		}
 
 		if len(resp.Choices) == 0 {
@@ -116,7 +119,7 @@ func (a *LiteLLMAdapter) RunAgent(
 		}
 	}
 
-	return BuildSuccessResponse(a.modelID, a.bareModelID, textParts, start, totalInput, totalOutput, proposed), nil
+	return BuildSuccessResponse(a.modelID, a.bareModelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
 }
 
 func init() {

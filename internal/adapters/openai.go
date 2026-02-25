@@ -48,7 +48,7 @@ func (a *OpenAIAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
-	var totalInput, totalOutput int64
+	var totalRegularInput, totalOutput, totalCacheRead int64
 	start := time.Now()
 
 	for {
@@ -58,12 +58,15 @@ func (a *OpenAIAdapter) RunAgent(
 			Messages: messages,
 		})
 		if err != nil {
-			return BuildErrorResponse(a.modelID, "openai/"+a.modelID, start, totalInput, totalOutput, err), err
+			return BuildErrorResponse(a.modelID, "openai/"+a.modelID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
 		}
 
 		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
-			totalInput += resp.Usage.PromptTokens
+			// OpenAI's PromptTokens = total including cached. CachedTokens is a subset.
+			cached := resp.Usage.PromptTokensDetails.CachedTokens
+			totalRegularInput += resp.Usage.PromptTokens - cached
 			totalOutput += resp.Usage.CompletionTokens
+			totalCacheRead += cached
 		}
 
 		if len(resp.Choices) == 0 {
@@ -94,7 +97,7 @@ func (a *OpenAIAdapter) RunAgent(
 		}
 	}
 
-	return BuildSuccessResponse(a.modelID, "openai/"+a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
+	return BuildSuccessResponse(a.modelID, "openai/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
 }
 
 func buildOpenAITools(ctx context.Context) []openai.ChatCompletionToolParam {

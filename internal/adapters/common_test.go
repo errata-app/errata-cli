@@ -281,7 +281,7 @@ func TestBuildSuccessResponse_Fields(t *testing.T) {
 	fw := []tools.FileWrite{{Path: "a.go", Content: "package a"}}
 
 	resp := BuildSuccessResponse("claude-sonnet-4-6", "anthropic/claude-sonnet-4-6",
-		[]string{"hello ", "world"}, start, 200, 80, fw)
+		[]string{"hello ", "world"}, start, 200, 0, 0, 80, fw)
 
 	assert.Equal(t, "claude-sonnet-4-6", resp.ModelID)
 	assert.Equal(t, "hello world", resp.Text)
@@ -294,7 +294,74 @@ func TestBuildSuccessResponse_Fields(t *testing.T) {
 }
 
 func TestBuildSuccessResponse_EmptyParts(t *testing.T) {
-	resp := BuildSuccessResponse("m", "m", nil, time.Now(), 0, 0, nil)
+	resp := BuildSuccessResponse("m", "m", nil, time.Now(), 0, 0, 0, 0, nil)
 	assert.Equal(t, "", resp.Text)
 	assert.Empty(t, resp.ProposedWrites)
+}
+
+// ─── Cache token tests ────────────────────────────────────────────────────────
+
+// TestBuildSuccessResponse_InputTokensIsTotal verifies InputTokens is the sum
+// of all three input categories for display purposes.
+func TestBuildSuccessResponse_InputTokensIsTotal(t *testing.T) {
+	resp := BuildSuccessResponse(
+		"claude-sonnet-4-6", "anthropic/claude-sonnet-4-6",
+		nil, time.Now(),
+		800_000, 150_000, 50_000, 100_000, nil,
+	)
+	assert.Equal(t, int64(1_000_000), resp.InputTokens,
+		"InputTokens must equal regularInput + cacheRead + cacheCreation")
+}
+
+// TestBuildSuccessResponse_CacheFieldsStored verifies cache token fields are
+// stored exactly as passed and not conflated with InputTokens.
+func TestBuildSuccessResponse_CacheFieldsStored(t *testing.T) {
+	resp := BuildSuccessResponse(
+		"claude-sonnet-4-6", "anthropic/claude-sonnet-4-6",
+		nil, time.Now(),
+		500_000, 200_000, 300_000, 0, nil,
+	)
+	assert.Equal(t, int64(200_000), resp.CacheReadTokens)
+	assert.Equal(t, int64(300_000), resp.CacheCreationTokens)
+}
+
+// TestBuildSuccessResponse_CacheReadCheaperThanRegular verifies that a run
+// with cache reads costs less than the same token count at the regular rate.
+// Uses claude-sonnet-4-6: CacheReadPMT=$0.30/M vs InputPMT=$3.00/M.
+func TestBuildSuccessResponse_CacheReadCheaperThanRegular(t *testing.T) {
+	respWithCache := BuildSuccessResponse(
+		"claude-sonnet-4-6", "anthropic/claude-sonnet-4-6",
+		nil, time.Now(), 0, 1_000_000, 0, 0, nil,
+	)
+	respAllRegular := BuildSuccessResponse(
+		"claude-sonnet-4-6", "anthropic/claude-sonnet-4-6",
+		nil, time.Now(), 1_000_000, 0, 0, 0, nil,
+	)
+	assert.Less(t, respWithCache.CostUSD, respAllRegular.CostUSD,
+		"cache reads should cost less than regular input tokens")
+}
+
+// TestBuildSuccessResponse_ZeroCacheTokens_BackwardsCompat verifies that zero
+// cache tokens leaves CacheReadTokens and CacheCreationTokens as zero and
+// InputTokens equals the regular input (pre-cache behaviour unchanged).
+func TestBuildSuccessResponse_ZeroCacheTokens_BackwardsCompat(t *testing.T) {
+	resp := BuildSuccessResponse(
+		"gpt-4o", "openai/gpt-4o",
+		nil, time.Now(), 1_000_000, 0, 0, 500_000, nil,
+	)
+	assert.Equal(t, int64(1_000_000), resp.InputTokens)
+	assert.Equal(t, int64(0), resp.CacheReadTokens)
+	assert.Equal(t, int64(0), resp.CacheCreationTokens)
+}
+
+// TestBuildErrorResponse_NoCacheTokens verifies error responses always have
+// zero cache token fields (partial-run errors don't track cache breakdown).
+func TestBuildErrorResponse_NoCacheTokens(t *testing.T) {
+	resp := BuildErrorResponse(
+		"claude-sonnet-4-6", "anthropic/claude-sonnet-4-6",
+		time.Now(), 500_000, 0, fmt.Errorf("timeout"),
+	)
+	assert.Equal(t, int64(0), resp.CacheReadTokens)
+	assert.Equal(t, int64(0), resp.CacheCreationTokens)
+	assert.GreaterOrEqual(t, resp.CostUSD, 0.0)
 }

@@ -46,7 +46,7 @@ func (a *AnthropicAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
-	var totalInput, totalOutput int64
+	var totalRegularInput, totalOutput, totalCacheRead, totalCacheCreation int64
 	start := time.Now()
 
 	for {
@@ -58,10 +58,14 @@ func (a *AnthropicAdapter) RunAgent(
 			Messages:  messages,
 		})
 		if err != nil {
-			return BuildErrorResponse(a.modelID, "anthropic/"+a.modelID, start, totalInput, totalOutput, err), err
+			return BuildErrorResponse(a.modelID, "anthropic/"+a.modelID, start, totalRegularInput+totalCacheRead+totalCacheCreation, totalOutput, err), err
 		}
-		totalInput += resp.Usage.InputTokens
+		// Anthropic's InputTokens = regular (non-cached) tokens only.
+		// CacheReadInputTokens and CacheCreationInputTokens are separate categories.
+		totalRegularInput += resp.Usage.InputTokens
 		totalOutput += resp.Usage.OutputTokens
+		totalCacheRead += resp.Usage.CacheReadInputTokens
+		totalCacheCreation += resp.Usage.CacheCreationInputTokens
 
 		// Append assistant turn
 		messages = append(messages, resp.ToParam())
@@ -92,7 +96,7 @@ func (a *AnthropicAdapter) RunAgent(
 		messages = append(messages, anthropic.NewUserMessage(toolResults...))
 	}
 
-	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
+	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, totalCacheCreation, totalOutput, proposed), nil
 }
 
 func buildAnthropicTools(ctx context.Context) []anthropic.ToolUnionParam {
