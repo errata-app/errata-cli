@@ -17,13 +17,13 @@
       "Bash(git show *)"
     ],
     "deny": [
-      "Bash(git push *)",
       "Bash(git reset --hard *)",
       "Bash(rm -rf *)",
       "Bash(curl *)",
       "Bash(wget *)"
     ],
     "ask": [
+      "Bash(git push *)",
       "Bash(git commit *)",
       "Bash(git merge *)",
       "Bash(git rebase *)",
