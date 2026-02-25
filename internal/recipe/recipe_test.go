@@ -927,6 +927,120 @@ seed: 42
 
 // ─── Empty new sections ─────────────────────────────────────────────────────
 
+func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
+	// Parse the full example recipe and verify every new section is populated.
+	examplePath := filepath.Join("..", "..", "recipe.example.md")
+	r, err := recipe.Parse(examplePath)
+	require.NoError(t, err)
+
+	assert.Equal(t, "My Project Recipe", r.Name)
+	assert.Len(t, r.Models, 3)
+
+	// System Prompt Variants
+	require.NotNil(t, r.SystemPromptVariants)
+	assert.Contains(t, r.SystemPromptVariants, "concise")
+	assert.Contains(t, r.SystemPromptVariants, "minimal")
+	assert.Contains(t, r.SystemPromptVariants["concise"], "Go monorepo")
+
+	// System Prompt Overrides
+	require.NotNil(t, r.SystemPromptOverrides)
+	assert.Contains(t, r.SystemPromptOverrides, "gpt-4o")
+	assert.Contains(t, r.SystemPromptOverrides, "gemini-2.0-flash")
+	assert.Equal(t, "concise", r.SystemPromptOverrides["gemini-2.0-flash"])
+
+	// Tool Descriptions
+	require.NotNil(t, r.ToolDescriptions)
+	assert.Contains(t, r.ToolDescriptions, "bash")
+	assert.Contains(t, r.ToolDescriptions, "read_file")
+	assert.Contains(t, r.ToolDescriptions, "search_code")
+	assert.Contains(t, r.ToolDescriptions["bash"], "exit codes")
+
+	// Tool Description Variants
+	require.NotNil(t, r.ToolDescriptionVariants)
+	assert.Contains(t, r.ToolDescriptionVariants["bash"], "concise")
+	assert.Contains(t, r.ToolDescriptionVariants["search_code"], "concise")
+
+	// Tool Description Overrides
+	require.NotNil(t, r.ToolDescriptionOverrides)
+	assert.Contains(t, r.ToolDescriptionOverrides, "gemini-2.0-flash")
+	assert.Contains(t, r.ToolDescriptionOverrides["gemini-2.0-flash"], "bash")
+	assert.Contains(t, r.ToolDescriptionOverrides["gemini-2.0-flash"], "search_code")
+
+	// Sub-Agent Modes
+	require.NotNil(t, r.SubAgentModes)
+	assert.Contains(t, r.SubAgentModes, "explore")
+	assert.Contains(t, r.SubAgentModes, "plan")
+	assert.Contains(t, r.SubAgentModes["explore"], "read-only")
+
+	// Sub-Agent Mode Variants
+	require.NotNil(t, r.SubAgentModeVariants)
+	assert.Contains(t, r.SubAgentModeVariants["explore"], "concise")
+
+	// Context Summarization Prompt
+	assert.Contains(t, r.SummarizationPrompt, "Summarize this conversation")
+
+	// Context Summarization Prompt Variants
+	require.NotNil(t, r.SummarizationPromptVariants)
+	assert.Contains(t, r.SummarizationPromptVariants, "concise")
+
+	// System Reminders
+	require.Len(t, r.SystemReminders, 4)
+	assert.Equal(t, "context_warning", r.SystemReminders[0].Name)
+	assert.Equal(t, "context_usage > 0.75", r.SystemReminders[0].Trigger)
+	assert.Contains(t, r.SystemReminders[0].Content, "context limit")
+	assert.Equal(t, "many_turns", r.SystemReminders[1].Name)
+	assert.Equal(t, "tool_failure", r.SystemReminders[2].Name)
+	assert.Equal(t, "focus_reminder", r.SystemReminders[3].Name)
+	assert.Equal(t, "manual", r.SystemReminders[3].Trigger)
+	assert.Contains(t, r.SystemReminders[3].Content, "focus on the specific task")
+
+	// Hooks
+	require.Len(t, r.Hooks, 3)
+	assert.Equal(t, "post_edit_vet", r.Hooks[0].Name)
+	assert.Equal(t, "post_tool_use", r.Hooks[0].Event)
+	assert.Equal(t, "edit_file", r.Hooks[0].Matcher)
+	assert.Contains(t, r.Hooks[0].Command, "go vet")
+	assert.Equal(t, "30s", r.Hooks[0].Timeout)
+	assert.True(t, r.Hooks[0].InjectOutput)
+
+	assert.Equal(t, "post_edit_test", r.Hooks[1].Name)
+	assert.Equal(t, "session_start_check", r.Hooks[2].Name)
+	assert.Equal(t, "session_start", r.Hooks[2].Event)
+
+	// Output Processing
+	require.NotNil(t, r.OutputProcessing)
+	assert.Equal(t, 200, r.OutputProcessing["bash"].MaxLines)
+	assert.Equal(t, "tail", r.OutputProcessing["bash"].Truncation)
+	assert.Contains(t, r.OutputProcessing["bash"].TruncationMessage, "{max_lines}")
+	assert.Equal(t, 100, r.OutputProcessing["search_code"].MaxLines)
+	assert.Equal(t, "head_tail", r.OutputProcessing["search_code"].Truncation)
+	assert.Equal(t, 500, r.OutputProcessing["read_file"].MaxLines)
+
+	// Output Processing Overrides
+	require.NotNil(t, r.OutputProcessingOverrides)
+	geminiRules := r.OutputProcessingOverrides["gemini-2.0-flash"]
+	require.NotNil(t, geminiRules)
+	assert.Equal(t, 50, geminiRules["bash"].MaxLines)
+	assert.Equal(t, 30, geminiRules["search_code"].MaxLines)
+
+	// Model Profiles
+	require.NotNil(t, r.ModelProfiles)
+	gpt := r.ModelProfiles["gpt-4o"]
+	assert.Equal(t, 128000, gpt.ContextBudget)
+	assert.Equal(t, "function_calling", gpt.ToolFormat)
+
+	gemini := r.ModelProfiles["gemini-2.0-flash"]
+	assert.Equal(t, 1000000, gemini.ContextBudget)
+	assert.Equal(t, "concise", gemini.Tier)
+
+	llama := r.ModelProfiles["local-llama"]
+	assert.Equal(t, 8192, llama.ContextBudget)
+	assert.Equal(t, "text_in_prompt", llama.ToolFormat)
+	assert.Equal(t, "minimal", llama.Tier)
+	require.NotNil(t, llama.MidConvoSystem)
+	assert.False(t, *llama.MidConvoSystem)
+}
+
 func TestParse_EmptyNewSections(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, `
 ## System Prompt Variants
