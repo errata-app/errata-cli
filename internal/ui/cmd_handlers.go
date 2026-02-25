@@ -456,11 +456,20 @@ func helpText() string {
 }
 
 // fmtPrice formats a per-million-token USD price compactly.
+// Always shows at least 2 decimal places ($0.80, not $0.8) and extends
+// precision for sub-cent values ($0.075).
 func fmtPrice(v float64) string {
 	if v >= 1 {
 		return fmt.Sprintf("$%.2f", v)
 	}
-	return fmt.Sprintf("$%g", v)
+	// Sub-dollar: use 4 decimal places, then trim trailing zeros
+	// keeping at least 2 decimal places for consistency.
+	s := fmt.Sprintf("%.4f", v)
+	dot := strings.Index(s, ".")
+	for len(s) > dot+3 && s[len(s)-1] == '0' {
+		s = s[:len(s)-1]
+	}
+	return "$" + s
 }
 
 // formatAvailableModels formats a ListAvailableModels result for display.

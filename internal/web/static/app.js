@@ -1118,7 +1118,11 @@ async function showStats() {
 
 function fmtPrice(v) {
   if (!v) return null;
-  return '$' + (v >= 1 ? v.toFixed(2) : parseFloat(v.toPrecision(3)));
+  if (v >= 1) return '$' + v.toFixed(2);
+  // Sub-dollar: 4 decimal places, trim trailing zeros keeping at least 2.
+  let s = v.toFixed(4);
+  while (s.length > s.indexOf('.') + 3 && s.endsWith('0')) s = s.slice(0, -1);
+  return '$' + s;
 }
 
 function openModelsPanel() {

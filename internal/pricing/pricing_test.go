@@ -409,3 +409,88 @@ func TestContextWindowTokens_DateSuffix_ISO(t *testing.T) {
 	cw := ContextWindowTokens("openai/gpt-4o-2024-08-06")
 	assert.Equal(t, int64(128_000), cw)
 }
+
+// ─── Digit-hyphen-to-dot normalization ──────────────────────────────────────
+
+func TestHyphensToDots(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"version hyphen", "claude-opus-4-5", "claude-opus-4.5"},
+		{"qualified version hyphen", "anthropic/claude-opus-4-5", "anthropic/claude-opus-4.5"},
+		{"already dotted", "claude-opus-4.5", "claude-opus-4.5"},
+		{"no version digits", "gpt-4o-mini", "gpt-4o-mini"},
+		{"multi-digit version", "gemini-2.0-flash", "gemini-2.0-flash"},
+		{"no change needed", "o1", "o1"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expect, hyphensToDots(tt.input))
+		})
+	}
+}
+
+// TestResolvePricing_DotNormalization verifies that Anthropic-style model IDs
+// with version hyphens (claude-opus-4-5) resolve against OpenRouter-style
+// dot-separated entries (anthropic/claude-opus-4.5).
+func TestResolvePricing_DotNormalization(t *testing.T) {
+	resetDynamicPricing(t)
+	pricingMu.Lock()
+	dynamicPricing = map[string]modelPricing{
+		"anthropic/claude-opus-4.5": {InputPMT: 5.0, OutputPMT: 25.0, ContextWindow: 200_000},
+	}
+	pricingMu.Unlock()
+	defer resetDynamicPricing(t)
+
+	// Qualified ID with hyphen version + date suffix — should resolve via
+	// date strip + dot normalization.
+	cost := CostUSD("anthropic/claude-opus-4-5-20251101", 1_000_000, 0, 0, 1_000_000)
+	assert.InDelta(t, 30.0, cost, 0.001, "should resolve via dot normalization") // $5 + $25
+
+	// Bare ID with hyphen version (no date suffix).
+	p, ok := resolvePricing("anthropic/claude-opus-4-5")
+	assert.True(t, ok, "qualified ID with hyphen version should resolve")
+	assert.InDelta(t, 5.0, p.InputPMT, 0.001)
+}
+
+// TestResolvePricing_DotNormalization_ContextWindow verifies that context
+// window data is also accessible through the dot normalization path.
+func TestResolvePricing_DotNormalization_ContextWindow(t *testing.T) {
+	resetDynamicPricing(t)
+	pricingMu.Lock()
+	dynamicPricing = map[string]modelPricing{
+		"anthropic/claude-opus-4.1": {InputPMT: 15.0, OutputPMT: 75.0, ContextWindow: 200_000},
+	}
+	pricingMu.Unlock()
+	defer resetDynamicPricing(t)
+
+	cw := ContextWindowTokens("anthropic/claude-opus-4-1-20250805")
+	assert.Equal(t, int64(200_000), cw)
+}
+
+// ─── roundPMT ───────────────────────────────────────────────────────────────
+
+func TestRoundPMT(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  float64
+		expect float64
+	}{
+		{"clean value", 3.0, 3.0},
+		{"fp noise 0.8", 0.7999999999999999, 0.8},
+		{"fp noise 0.4", 0.39999999999999997, 0.4},
+		{"fp noise 0.1", 0.09999999999999999, 0.1},
+		{"fp noise 1.6", 1.5999999999999999, 1.6},
+		{"sub-cent preserved", 0.075, 0.075},
+		{"small sub-cent", 0.01875, 0.01875},
+		{"zero", 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.InDelta(t, tt.expect, roundPMT(tt.input), 1e-9)
+		})
+	}
+}
