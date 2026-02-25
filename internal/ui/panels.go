@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/suarezc/errata/internal/models"
@@ -10,6 +11,7 @@ import (
 )
 
 const maxPanelEvents = 20
+const maxInlineEvents = 4
 
 // panelColors cycles through 6 distinct terminal colors.
 var panelColors = []string{"#00AFAF", "#AF00AF", "#00AF00", "#AFAF00", "#0087AF", "#AF0000"}
@@ -31,13 +33,21 @@ type panelState struct {
 	cacheReadTokens int64 // tokens served from cache at a discount; 0 when none
 	costUSD         float64
 	histTokens      int64 // estimated history tokens at run start (for fill % display)
+
+	toolUseCount int       // count of tool-use events (reading, writing, bash)
+	expanded     bool      // when done: true = show events, false = collapsed summary
+	startedAt    time.Time // creation time for live elapsed display
 }
 
 func newPanelState(modelID string, idx int) *panelState {
-	return &panelState{modelID: modelID, color: colorFor(idx)}
+	return &panelState{modelID: modelID, color: colorFor(idx), startedAt: time.Now()}
 }
 
 func (p *panelState) addEvent(e models.AgentEvent) {
+	switch e.Type {
+	case "reading", "writing", "bash":
+		p.toolUseCount++
+	}
 	p.events = append(p.events, e)
 	if len(p.events) > maxPanelEvents {
 		// Copy into a fresh slice so the old backing array can be GC'd.
@@ -45,57 +55,6 @@ func (p *panelState) addEvent(e models.AgentEvent) {
 		copy(trimmed, p.events[len(p.events)-maxPanelEvents:])
 		p.events = trimmed
 	}
-}
-
-// renderPanel returns a lipgloss-styled box for one model.
-func renderPanel(p *panelState, width int) string {
-	color := lipgloss.Color(p.color)
-	if p.done && p.errMsg != "" {
-		color = lipgloss.Color("#AF0000")
-	}
-
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(color)
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(color).
-		Width(width - 4).
-		Padding(0, 1)
-
-	status := "running…"
-	if p.done {
-		if p.errMsg != "" {
-			short := p.errMsg
-			if len(short) > 45 {
-				short = short[:45] + "…"
-			}
-			status = "error: " + short
-		} else {
-			tok := fmtTokens(p.inputTokens + p.outputTokens)
-			tokStr := tok + " tok"
-			if p.cacheReadTokens > 0 {
-				tokStr += fmt.Sprintf(" (%s↩)", fmtTokens(p.cacheReadTokens))
-			}
-			if p.costUSD > 0 {
-				status = fmt.Sprintf("done  %dms  ·  %s  ·  $%.4f", p.latencyMS, tokStr, p.costUSD)
-			} else {
-				status = fmt.Sprintf("done  %dms  ·  %s", p.latencyMS, tokStr)
-			}
-			if cw := pricing.ContextWindowTokens(p.modelID); cw > 0 && p.histTokens > 0 {
-				pct := float64(p.histTokens) / float64(cw) * 100
-				status += fmt.Sprintf("  ·  ~%.0f%% ctx", pct)
-			}
-		}
-	}
-	title := titleStyle.Render(p.modelID) + "  " +
-		lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"}).Render(status)
-
-	var lines []string
-	lines = append(lines, title)
-	for _, e := range p.events {
-		lines = append(lines, renderEvent(e))
-	}
-
-	return borderStyle.Render(strings.Join(lines, "\n"))
 }
 
 // truncateLine strips after the first newline and caps at max runes.
@@ -107,24 +66,6 @@ func truncateLine(s string, max int) string {
 		s = string([]rune(s)[:max]) + "…"
 	}
 	return s
-}
-
-func renderEvent(e models.AgentEvent) string {
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	switch e.Type {
-	case "reading":
-		return dimStyle.Render("reading  ") + e.Data
-	case "writing":
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AFAF00")).Render("writing  ") + e.Data
-	case "bash":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF87")).Render("bash     ") + truncateLine(e.Data, 60)
-	case "error":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error    ") + truncateLine(e.Data, 60)
-	case "text":
-		return dimStyle.Render(truncateLine(e.Data, 60))
-	default:
-		return dimStyle.Render(e.Data)
-	}
 }
 
 // fmtTokens formats a token count compactly: 1.2k, 34.5k, 1.2M.
@@ -139,19 +80,171 @@ func fmtTokens(n int64) string {
 	}
 }
 
-// renderPanelRow lays panels side-by-side.
-func renderPanelRow(panels []*panelState, termWidth int) string {
+// formatElapsed formats a duration in human-readable form.
+func formatElapsed(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	s := int(d.Seconds())
+	if s < 60 {
+		return fmt.Sprintf("%ds", s)
+	}
+	m := s / 60
+	rem := s % 60
+	if rem == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return fmt.Sprintf("%dm %ds", m, rem)
+}
+
+// formatDoneSummary builds the parenthesized completion summary line.
+func formatDoneSummary(p *panelState) string {
+	var parts []string
+	if p.toolUseCount > 0 {
+		noun := "tool uses"
+		if p.toolUseCount == 1 {
+			noun = "tool use"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", p.toolUseCount, noun))
+	}
+	if tot := p.inputTokens + p.outputTokens; tot > 0 {
+		tokStr := fmtTokens(tot) + " tokens"
+		if p.cacheReadTokens > 0 {
+			tokStr += fmt.Sprintf(" (%s cached)", fmtTokens(p.cacheReadTokens))
+		}
+		parts = append(parts, tokStr)
+	}
+	if p.latencyMS > 0 {
+		parts = append(parts, formatElapsed(time.Duration(p.latencyMS)*time.Millisecond))
+	}
+	if p.costUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.4f", p.costUSD))
+	}
+	if cw := pricing.ContextWindowTokens(p.modelID); cw > 0 && p.histTokens > 0 {
+		pct := float64(p.histTokens) / float64(cw) * 100
+		parts = append(parts, fmt.Sprintf("~%.0f%% ctx", pct))
+	}
+	if len(parts) == 0 {
+		return "Done"
+	}
+	return "Done (" + strings.Join(parts, " · ") + ")"
+}
+
+// renderInlineEvent formats a single event for inline display.
+func renderInlineEvent(e models.AgentEvent) string {
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	switch e.Type {
+	case "reading":
+		return dimStyle.Render("reading ") + truncateLine(e.Data, 70)
+	case "writing":
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AFAF00")).Render("writing ") + truncateLine(e.Data, 70)
+	case "bash":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF87")).Render("bash    ") + truncateLine(e.Data, 60)
+	case "error":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error   ") + truncateLine(e.Data, 60)
+	case "text":
+		return dimStyle.Render(truncateLine(e.Data, 70))
+	default:
+		return dimStyle.Render(truncateLine(e.Data, 70))
+	}
+}
+
+// renderInlinePanel renders a single model panel in Claude Code inline style.
+func renderInlinePanel(p *panelState, termWidth int) string {
+	color := lipgloss.Color(p.color)
+	if p.done && p.errMsg != "" {
+		color = lipgloss.Color("#AF0000")
+	}
+
+	dotStyle := lipgloss.NewStyle().Foreground(color)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	modelStyle := lipgloss.NewStyle().Bold(true).Foreground(color)
+
+	connector := dimStyle.Render("  ⎿  ")
+	cont := "     "
+
+	var sb strings.Builder
+
+	// Header line: colored dot + model ID
+	sb.WriteString(dotStyle.Render("⏺") + " " + modelStyle.Render(p.modelID))
+	sb.WriteByte('\n')
+
+	if p.done {
+		if p.errMsg != "" {
+			short := p.errMsg
+			if len([]rune(short)) > 60 {
+				short = string([]rune(short)[:60]) + "…"
+			}
+			sb.WriteString(connector)
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).
+				Render("Error: " + short))
+			sb.WriteByte('\n')
+		} else if p.expanded {
+			// Expanded view: full event list + summary
+			for i, e := range p.events {
+				if i == 0 {
+					sb.WriteString(connector)
+				} else {
+					sb.WriteString(cont)
+				}
+				sb.WriteString(renderInlineEvent(e))
+				sb.WriteByte('\n')
+			}
+			if len(p.events) == 0 {
+				sb.WriteString(connector)
+			} else {
+				sb.WriteString(cont)
+			}
+			sb.WriteString(dimStyle.Render(formatDoneSummary(p)))
+			sb.WriteByte('\n')
+		} else {
+			// Collapsed view (default): summary line only
+			sb.WriteString(connector)
+			sb.WriteString(dimStyle.Render(formatDoneSummary(p)))
+			sb.WriteByte('\n')
+			sb.WriteString(cont)
+			sb.WriteString(dimStyle.Render("(ctrl+o to expand)"))
+			sb.WriteByte('\n')
+		}
+	} else {
+		// Running: show last N events + running stats
+		start := 0
+		if len(p.events) > maxInlineEvents {
+			start = len(p.events) - maxInlineEvents
+		}
+		visible := p.events[start:]
+		for i, e := range visible {
+			if i == 0 {
+				sb.WriteString(connector)
+			} else {
+				sb.WriteString(cont)
+			}
+			sb.WriteString(renderInlineEvent(e))
+			sb.WriteByte('\n')
+		}
+		// Running stats line
+		elapsed := time.Since(p.startedAt)
+		if len(visible) == 0 {
+			sb.WriteString(connector)
+		} else {
+			sb.WriteString(cont)
+		}
+		sb.WriteString(dimStyle.Render(
+			fmt.Sprintf("%d tool uses · %s", p.toolUseCount, formatElapsed(elapsed))))
+		sb.WriteByte('\n')
+	}
+
+	return sb.String()
+}
+
+// renderInlinePanels renders all panels vertically stacked.
+func renderInlinePanels(panels []*panelState, termWidth int) string {
 	if len(panels) == 0 {
 		return ""
 	}
-	panelWidth := termWidth / len(panels)
-	if panelWidth < 20 {
-		panelWidth = 20
+	var sb strings.Builder
+	for _, p := range panels {
+		sb.WriteString(renderInlinePanel(p, termWidth))
 	}
-
-	rendered := make([]string, len(panels))
-	for i, p := range panels {
-		rendered[i] = renderPanel(p, panelWidth)
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+	return sb.String()
 }

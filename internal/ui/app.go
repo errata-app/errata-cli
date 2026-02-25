@@ -254,7 +254,7 @@ func (a App) renderFeedContent() string {
 			sb.WriteString(promptStyle.Render("> " + item.prompt))
 			sb.WriteByte('\n')
 			if len(item.panels) > 0 {
-				sb.WriteString(renderPanelRow(item.panels, a.width))
+				sb.WriteString(renderInlinePanels(item.panels, a.width))
 				sb.WriteByte('\n')
 			}
 			if item.responses != nil {
