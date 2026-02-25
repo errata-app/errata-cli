@@ -14,6 +14,7 @@ import (
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/prompthistory"
@@ -239,6 +240,8 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	projectRoot := a.projectRoot
 	cfg := a.cfg
 	seed := a.seed
+	sessionID := a.sessionID
+	rec := a.recipe
 
 	return a, func() tea.Msg {
 		effectiveHistories := histories
@@ -283,14 +286,25 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 		if seed != nil {
 			runCtx = tools.WithSeed(runCtx, *seed)
 		}
+		collector := output.NewCollector()
 		responses := runner.RunAll(
 			runCtx, ads, effectiveHistories, trimmed,
-			func(modelID string, event models.AgentEvent) {
+			collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
-			},
+			}),
 			verbose,
 		)
-		return runCompleteMsg{responses: responses, compactedHistories: compacted}
+
+		toolNames := make([]string, len(activeDefs))
+		for i, d := range activeDefs {
+			toolNames[i] = d.Name
+		}
+		report := output.BuildReport(sessionID, rec, trimmed, responses, collector, toolNames)
+		if _, err := output.Save(output.DefaultDir, report); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
+		}
+
+		return runCompleteMsg{responses: responses, compactedHistories: compacted, report: report}
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/runner"
@@ -32,6 +33,7 @@ type agentEventMsg struct {
 type runCompleteMsg struct {
 	responses          []models.ModelResponse
 	compactedHistories map[string][]models.ConversationTurn // non-nil if auto-compact ran
+	report             *output.Report                       // output report for selection recording
 }
 
 type compactCompleteMsg struct {
@@ -133,6 +135,13 @@ type App struct {
 
 	// seed for reproducible model sampling; nil = not set
 	seed *int64
+
+	// recipe holds the full recipe configuration; used for output reports.
+	recipe *recipe.Recipe
+
+	// lastReport is the most recent output report; used by selection/rating
+	// handlers to call RecordSelection after the user picks a winner.
+	lastReport *output.Report
 }
 
 // New creates the App model.
@@ -180,6 +189,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		mcpDispatchers:        mcpDispatchers,
 		seed:                  cfg.Seed,
 	}
+	app.recipe = rec
 	if rec != nil {
 		if rec.Tools != nil {
 			app.toolAllowlist = rec.Tools.Allowlist
@@ -337,6 +347,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.withMessage("History compacted."), nil
 
 	case runCompleteMsg:
+		a.lastReport = msg.report
+
 		// Mark panels done. runner.RunAll preserves adapter order, so results[i] == panels[i].
 		for i, resp := range msg.responses {
 			if i >= len(a.panels) {
