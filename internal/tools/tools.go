@@ -221,6 +221,31 @@ func ActiveToolsFromContext(ctx context.Context) []ToolDef {
 	return Definitions
 }
 
+// bashPrefixesKey is the context key for the bash command prefix allowlist.
+type bashPrefixesKey struct{}
+
+// WithBashPrefixes returns a context carrying the given bash prefix allowlist.
+// When set, ExecuteBash will only run commands whose prefix matches one of these
+// patterns (e.g. "go test *", "go build *"). nil or empty means unrestricted.
+func WithBashPrefixes(ctx context.Context, prefixes []string) context.Context {
+	return context.WithValue(ctx, bashPrefixesKey{}, prefixes)
+}
+
+// BashPrefixesFromContext returns the bash prefix allowlist stored in ctx,
+// or nil if no restriction was set.
+func BashPrefixesFromContext(ctx context.Context) []string {
+	v, _ := ctx.Value(bashPrefixesKey{}).([]string)
+	return v
+}
+
+// matchBashPrefix reports whether command matches the given prefix pattern.
+// A trailing "*" (with optional spaces) is stripped from pattern; the remaining
+// text must be a prefix of command (case-sensitive, no leading-space trim).
+func matchBashPrefix(command, pattern string) bool {
+	prefix := strings.TrimRight(pattern, "* ")
+	return strings.HasPrefix(command, prefix)
+}
+
 // MCPDispatcher is a function that executes one MCP tool call.
 // args values are strings to match Errata's DispatchTool convention.
 type MCPDispatcher func(args map[string]string) string
@@ -342,6 +367,36 @@ func ActiveDefinitions(disabled map[string]bool) []ToolDef {
 	}
 	out := make([]ToolDef, 0, len(Definitions))
 	for _, d := range Definitions {
+		if !disabled[d.Name] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// DefinitionsAllowed returns tool definitions filtered by allowlist (if non-nil)
+// and minus any disabled tools. If allowlist is nil, all Definitions are candidates.
+// This combines recipe-level tool allowlist filtering with session-level disabling.
+func DefinitionsAllowed(allowlist []string, disabled map[string]bool) []ToolDef {
+	candidates := Definitions
+	if len(allowlist) > 0 {
+		set := make(map[string]bool, len(allowlist))
+		for _, n := range allowlist {
+			set[n] = true
+		}
+		out := make([]ToolDef, 0, len(allowlist))
+		for _, d := range Definitions {
+			if set[d.Name] {
+				out = append(out, d)
+			}
+		}
+		candidates = out
+	}
+	if len(disabled) == 0 {
+		return candidates
+	}
+	out := make([]ToolDef, 0, len(candidates))
+	for _, d := range candidates {
 		if !disabled[d.Name] {
 			out = append(out, d)
 		}
@@ -663,18 +718,33 @@ func ExecuteSearchFiles(pattern, basePath string) string {
 
 // ExecuteBash runs command via the system shell (sh -c) with a 2-minute timeout.
 // stdout and stderr are combined; output is capped at bashOutputLimit bytes.
-func ExecuteBash(command string) string {
+// If ctx carries a bash prefix allowlist (via WithBashPrefixes), the command must
+// match one of the allowed prefixes or an error string is returned instead.
+func ExecuteBash(ctx context.Context, command string) string {
+	if prefixes := BashPrefixesFromContext(ctx); len(prefixes) > 0 {
+		allowed := false
+		for _, p := range prefixes {
+			if matchBashPrefix(command, p) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Sprintf("[bash: command not allowed by recipe tools restriction: %q]", command)
+		}
+	}
+
 	timeout := bashTimeout()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd := exec.CommandContext(timeoutCtx, "sh", "-c", command)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 
 	if runErr := cmd.Run(); runErr != nil {
-		if ctx.Err() == context.DeadlineExceeded {
+		if timeoutCtx.Err() == context.DeadlineExceeded {
 			output := out.String()
 			if output == "" {
 				return fmt.Sprintf("[error: command timed out after %s]", timeout)

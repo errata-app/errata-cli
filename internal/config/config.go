@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -60,6 +61,21 @@ type Config struct {
 	// 1 (default) means sub-agents cannot spawn further sub-agents.
 	// 0 disables spawn_agent entirely. Loaded from ERRATA_SUBAGENT_MAX_DEPTH.
 	SubagentMaxDepth int
+
+	// AgentTimeout is the per-adapter wall-clock timeout for a single RunAgent call.
+	// 0 means use the runner's built-in default (5 minutes).
+	// Set via recipe ## Constraints timeout: or ERRATA_AGENT_TIMEOUT env var.
+	AgentTimeout time.Duration
+
+	// CompactThreshold is the context fill fraction that triggers auto-compact.
+	// 0 means use the runner's built-in default (0.80).
+	// Set via recipe ## Context compact_threshold:.
+	CompactThreshold float64
+
+	// MaxHistoryTurns is the maximum number of conversation turns kept per model.
+	// Load() sets this to 20 by default; ERRATA_MAX_HISTORY_TURNS overrides it.
+	// A recipe can further override via ## Context max_history_turns:.
+	MaxHistoryTurns int
 }
 
 // Load reads .env (if present) then environment variables and returns a Config.
@@ -87,6 +103,18 @@ func Load() Config {
 			cfg.SubagentMaxDepth = n
 		}
 	}
+	cfg.MaxHistoryTurns = 20
+	if v := os.Getenv("ERRATA_MAX_HISTORY_TURNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MaxHistoryTurns = n
+		}
+	}
+	if v := os.Getenv("ERRATA_AGENT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.AgentTimeout = d
+		}
+	}
+
 	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	cfg.GoogleAPIKey = os.Getenv("GOOGLE_API_KEY")

@@ -411,10 +411,10 @@ func makeTurns(args ...string) []models.ConversationTurn {
 }
 
 func TestShouldAutoCompact_NoHistoryReturnsFalse(t *testing.T) {
-	if runner.ShouldAutoCompact(nil, "claude-sonnet-4-6") {
+	if runner.ShouldAutoCompact(nil, "claude-sonnet-4-6", 0) {
 		t.Error("nil histories should not trigger compact")
 	}
-	if runner.ShouldAutoCompact(map[string][]models.ConversationTurn{}, "claude-sonnet-4-6") {
+	if runner.ShouldAutoCompact(map[string][]models.ConversationTurn{}, "claude-sonnet-4-6", 0) {
 		t.Error("empty histories should not trigger compact")
 	}
 }
@@ -424,7 +424,7 @@ func TestShouldAutoCompact_UnknownModelReturnsFalse(t *testing.T) {
 	h := map[string][]models.ConversationTurn{
 		"no-such-model": makeTurns("user", strings.Repeat("x", 1_000_000), "assistant", "y"),
 	}
-	if runner.ShouldAutoCompact(h, "no-such-model") {
+	if runner.ShouldAutoCompact(h, "no-such-model", 0) {
 		t.Error("unknown model should never trigger auto-compact")
 	}
 }
@@ -434,7 +434,7 @@ func TestShouldAutoCompact_BelowThresholdReturnsFalse(t *testing.T) {
 	h := map[string][]models.ConversationTurn{
 		"gemini-2.0-flash": makeTurns("user", "short", "assistant", "reply"),
 	}
-	if runner.ShouldAutoCompact(h, "gemini-2.0-flash") {
+	if runner.ShouldAutoCompact(h, "gemini-2.0-flash", 0) {
 		t.Error("well-below-threshold history should not trigger compact")
 	}
 }
@@ -445,7 +445,7 @@ func TestShouldAutoCompact_AboveThresholdReturnsTrue(t *testing.T) {
 	h := map[string][]models.ConversationTurn{
 		"claude-sonnet-4-6": {{Role: "user", Content: bigText}},
 	}
-	if !runner.ShouldAutoCompact(h, "claude-sonnet-4-6") {
+	if !runner.ShouldAutoCompact(h, "claude-sonnet-4-6", 0) {
 		t.Error("above-threshold history should trigger auto-compact")
 	}
 }

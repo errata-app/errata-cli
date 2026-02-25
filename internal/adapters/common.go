@@ -127,7 +127,7 @@ func DispatchTool(
 			desc = command
 		}
 		onEvent(models.AgentEvent{Type: "bash", Data: desc})
-		return tools.ExecuteBash(command), true
+		return tools.ExecuteBash(ctx, command), true
 
 	case tools.WebFetchToolName:
 		rawURL := args["url"]

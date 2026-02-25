@@ -211,31 +211,56 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	verbose := a.verbose
 	prog := a.prog
 	histories := a.conversationHistories // read-only in goroutine; written only by main loop
-	activeDefs := tools.ActiveDefinitions(a.disabledTools)
+	activeDefs := tools.DefinitionsAllowed(a.toolAllowlist, a.disabledTools)
 	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
+	// Apply sandbox restrictions from recipe.
+	if a.sandboxFilesystem == "read_only" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
+			tools.WriteToolName: true,
+			tools.EditToolName:  true,
+		})
+	}
+	if a.sandboxNetwork == "none" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
+			tools.WebFetchToolName:  true,
+			tools.WebSearchToolName: true,
+		})
+	}
 	mcpDispatchers := a.mcpDispatchers
+	bashPrefixes := a.bashPrefixes
+	contextStrategy := a.contextStrategy
+	cfg := a.cfg
 
 	return a, func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
-		for _, ad := range ads {
-			if runner.ShouldAutoCompact(effectiveHistories, ad.ID()) {
-				prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
-					Type: "text", Data: "[auto-compacting history…]",
-				}})
-				effectiveHistories = runner.CompactHistories(
-					context.Background(), []models.ModelAdapter{ad},
-					effectiveHistories, func(id string, e models.AgentEvent) {
-						prog.Send(agentEventMsg{modelID: id, event: e})
-					},
-				)
-				compacted = effectiveHistories
+		// Skip auto-compact when context strategy is "manual" or "off".
+		if contextStrategy != "manual" && contextStrategy != "off" {
+			for _, ad := range ads {
+				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
+					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
+						Type: "text", Data: "[auto-compacting history…]",
+					}})
+					effectiveHistories = runner.CompactHistories(
+						context.Background(), []models.ModelAdapter{ad},
+						effectiveHistories, func(id string, e models.AgentEvent) {
+							prog.Send(agentEventMsg{modelID: id, event: e})
+						},
+					)
+					compacted = effectiveHistories
+				}
 			}
 		}
 		runCtx := tools.WithActiveTools(context.Background(), activeDefs)
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
+		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
+		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
+			Timeout:          cfg.AgentTimeout,
+			CompactThreshold: cfg.CompactThreshold,
+			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+		})
 		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
-			ads, a.cfg, mcpDispatchers,
+			ads, cfg, mcpDispatchers,
 			func(modelID string, e models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: e})
 			},

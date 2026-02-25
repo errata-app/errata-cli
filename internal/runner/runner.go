@@ -3,8 +3,6 @@ package runner
 
 import (
 	"context"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,13 +15,36 @@ const agentTimeout = 5 * time.Minute
 const defaultMaxHistoryTurns = 20
 const autoCompactThreshold = 0.80
 
-func maxHistoryTurns() int {
-	if v := os.Getenv("ERRATA_MAX_HISTORY_TURNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
+// ─── Run options (context-based) ─────────────────────────────────────────────
+
+type runOptsKey struct{}
+
+// RunOptions controls per-run behavior. Zero values fall back to package defaults.
+type RunOptions struct {
+	Timeout          time.Duration // 0 → agentTimeout (5 min)
+	CompactThreshold float64       // 0 → autoCompactThreshold (0.80)
+	MaxHistoryTurns  int           // 0 → defaultMaxHistoryTurns (20)
+}
+
+// WithRunOptions returns a context carrying the given RunOptions.
+func WithRunOptions(ctx context.Context, opts RunOptions) context.Context {
+	return context.WithValue(ctx, runOptsKey{}, opts)
+}
+
+// runOptsFromContext retrieves RunOptions from ctx, filling in package defaults
+// for any zero values.
+func runOptsFromContext(ctx context.Context) RunOptions {
+	v, _ := ctx.Value(runOptsKey{}).(RunOptions)
+	if v.Timeout == 0 {
+		v.Timeout = agentTimeout
 	}
-	return defaultMaxHistoryTurns
+	if v.CompactThreshold == 0 {
+		v.CompactThreshold = autoCompactThreshold
+	}
+	if v.MaxHistoryTurns == 0 {
+		v.MaxHistoryTurns = defaultMaxHistoryTurns
+	}
+	return v
 }
 
 // RunAll sends prompt to every adapter concurrently and returns all responses.
@@ -38,6 +59,7 @@ func RunAll(
 	onEvent  func(modelID string, event models.AgentEvent),
 	verbose  bool,
 ) []models.ModelResponse {
+	opts := runOptsFromContext(ctx)
 	results := make([]models.ModelResponse, len(adapters))
 	var wg sync.WaitGroup
 
@@ -47,7 +69,7 @@ func RunAll(
 		go func() {
 			defer wg.Done()
 
-			tctx, cancel := context.WithTimeout(ctx, agentTimeout)
+			tctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 			defer cancel()
 
 			// filtered suppresses "text" and "error" events when not verbose.
@@ -59,7 +81,7 @@ func RunAll(
 			}
 
 			start := time.Now()
-			h := TrimHistory(histories[a.ID()], maxHistoryTurns())
+			h := TrimHistory(histories[a.ID()], opts.MaxHistoryTurns)
 			resp, err := a.RunAgent(tctx, h, prompt, filtered)
 			resp.ModelID = a.ID() // enforce: ModelID always matches the configured adapter ID
 
@@ -151,16 +173,19 @@ func IsContextOverflowError(errStr string) bool {
 	return false
 }
 
-// ShouldAutoCompact reports whether the history for adapterID has grown past the
-// auto-compact threshold relative to the model's known context window.
+// ShouldAutoCompact reports whether the history for adapterID has grown past threshold
+// relative to the model's known context window. threshold=0 uses the package default (0.80).
 // Returns false when the context window is unknown.
-func ShouldAutoCompact(histories map[string][]models.ConversationTurn, adapterID string) bool {
+func ShouldAutoCompact(histories map[string][]models.ConversationTurn, adapterID string, threshold float64) bool {
 	cw := pricing.ContextWindowTokens(adapterID)
 	if cw == 0 {
 		return false
 	}
+	if threshold <= 0 {
+		threshold = autoCompactThreshold
+	}
 	est := EstimateHistoryTokens(histories[adapterID])
-	return float64(est)/float64(cw) >= autoCompactThreshold
+	return float64(est)/float64(cw) >= threshold
 }
 
 const compactPrompt = `Please write a complete but concise summary of our conversation so far.

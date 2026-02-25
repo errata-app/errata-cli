@@ -188,9 +188,14 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		toRun = wc.s.adapters
 	}
 
+	cfg := wc.s.cfg
+	timeout := cfg.AgentTimeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
 	wc.mu.Lock()
 	oldCancel := wc.cancelRun
-	runCtx, cancel := context.WithTimeout(wc.ctx, 5*time.Minute)
+	runCtx, cancel := context.WithTimeout(wc.ctx, timeout)
 	wc.cancelRun = cancel
 	wc.mu.Unlock()
 
@@ -207,30 +212,65 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 		oldCancel()
 	}
 
-	activeDefs := tools.ActiveDefinitions(wc.disabledTools)
+	// Derive active tool definitions from recipe allowlist + session disabled set.
+	var toolAllowlist []string
+	var bashPrefixes []string
+	contextStrategy := ""
+	sandboxFilesystem := ""
+	sandboxNetwork := ""
+	if wc.s.rec != nil {
+		if wc.s.rec.Tools != nil {
+			toolAllowlist = wc.s.rec.Tools.Allowlist
+			bashPrefixes = wc.s.rec.Tools.BashPrefixes
+		}
+		contextStrategy = wc.s.rec.Context.Strategy
+		sandboxFilesystem = wc.s.rec.Sandbox.Filesystem
+		sandboxNetwork = wc.s.rec.Sandbox.Network
+	}
+	activeDefs := tools.DefinitionsAllowed(toolAllowlist, wc.disabledTools)
 	activeDefs = append(activeDefs, tools.FilterDefs(wc.s.mcpDefs, wc.disabledTools)...)
+	if sandboxFilesystem == "read_only" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
+			tools.WriteToolName: true,
+			tools.EditToolName:  true,
+		})
+	}
+	if sandboxNetwork == "none" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
+			tools.WebFetchToolName:  true,
+			tools.WebSearchToolName: true,
+		})
+	}
 	mcpDispatchers := wc.s.mcpDispatchers
 
 	go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, ads []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
 		defer cancel()
 
 		effectiveHistories := hists
-		for _, ad := range ads {
-			if runner.ShouldAutoCompact(effectiveHistories, ad.ID()) {
-				wc.send(wsServerMsg{Type: "agent_event", ModelID: ad.ID(), EventType: "text", Data: "[auto-compacting history…]"})
-				effectiveHistories = runner.CompactHistories(
-					runCtx, []models.ModelAdapter{ad},
-					effectiveHistories, func(modelID string, e models.AgentEvent) {
-						wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
-					},
-				)
+		if contextStrategy != "manual" && contextStrategy != "off" {
+			for _, ad := range ads {
+				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
+					wc.send(wsServerMsg{Type: "agent_event", ModelID: ad.ID(), EventType: "text", Data: "[auto-compacting history…]"})
+					effectiveHistories = runner.CompactHistories(
+						runCtx, []models.ModelAdapter{ad},
+						effectiveHistories, func(modelID string, e models.AgentEvent) {
+							wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
+						},
+					)
+				}
 			}
 		}
 
 		toolCtx := tools.WithActiveTools(runCtx, activeDefs)
 		toolCtx = tools.WithMCPDispatchers(toolCtx, mcpDispatchers)
+		toolCtx = tools.WithBashPrefixes(toolCtx, bashPrefixes)
+		toolCtx = runner.WithRunOptions(toolCtx, runner.RunOptions{
+			Timeout:          cfg.AgentTimeout,
+			CompactThreshold: cfg.CompactThreshold,
+			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+		})
 		toolCtx = tools.WithSubagentDispatcher(toolCtx, subagent.NewDispatcher(
-			ads, wc.s.cfg, mcpDispatchers,
+			ads, cfg, mcpDispatchers,
 			func(modelID string, e models.AgentEvent) {
 				wc.send(wsServerMsg{Type: "agent_event", ModelID: modelID, EventType: e.Type, Data: e.Data})
 			},

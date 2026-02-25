@@ -14,6 +14,7 @@ import (
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -27,7 +28,8 @@ type Server struct {
 	histPath        string
 	sessionID       string
 	cfg             config.Config
-	startupWarnings []string // sent to each browser on WS connect
+	rec             *recipe.Recipe // recipe settings (nil = use defaults)
+	startupWarnings []string       // sent to each browser on WS connect
 
 	// MCP tool definitions and dispatchers (nil if no MCP servers configured)
 	mcpDefs        []tools.ToolDef
@@ -40,7 +42,7 @@ type Server struct {
 // New creates a Server. A fresh session ID is generated on each call.
 // Conversation history is loaded from histPath if it exists.
 // startupWarnings are sent to each browser client on WebSocket connect.
-func New(adapters []models.ModelAdapter, prefPath, histPath string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, startupWarnings []string) *Server {
+func New(adapters []models.ModelAdapter, prefPath, histPath string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, startupWarnings []string, rec *recipe.Recipe) *Server {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 
@@ -55,6 +57,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath string, cfg config.C
 		histPath:        histPath,
 		sessionID:       hex.EncodeToString(b),
 		cfg:             cfg,
+		rec:             rec,
 		histories:       h,
 		mcpDefs:         mcpDefs,
 		mcpDispatchers:  mcpDispatchers,

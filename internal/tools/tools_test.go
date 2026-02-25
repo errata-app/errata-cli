@@ -456,52 +456,52 @@ func TestSystemPromptSuffix_ContainsKeyGuidance(t *testing.T) {
 // --- ExecuteBash ---
 
 func TestExecuteBash_SimpleCommand(t *testing.T) {
-	out := tools.ExecuteBash("echo hello")
+	out := tools.ExecuteBash(context.Background(),"echo hello")
 	assert.Equal(t, "hello", out)
 }
 
 func TestExecuteBash_StderrCombined(t *testing.T) {
 	// stderr should appear in the output
-	out := tools.ExecuteBash("echo out && echo err >&2")
+	out := tools.ExecuteBash(context.Background(),"echo out && echo err >&2")
 	assert.Contains(t, out, "out")
 	assert.Contains(t, out, "err")
 }
 
 func TestExecuteBash_NonZeroExitIncludesOutput(t *testing.T) {
 	// A failing command should return its output AND an exit notice.
-	out := tools.ExecuteBash("echo before && exit 1")
+	out := tools.ExecuteBash(context.Background(),"echo before && exit 1")
 	assert.Contains(t, out, "before")
 	assert.Contains(t, out, "[exit:")
 }
 
 func TestExecuteBash_NonZeroExitNoOutput(t *testing.T) {
 	// When there's no output, only the exit notice is returned.
-	out := tools.ExecuteBash("exit 2")
+	out := tools.ExecuteBash(context.Background(),"exit 2")
 	assert.Contains(t, out, "[exit:")
 	assert.NotContains(t, out, "[error:")
 }
 
 func TestExecuteBash_NoOutput(t *testing.T) {
-	out := tools.ExecuteBash("true")
+	out := tools.ExecuteBash(context.Background(),"true")
 	assert.Equal(t, "(no output)", out)
 }
 
 func TestExecuteBash_MultilineOutput(t *testing.T) {
-	out := tools.ExecuteBash("printf 'a\nb\nc\n'")
+	out := tools.ExecuteBash(context.Background(),"printf 'a\nb\nc\n'")
 	assert.Contains(t, out, "a")
 	assert.Contains(t, out, "b")
 	assert.Contains(t, out, "c")
 }
 
 func TestExecuteBash_PipeSupport(t *testing.T) {
-	out := tools.ExecuteBash("echo hello world | tr ' ' '_'")
+	out := tools.ExecuteBash(context.Background(),"echo hello world | tr ' ' '_'")
 	assert.Equal(t, "hello_world", out)
 }
 
 func TestExecuteBash_WorkingDirIsInherited(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	out := tools.ExecuteBash("pwd")
+	out := tools.ExecuteBash(context.Background(),"pwd")
 	// The resolved pwd may differ from dir due to symlinks; just check no error.
 	assert.NotContains(t, out, "[error:")
 	assert.NotContains(t, out, "[exit:")
@@ -510,10 +510,10 @@ func TestExecuteBash_WorkingDirIsInherited(t *testing.T) {
 func TestExecuteBash_OutputCapped(t *testing.T) {
 	// Generate output larger than bashOutputLimit (10 000 bytes).
 	// Each "A" repeated 200 times + newline = 201 bytes; 60 lines = 12060 bytes.
-	out := tools.ExecuteBash("python3 -c \"print('A'*200+'\\n'*1, end='')\" | for i in $(seq 60); do cat; done 2>/dev/null || printf '%0.s' {1..12000} | head -c 12000 | tr '\\0' 'A'")
+	out := tools.ExecuteBash(context.Background(),"python3 -c \"print('A'*200+'\\n'*1, end='')\" | for i in $(seq 60); do cat; done 2>/dev/null || printf '%0.s' {1..12000} | head -c 12000 | tr '\\0' 'A'")
 	// Fallback: just generate a long string directly.
 	if strings.Contains(out, "[exit:") || strings.Contains(out, "(no output)") {
-		out = tools.ExecuteBash("dd if=/dev/zero bs=1 count=12000 2>/dev/null | tr '\\0' 'A'")
+		out = tools.ExecuteBash(context.Background(),"dd if=/dev/zero bs=1 count=12000 2>/dev/null | tr '\\0' 'A'")
 	}
 	if len(out) > 10_000 {
 		assert.Contains(t, out, "[truncated:")
@@ -524,7 +524,7 @@ func TestExecuteBash_OutputCapped(t *testing.T) {
 
 func TestExecuteBash_Timeout(t *testing.T) {
 	t.Setenv("ERRATA_BASH_TIMEOUT", "2s")
-	out := tools.ExecuteBash("sleep 60")
+	out := tools.ExecuteBash(context.Background(),"sleep 60")
 	assert.Contains(t, out, "[error:")
 	assert.Contains(t, out, "timed out")
 }

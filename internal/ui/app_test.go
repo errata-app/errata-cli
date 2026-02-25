@@ -22,7 +22,7 @@ func (s uiStub) RunAgent(_ context.Context, _ []models.ConversationTurn, _ strin
 
 func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 	t.Helper()
-	a := New(ads, t.TempDir()+"/pref.jsonl", t.TempDir()+"/hist.json", t.TempDir()+"/prompt_hist.jsonl", "session", "", config.Config{}, nil, nil)
+	a := New(ads, t.TempDir()+"/pref.jsonl", t.TempDir()+"/hist.json", t.TempDir()+"/prompt_hist.jsonl", "session", "", config.Config{}, nil, nil, nil)
 	return *a
 }
 

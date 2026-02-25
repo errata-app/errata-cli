@@ -17,6 +17,7 @@ import (
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/prompthistory"
+	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -80,6 +81,13 @@ type App struct {
 	mcpDefs        []tools.ToolDef
 	mcpDispatchers map[string]tools.MCPDispatcher
 
+	// Recipe-derived settings (nil/empty = unrestricted)
+	toolAllowlist    []string // nil = all tools; from recipe ## Tools allowlist
+	bashPrefixes     []string // nil = unrestricted bash; from recipe ## Tools bash(...)
+	contextStrategy  string   // "auto_compact" | "manual" | "off"
+	sandboxFilesystem string  // "" | "project_only" | "read_only"
+	sandboxNetwork    string  // "" | "full" | "none"
+
 	mode    mode
 	verbose bool
 	width   int
@@ -124,7 +132,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID, toolStatePath string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher) *App {
+func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID, toolStatePath string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -148,7 +156,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		fmt.Fprintf(os.Stderr, "warning: could not load tool state: %v\n", err)
 	}
 
-	return &App{
+	app := &App{
 		adapters:              adapters,
 		prefPath:              prefPath,
 		histPath:              histPath,
@@ -167,6 +175,16 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		mcpDefs:               mcpDefs,
 		mcpDispatchers:        mcpDispatchers,
 	}
+	if rec != nil {
+		if rec.Tools != nil {
+			app.toolAllowlist = rec.Tools.Allowlist
+			app.bashPrefixes = rec.Tools.BashPrefixes
+		}
+		app.contextStrategy = rec.Context.Strategy
+		app.sandboxFilesystem = rec.Sandbox.Filesystem
+		app.sandboxNetwork = rec.Sandbox.Network
+	}
+	return app
 }
 
 // SetProgram wires up the tea.Program reference so goroutines can send messages.
@@ -504,8 +522,8 @@ func (a App) View() string {
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher) error {
-	app := New(adapters, prefPath, histPath, promptHistPath, sessionID, ".errata_tools", cfg, mcpDefs, mcpDispatchers)
+func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe) error {
+	app := New(adapters, prefPath, histPath, promptHistPath, sessionID, ".errata_tools", cfg, mcpDefs, mcpDispatchers, rec)
 
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	app.SetProgram(p)

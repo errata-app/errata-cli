@@ -14,10 +14,13 @@ import (
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
+	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/tools"
 	"github.com/suarezc/errata/internal/ui"
 	"github.com/suarezc/errata/internal/web"
 )
+
+var recipePath string
 
 func main() {
 	root := &cobra.Command{
@@ -25,6 +28,7 @@ func main() {
 		Short: "A/B testing tool for agentic AI models",
 		RunE:  runREPL,
 	}
+	root.PersistentFlags().StringVarP(&recipePath, "recipe", "r", "", "recipe file (default: auto-discover recipe.md)")
 
 	statsCmd := &cobra.Command{
 		Use:   "stats",
@@ -44,6 +48,17 @@ func main() {
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// loadRecipe discovers and parses the recipe for the current invocation.
+// Falls back to the built-in default on any error.
+func loadRecipe() *recipe.Recipe {
+	rec, err := recipe.Discover(recipePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load recipe: %v\n", err)
+		return recipe.Default()
+	}
+	return rec
 }
 
 // setupAdapters loads config, pricing, adapters, and MCP servers.
@@ -91,17 +106,21 @@ func setupAdapters(cfg config.Config) (
 }
 
 func runREPL(cmd *cobra.Command, args []string) error {
+	rec := loadRecipe()
 	cfg := config.Load()
+	rec.ApplyTo(&cfg)
 	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
 	defer cleanup()
 	if len(ads) == 0 {
 		return fmt.Errorf("no models available — set at least one API key in .env")
 	}
-	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers)
+	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec)
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	rec := loadRecipe()
 	cfg := config.Load()
+	rec.ApplyTo(&cfg)
 	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
 	defer cleanup()
 	if len(ads) == 0 {
@@ -113,12 +132,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	_ = sessionID // web server creates its own session ID per connection
 	addr := ":8080"
 	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
-	return web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg, mcpDefs, mcpDispatchers, warnings).Start(addr)
+	return web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg, mcpDefs, mcpDispatchers, warnings, rec).Start(addr)
 }
 
 func runStats(cmd *cobra.Command, args []string) error {
 	detail, _ := cmd.Flags().GetBool("detail")
+	rec := loadRecipe()
 	cfg := config.Load()
+	rec.ApplyTo(&cfg)
 
 	if detail {
 		return runStatsDetailed(cfg)
