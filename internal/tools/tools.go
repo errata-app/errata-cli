@@ -243,10 +243,36 @@ func ActiveDefinitions(disabled map[string]bool) []ToolDef {
 	return out
 }
 
+// FilterDefs returns the subset of defs not in disabled.
+// Used to apply the same disabled-tool filter to MCP or other dynamic tool sets.
+func FilterDefs(defs []ToolDef, disabled map[string]bool) []ToolDef {
+	if len(disabled) == 0 {
+		return defs
+	}
+	out := make([]ToolDef, 0, len(defs))
+	for _, d := range defs {
+		if !disabled[d.Name] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// systemPromptExtra holds optional user-supplied text appended after the
+// built-in tool guidance. Set once at startup via SetSystemPromptExtra.
+var systemPromptExtra string
+
+// SetSystemPromptExtra stores additional text to be appended to every adapter's
+// system prompt. Call once at startup (e.g. from ERRATA_SYSTEM_PROMPT).
+// Subsequent calls overwrite the previous value.
+func SetSystemPromptExtra(s string) { systemPromptExtra = s }
+
 // SystemPromptSuffix returns guidance text appended to each adapter's system prompt
 // so models understand how to use the available tool set effectively.
+// If SetSystemPromptExtra has been called, that text is appended after the
+// built-in guidance so project-specific context reaches every model.
 func SystemPromptSuffix() string {
-	return `
+	base := `
 Tool use guidance:
 - Use list_directory to explore the project structure before reading specific files.
 - Use search_files to find files by name pattern (e.g. search_files("**/*.go")).
@@ -258,6 +284,10 @@ Tool use guidance:
 - Use web_search for quick factual lookups (definitions, Wikipedia summaries). For specific URLs, use web_fetch directly.
 - write_file and edit_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
 `
+	if systemPromptExtra == "" {
+		return base
+	}
+	return base + "\n" + systemPromptExtra
 }
 
 // ExecuteRead reads a file relative to cwd.

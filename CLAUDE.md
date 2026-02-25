@@ -3,10 +3,9 @@
 ## Project Overview
 
 **Errata** is a tool that sends programming prompts to multiple AI models simultaneously,
-runs each as a full coding agent with six tools (`list_directory`, `search_files`, `search_code`,
-`read_file`, `bash`, `write_file`), shows live tool-event panels, lets the user select the best
-proposal, and applies the winner's file writes to disk. Every selection is logged for preference
-analysis over time.
+runs each as a full coding agent with nine built-in tools plus any dynamically-registered MCP
+tools, shows live tool-event panels, lets the user select the best proposal, and applies the
+winner's file writes to disk. Every selection is logged for preference analysis over time.
 
 Two user surfaces share the same core engine:
 - **TUI** (`./errata`) — bubbletea REPL for terminal use
@@ -56,8 +55,11 @@ errata/
 │   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens() — OpenRouter fetch + hardcoded fallback
 │   ├── runner/
 │   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories()
+│   ├── mcp/
+│   │   ├── client.go        # JSON-RPC 2.0 stdio client (Content-Length framing)
+│   │   └── manager.go       # MCP server subprocess lifecycle, tool discovery, dispatcher registry
 │   ├── tools/
-│   │   └── tools.go         # FileWrite, ToolDef, ExecuteRead(), ApplyWrites()
+│   │   └── tools.go         # FileWrite, ToolDef, ExecuteRead(), ApplyWrites(), FilterDefs(), SetSystemPromptExtra()
 │   ├── diff/
 │   │   └── diff.go          # Compute() → FileDiff (LCS; shared by TUI + web)
 │   ├── preferences/
@@ -112,8 +114,8 @@ Both the TUI and the web textarea accept slash commands.
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/compact` | Summarize conversation history to free up context window |
 | `/models` | Query each configured provider for all available models; shows per-model pricing ($X in / $Y out /1M tokens); for OpenAI and Gemini shows only chat-capable models with a "N of M, chat only" count; caps display at 10 per provider with "… and N more" notice |
-| `/tools` | Show current tool status (`on`/`off` for each tool) |
-| `/tools off <name...>` | Disable one or more tools for this session (e.g. `/tools off bash`) |
+| `/tools` | Show current tool status (`on`/`off` for each tool, including any active MCP tools) |
+| `/tools off <name...>` | Disable one or more tools for this session — works for both built-in and MCP tools |
 | `/tools on <name...>` | Re-enable specific tools |
 | `/tools reset` | Re-enable all tools |
 | `/stats` | Show preference win counts and per-model session cost |
@@ -143,15 +145,25 @@ Both surfaces derive their lists from this single source; web commands are serve
 
 1. User types a prompt (TUI REPL or web textarea)
 2. `runner.RunAll()` fans out to all active adapters concurrently via goroutines
-3. Each adapter runs a multi-turn agentic loop using six tools:
+3. Each adapter runs a multi-turn agentic loop using the active tool set:
+
+   **Built-in tools (always available):**
    - `list_directory(path, depth)` — directory tree (read-only, path-traversal guarded)
    - `search_files(pattern, base_path)` — glob file search with `**` support (read-only)
    - `search_code(pattern, path, file_glob)` — regex content search via `grep -rn` (read-only)
-   - `read_file(path)` — file contents (read-only, path-traversal guarded)
+   - `read_file(path, offset, limit)` — file contents with pagination (read-only, path-traversal guarded)
+   - `edit_file(path, old_string, new_string)` — exact-string-replace; **intercepted** like write_file
    - `bash(command, description)` — shell execution with 2-minute timeout
    - `write_file(path, content)` — **intercepted**: stored as proposals, not written to disk
+   - `web_fetch(url)` — fetch and clean a public URL (HTML stripped, 50 KB cap)
+   - `web_search(query)` — DuckDuckGo instant answers (knowledge panels; no API key required)
+
+   **MCP tools (dynamically registered at startup):**
+   - Any tool exposed by servers in `ERRATA_MCP_SERVERS` — injected into the same dispatch table
+   - Models see and can call MCP tools identically to built-in tools
    - Loop exits when the model stops calling tools
-4. Active tool set is configurable per-session with `/tools off <name>` / `/tools on <name>` / `/tools reset`
+
+4. Active tool set is configurable per-session with `/tools off <name>` / `/tools on <name>` / `/tools reset` — works for both built-in and MCP tools
 5. Live tool-event panels render while goroutines run
 6. If no model proposed any file writes, responses are shown as text and the run ends
 7. Otherwise a compact diff view shows each model's proposed changes
@@ -281,6 +293,7 @@ per-connection state (active adapter filter, last run results, cancel function).
 | `GET` | `/api/models` | Active model IDs JSON |
 | `GET` | `/api/commands` | Web-applicable slash commands JSON (`commands.Web()`); fetched by the browser at page load to populate the slash-completion dropdown |
 | `GET` | `/api/available-models` | Active models + all models from each configured provider (concurrent fetch, 15 s timeout); each provider entry includes `name`, `count`, `total_count` (pre-filter API count), `truncated` (models omitted past cap), and `models[]` — each entry has `id`, `input_pmt`, `output_pmt` (per-million-token USD, omitted when unknown); display capped at `ModelListCap=10` per provider |
+| `GET` | `/api/tools` | All available tool definitions as JSON — built-in and MCP tools; each entry has `name`, `description`, `source` (`"builtin"` or `"mcp"`); useful for building toggle UIs or programmatic introspection |
 
 ### WebSocket message protocol
 
@@ -337,6 +350,7 @@ the display history (localStorage) and the conversation history (disk).
 ```
 tools          ← stdlib only
 pricing        ← stdlib only
+mcp            ← tools (for ToolDef, MCPDispatcher)
 models         ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
 config         ← stdlib only
 commands       ← stdlib only
@@ -349,7 +363,7 @@ logging        ← models (ModelAdapter, ModelResponse), stdlib
 preferences    ← models (for ModelResponse latency/ID), encoding/json, os
 ui             ← models, pricing, tools, runner, diff, history, adapters, config, commands, prompthistory, bubbletea, lipgloss
 web            ← models, runner, tools, diff, preferences, logging, history, adapters, config, commands, coder/websocket
-cmd/errata     ← config, adapters, pricing, logging, ui, web
+cmd/errata     ← config, adapters, pricing, logging, ui, web, mcp, tools
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -401,13 +415,19 @@ Tokens are accumulated across all turns (each turn re-sends context, so input gr
 Writes are **never** executed inside the loop — they accumulate in `proposed` and are
 returned in `ModelResponse.ProposedWrites`.
 
-**Tool dispatch is centralised:** All adapters call `adapters.DispatchTool(name, args, onEvent, &proposed)`
-from `internal/adapters/common.go`. Adding a new tool requires only adding a `ToolDef` to
+**Tool dispatch is centralised:** All adapters call `adapters.DispatchTool(ctx, name, args, onEvent, &proposed)`
+from `internal/adapters/common.go`. `DispatchTool` first checks MCP dispatchers in context, then
+falls through to the built-in switch. Adding a built-in tool requires only adding a `ToolDef` to
 `tools.Definitions` in `internal/tools/tools.go` and a new case in `DispatchTool`.
 
 **Tool availability is context-scoped:** The active tool set (after `/tools off` filtering) is stored
 in the request `context.Context` via `tools.WithActiveTools`. Each adapter reads it with
 `tools.ActiveToolsFromContext(ctx)` to build the tool list passed to the API.
+
+**MCP dispatchers are context-scoped:** MCP tool dispatch functions are stored in context via
+`tools.WithMCPDispatchers`. `DispatchTool` reads them and calls the matching dispatcher before
+any built-in case, so MCP tools can shadow or extend the built-in set. Both TUI (`launchRun`)
+and web (`wsHandleRun`) build the combined active-tool context before passing it to `runner.RunAll`.
 
 **`ModelID` is enforced by the runner:** `runner.RunAll` overwrites `resp.ModelID = a.ID()`
 after every `RunAgent` call. Adapters do not need to set it. Provider SDKs return resolved
@@ -509,6 +529,21 @@ LITELLM_API_KEY=optional
 
 # Optional: pin specific models (comma-separated)
 ERRATA_ACTIVE_MODELS=claude-opus-4-6,anthropic/claude-sonnet-4-6
+
+# MCP tool servers — each server exposes additional tools to all models
+# Format: "name:command arg1 arg2,name2:command2 arg1"
+# The subprocess inherits the full process environment (API keys, etc.)
+ERRATA_MCP_SERVERS=exa:npx @exa-ai/exa-mcp-server
+
+# Custom system prompt appended to the built-in tool guidance (all adapters)
+# Use for project-specific context, conventions, or domain knowledge
+ERRATA_SYSTEM_PROMPT=You are working on a Go codebase. Always run go vet and go test after making changes.
+
+# Optional: override how many history turns are kept per model (default 20)
+ERRATA_MAX_HISTORY_TURNS=10
+
+# Optional: enable per-run JSONL debug logging
+ERRATA_DEBUG_LOG=data/log.jsonl
 ```
 
 Default models (auto-detected from available API keys; native providers only):
@@ -545,6 +580,132 @@ The prefix is stripped before the API call; it remains in the display name.
 ```
 
 Append-only. Corrupt lines are skipped with `log.Printf` (never crash on bad data).
+
+---
+
+## MCP Tool Servers
+
+Errata supports the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) for
+extending the tool set at runtime. Any MCP server that speaks stdio transport and exposes
+the `tools` capability can be connected via `ERRATA_MCP_SERVERS`.
+
+### Configuration format
+
+```
+ERRATA_MCP_SERVERS=name1:command arg1 arg2,name2:command
+```
+
+- Comma-separated list of `name:command` pairs
+- `name` is used in log messages only
+- `command` is passed to `exec.Command` (the subprocess inherits the full process environment)
+- API keys for the MCP server (e.g. `EXA_API_KEY`) should be set in `.env` alongside Errata's own keys
+
+### Startup behavior
+
+`mcp.StartServers` is called in `setupAdapters` (non-fatal):
+- Each server subprocess is launched, MCP handshake completed, and `tools/list` called
+- Tool definitions are merged into the active tool set before the first run
+- A server that fails to start or handshake is logged as a warning and skipped
+- All subprocesses are killed on clean exit via the `cleanup` deferred function
+
+### MCP tool dispatch flow
+
+1. `launchRun` / `wsHandleRun` builds `activeDefs` by combining `tools.ActiveDefinitions(disabled)` + `tools.FilterDefs(mcpDefs, disabled)` — both respect `/tools off`
+2. `tools.WithActiveTools(ctx, activeDefs)` stores the combined list
+3. `tools.WithMCPDispatchers(ctx, dispatchers)` stores the call functions
+4. Each adapter reads `ActiveToolsFromContext(ctx)` to build the tool list sent to the API
+5. When the model calls an MCP tool, `DispatchTool` finds it in `MCPDispatchersFromContext(ctx)` and calls the dispatcher, which calls `conn.CallTool` on the subprocess
+
+### Known MCP servers
+
+| Provider | Package | Required env var | Example tools |
+|----------|---------|-----------------|---------------|
+| [Exa](https://exa.ai) | `npx @exa-ai/exa-mcp-server` | `EXA_API_KEY` | `search`, `find_similar`, `get_contents` |
+| [Brave Search](https://brave.com/search/api/) | `npx @modelcontextprotocol/server-brave-search` | `BRAVE_API_KEY` | `brave_web_search`, `brave_local_search` |
+| [Tavily](https://tavily.com) | `npx @tavily-mcp/server` | `TAVILY_API_KEY` | `tavily_search` |
+| Filesystem | `npx @modelcontextprotocol/server-filesystem /path` | — | `read_file`, `list_directory`, `write_file` |
+| GitHub | `npx @modelcontextprotocol/server-github` | `GITHUB_TOKEN` | `create_issue`, `list_prs`, `get_file_contents` |
+
+### Tool management with MCP
+
+MCP tools appear alongside built-in tools in `/tools` output (labeled `(mcp)`):
+
+```
+  [on ] read_file
+  [on ] bash
+  [on ] search        (mcp)   ← Exa search tool
+  [off] find_similar  (mcp)   ← disabled for this session
+```
+
+`/tools off search` and `/tools on search` work identically for MCP tool names.
+
+### Schema translation
+
+MCP `inputSchema` (JSON Schema) is translated to Errata's `ToolDef` properties on connection:
+- `properties` → `map[string]ToolParam{Type, Description}`
+- `required` → `[]string`
+- Only `string` and `integer` parameter types are used (all others become `string`)
+- Nested schemas are flattened — only top-level properties are exposed to the model
+
+---
+
+## Deployment Configuration
+
+Errata is designed to be used as a development harness that matches your real-world agentic
+setup. Key configuration knobs for production/team deployments:
+
+### Custom system prompt (`ERRATA_SYSTEM_PROMPT`)
+
+Injected after the built-in tool guidance in every adapter's system prompt:
+
+```bash
+# Describe the project to every model on every prompt
+ERRATA_SYSTEM_PROMPT="You are working on the Acme platform, a Go monorepo at /opt/acme.\
+ The main service is in cmd/acme/. Always run \`go test ./...\` before proposing writes.\
+ The team uses conventional commits (feat:, fix:, chore:)."
+```
+
+Implementation: `tools.SetSystemPromptExtra(cfg.SystemPromptExtra)` is called once at
+startup in `setupAdapters`. `SystemPromptSuffix()` appends the extra text to its return
+value, which all five adapters call when constructing the system message.
+
+### Restricting the tool set
+
+Disable tools globally for a deployment by starting with `/tools off <name>` as the
+first command, or by building a wrapper script:
+
+```bash
+# Kiosk mode: code search only, no shell or web access
+./errata <<< '/tools off bash web_fetch web_search'
+```
+
+For persistent per-project defaults, the `/tools off` state is saved to `.errata_tools`
+(cwd-local) so it survives session restarts.
+
+### Pointing at a self-hosted model proxy
+
+```bash
+# LiteLLM proxy exposing any model — Ollama, local llms, internal endpoints
+LITELLM_BASE_URL=http://10.0.0.5:4000/v1
+ERRATA_ACTIVE_MODELS=litellm/llama-3-70b,litellm/codestral
+```
+
+### Restricting to specific models
+
+```bash
+# Only compare these two models; ignore any other configured keys
+ERRATA_ACTIVE_MODELS=claude-opus-4-6,gpt-4o
+```
+
+### Running as a web service
+
+```bash
+./errata serve --port 8080
+```
+
+The web server uses WebSocket per browser tab. All tabs share the same server-side
+conversation history (`data/history.json`). The `/api/tools` endpoint lets custom UIs
+introspect the active tool set dynamically.
 
 ---
 

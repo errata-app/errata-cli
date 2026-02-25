@@ -40,10 +40,16 @@ type Config struct {
 	// Empty (default) disables debug logging entirely.
 	DebugLogPath string
 
-	// MCPServers is the list of MCP server configs parsed from ERRATA_MCP_SERVERS.
+	// MCPServers is the raw value of ERRATA_MCP_SERVERS.
 	// Format: "name:command arg1 arg2,name2:command2"
 	// Empty disables MCP entirely.
 	MCPServers string
+
+	// SystemPromptExtra is appended after the built-in tool guidance in every
+	// adapter's system prompt. Use for project-specific context, coding conventions,
+	// or domain knowledge that should influence all models.
+	// Loaded from ERRATA_SYSTEM_PROMPT.
+	SystemPromptExtra string
 }
 
 // Load reads .env (if present) then environment variables and returns a Config.
@@ -63,6 +69,7 @@ func Load() Config {
 
 	cfg.DebugLogPath = os.Getenv("ERRATA_DEBUG_LOG")
 	cfg.MCPServers = os.Getenv("ERRATA_MCP_SERVERS")
+	cfg.SystemPromptExtra = os.Getenv("ERRATA_SYSTEM_PROMPT")
 	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	cfg.GoogleAPIKey = os.Getenv("GOOGLE_API_KEY")

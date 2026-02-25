@@ -75,6 +75,7 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/commands", s.handleCommands)
 	mux.HandleFunc("GET /api/available-models", s.handleAvailableModels)
+	mux.HandleFunc("GET /api/tools", s.handleToolsList)
 
 	return http.ListenAndServe(addr, mux)
 }

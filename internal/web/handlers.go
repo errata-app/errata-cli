@@ -197,7 +197,7 @@ func (wc *wsConn) wsHandleRun(msg wsClientMsg) {
 	}
 
 	activeDefs := tools.ActiveDefinitions(wc.disabledTools)
-	activeDefs = append(activeDefs, wc.s.mcpDefs...)
+	activeDefs = append(activeDefs, tools.FilterDefs(wc.s.mcpDefs, wc.disabledTools)...)
 	mcpDispatchers := wc.s.mcpDispatchers
 
 	go func(prompt string, runCtx context.Context, cancel context.CancelFunc, verbose bool, ads []models.ModelAdapter, hists map[string][]models.ConversationTurn) {
@@ -374,8 +374,9 @@ func (wc *wsConn) wsHandleSetTools(msg wsClientMsg) {
 			wc.disabledTools[name] = true
 		}
 	}
-	// Reply with the names of currently active tools so the client can sync state.
+	// Reply with the names of currently active tools (built-in + MCP) so the client can sync state.
 	active := tools.ActiveDefinitions(wc.disabledTools)
+	active = append(active, tools.FilterDefs(wc.s.mcpDefs, wc.disabledTools)...)
 	names := make([]string, len(active))
 	for i, d := range active {
 		names[i] = d.Name
@@ -435,6 +436,26 @@ func (wc *wsConn) wsHandleClearHistory() {
 }
 
 // ─── REST handlers ────────────────────────────────────────────────────────────
+
+// handleToolsList returns all available tool definitions (built-in + MCP) as JSON.
+// Each entry includes the tool name, description, and source ("builtin" or "mcp").
+// Clients use this to display the full tool list and build toggle UIs.
+func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
+	type toolEntry struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Source      string `json:"source"` // "builtin" or "mcp"
+	}
+	var list []toolEntry
+	for _, d := range tools.Definitions {
+		list = append(list, toolEntry{Name: d.Name, Description: d.Description, Source: "builtin"})
+	}
+	for _, d := range s.mcpDefs {
+		list = append(list, toolEntry{Name: d.Name, Description: d.Description, Source: "mcp"})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
+}
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	tally := preferences.Summarize(s.prefPath)

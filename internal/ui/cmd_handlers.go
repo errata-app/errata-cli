@@ -211,7 +211,7 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
 	prog := a.prog
 	histories := a.conversationHistories // read-only in goroutine; written only by main loop
 	activeDefs := tools.ActiveDefinitions(a.disabledTools)
-	activeDefs = append(activeDefs, a.mcpDefs...)
+	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
 	mcpDispatchers := a.mcpDispatchers
 
 	return a, func() tea.Msg {
@@ -266,6 +266,13 @@ func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) {
 			}
 			lines = append(lines, fmt.Sprintf("  [%s] %s", state, d.Name))
 		}
+		for _, d := range a.mcpDefs {
+			state := "on "
+			if a.disabledTools[d.Name] {
+				state = "off"
+			}
+			lines = append(lines, fmt.Sprintf("  [%s] %s  (mcp)", state, d.Name))
+		}
 		return a.withMessage("Tools:\n" + strings.Join(lines, "\n")), nil
 	}
 
@@ -276,9 +283,12 @@ func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) {
 	}
 
 	action, names := parts[0], parts[1:]
-	// Validate all names first.
-	validNames := make(map[string]bool, len(tools.Definitions))
+	// Validate all names against both built-in and MCP tools.
+	validNames := make(map[string]bool, len(tools.Definitions)+len(a.mcpDefs))
 	for _, d := range tools.Definitions {
+		validNames[d.Name] = true
+	}
+	for _, d := range a.mcpDefs {
 		validNames[d.Name] = true
 	}
 	for _, n := range names {
@@ -286,6 +296,9 @@ func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) {
 			var all []string
 			for _, d := range tools.Definitions {
 				all = append(all, d.Name)
+			}
+			for _, d := range a.mcpDefs {
+				all = append(all, d.Name+" (mcp)")
 			}
 			return a.withMessage(fmt.Sprintf("Unknown tool %q. Available: %s", n, strings.Join(all, ", "))), nil
 		}

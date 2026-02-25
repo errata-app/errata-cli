@@ -62,6 +62,11 @@ func setupAdapters(cfg config.Config) (
 	sessionID = logging.RandomHex(16)
 	cleanup = func() {}
 
+	// Apply custom system prompt if configured.
+	if cfg.SystemPromptExtra != "" {
+		tools.SetSystemPromptExtra(cfg.SystemPromptExtra)
+	}
+
 	if cfg.DebugLogPath != "" {
 		logger, err := logging.NewLogger(cfg.DebugLogPath)
 		if err != nil {
