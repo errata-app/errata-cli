@@ -2,6 +2,7 @@ package pricing
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -580,6 +581,63 @@ func TestFetchOpenRouterPricing_ParsesResponse(t *testing.T) {
 	assert.Len(t, parsed.Data, 3)
 	assert.Equal(t, "test/model-a", parsed.Data[0].ID)
 	_ = origURL // acknowledge we can't override the const
+}
+
+// ─── LoadPricing: stale cache path ─────────────────────────────────────────────
+
+// failTransport is an http.RoundTripper that always returns an error,
+// used to force fetchOpenRouterPricing to fail without any network access.
+type failTransport struct{}
+
+func (failTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("network disabled for test")
+}
+
+func TestLoadPricing_StaleCache_UsedWhenFetchFails(t *testing.T) {
+	resetDynamicPricing(t)
+	defer resetDynamicPricing(t)
+
+	// Block all outbound HTTP so the OpenRouter fetch fails.
+	orig := http.DefaultTransport
+	http.DefaultTransport = failTransport{}
+	defer func() { http.DefaultTransport = orig }()
+
+	dir := t.TempDir()
+	cacheFile := filepath.Join(dir, "cache.json")
+
+	// Write a stale cache (older than 24 hours).
+	staleTime := time.Now().Add(-48 * time.Hour)
+	c := pricingCacheFile{
+		FetchedAt: staleTime,
+		Models: map[string]modelPricing{
+			"stale/test-model": {InputPMT: 42.0, OutputPMT: 84.0},
+		},
+	}
+	data, err := json.Marshal(c)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cacheFile, data, 0o644))
+
+	// LoadPricing: skip fresh cache → try fetch (fails) → use stale cache.
+	LoadPricing(cacheFile)
+
+	cost := CostUSD("stale/test-model", 1_000_000, 0, 0, 1_000_000)
+	assert.InDelta(t, 126.0, cost, 0.001, "stale cache should provide pricing") // $42 + $84
+}
+
+func TestLoadPricing_NoCache_NoNetwork_FallsBackToHardcoded(t *testing.T) {
+	resetDynamicPricing(t)
+	defer resetDynamicPricing(t)
+
+	orig := http.DefaultTransport
+	http.DefaultTransport = failTransport{}
+	defer func() { http.DefaultTransport = orig }()
+
+	// No cache file at all.
+	LoadPricing(filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	// Should fall back to hardcoded table.
+	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0, 0, 0)
+	assert.Greater(t, cost, 0.0, "hardcoded fallback must provide non-zero price")
 }
 
 // ─── resolvePricing: bare ID dot normalization ──────────────────────────────
