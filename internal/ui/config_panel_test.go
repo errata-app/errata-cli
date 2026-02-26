@@ -622,3 +622,32 @@ func TestSummarizeContextSummarization_ShowsDefault(t *testing.T) {
 	s := summarizeContextSummarization(rec)
 	assert.Contains(t, s, "built-in prompt")
 }
+
+// ── section descriptions tests ───────────────────────────────────────────────
+
+func TestSectionDescriptions_AllSectionsHaveDescriptions(t *testing.T) {
+	rec := recipe.Default()
+	sections := buildConfigSections(rec, nil, nil)
+	for _, sec := range sections {
+		assert.NotEmpty(t, sec.Desc, "section %q missing Desc", sec.Name)
+		assert.NotEmpty(t, sec.DetailDesc, "section %q missing DetailDesc", sec.Name)
+	}
+}
+
+func TestSectionDescriptions_NavViewShowsDescForSelected(t *testing.T) {
+	rec := recipe.Default()
+	sections := buildConfigSections(rec, nil, nil)
+	// Render with first section selected.
+	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "")
+	// The selected section (models) should show its brief description.
+	assert.Contains(t, out, sectionDescriptions["models"].Brief)
+}
+
+func TestSectionDescriptions_ExpandedViewShowsDetail(t *testing.T) {
+	rec := recipe.Default()
+	sections := buildConfigSections(rec, nil, nil)
+	fields := buildScalarFields("constraints", rec)
+	// Expand constraints (index 5).
+	out := renderConfigOverlay(sections, 5, 5, false, 80, nil, 0, fields, 0, "")
+	assert.Contains(t, out, sectionDescriptions["constraints"].Detail)
+}
