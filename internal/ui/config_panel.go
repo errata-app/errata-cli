@@ -137,7 +137,7 @@ func summarizeParameters(rec *recipe.Recipe) string {
 		parts = append(parts, fmt.Sprintf("max_tokens: %d", *rec.ModelParams.MaxTokens))
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: seed=none, temperature/max_tokens=provider)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -151,7 +151,7 @@ func summarizeConstraints(rec *recipe.Recipe) string {
 		parts = append(parts, fmt.Sprintf("max_steps: %d", rec.Constraints.MaxSteps))
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: timeout=5m, max_steps=unlimited)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -168,7 +168,7 @@ func summarizeContext(rec *recipe.Recipe) string {
 		parts = append(parts, fmt.Sprintf("threshold: %.2f", rec.Context.CompactThreshold))
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: auto_compact, 20 turns, threshold=0.80)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -185,7 +185,7 @@ func summarizeSubAgent(rec *recipe.Recipe) string {
 		parts = append(parts, "tools: "+rec.SubAgent.Tools)
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: model=parent, depth=1, tools=all)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -199,7 +199,7 @@ func summarizeSandbox(rec *recipe.Recipe) string {
 		parts = append(parts, "network: "+rec.Sandbox.Network)
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: filesystem=unrestricted, network=full)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -239,7 +239,7 @@ func summarizeOutputProcessing(rec *recipe.Recipe) string {
 
 func summarizeContextSummarization(rec *recipe.Recipe) string {
 	if rec.SummarizationPrompt == "" {
-		return "(default)"
+		return "(default: built-in prompt)"
 	}
 	preview := rec.SummarizationPrompt
 	if runes := []rune(preview); len(runes) > 50 {
@@ -587,6 +587,25 @@ func setConfigValue(rec *recipe.Recipe, path, value string) error {
 	return entry.Set(rec, value)
 }
 
+// configPathDefaults maps config dot-paths to their default value descriptions.
+// Used to show "default: <value>" instead of bare "(not set)" in the overlay.
+var configPathDefaults = map[string]string{
+	"constraints.timeout":         "5m",
+	"constraints.max_steps":       "unlimited",
+	"context.strategy":            "auto_compact",
+	"context.max_history_turns":   "20",
+	"context.compact_threshold":   "0.80",
+	"sub_agent.model":             "same as parent",
+	"sub_agent.max_depth":         "1",
+	"sub_agent.tools":             "all",
+	"sandbox.filesystem":          "unrestricted",
+	"sandbox.network":             "full",
+	"parameters.seed":             "none",
+	"parameters.temperature":      "provider default",
+	"parameters.max_tokens":       "provider default",
+	"context_summarization.prompt": "built-in prompt",
+}
+
 // configPathCandidates returns all valid config dot-paths for tab-completion.
 func configPathCandidates() []string {
 	out := make([]string, 0, len(configPaths))
@@ -727,7 +746,11 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 				} else {
 					val := f.Value
 					if val == "" {
-						val = "(not set)"
+						if dflt, ok := configPathDefaults[f.Path]; ok {
+							val = "(default: " + dflt + ")"
+						} else {
+							val = "(not set)"
+						}
 					}
 					sb.WriteString(dimStyle.Render(fmt.Sprintf("  %s", cursor)))
 					sb.WriteString(nameStyle.Render(f.Key + ":"))

@@ -94,7 +94,9 @@ func TestSummarizeConstraints_WithValues(t *testing.T) {
 
 func TestSummarizeConstraints_Defaults(t *testing.T) {
 	rec := &recipe.Recipe{}
-	assert.Equal(t, "(defaults)", summarizeConstraints(rec))
+	s := summarizeConstraints(rec)
+	assert.Contains(t, s, "timeout=5m")
+	assert.Contains(t, s, "max_steps=unlimited")
 }
 
 func TestSummarizeSandbox_WithValues(t *testing.T) {
@@ -148,7 +150,9 @@ func TestSummarizeParameters_AllSet(t *testing.T) {
 
 func TestSummarizeParameters_Defaults(t *testing.T) {
 	rec := &recipe.Recipe{}
-	assert.Equal(t, "(defaults)", summarizeParameters(rec))
+	s := summarizeParameters(rec)
+	assert.Contains(t, s, "seed=none")
+	assert.Contains(t, s, "provider")
 }
 
 func TestSummarizeContext_AllSet(t *testing.T) {
@@ -167,7 +171,10 @@ func TestSummarizeContext_AllSet(t *testing.T) {
 
 func TestSummarizeContext_Defaults(t *testing.T) {
 	rec := &recipe.Recipe{}
-	assert.Equal(t, "(defaults)", summarizeContext(rec))
+	s := summarizeContext(rec)
+	assert.Contains(t, s, "auto_compact")
+	assert.Contains(t, s, "20 turns")
+	assert.Contains(t, s, "threshold=0.80")
 }
 
 func TestSummarizeSubAgent_WithFields(t *testing.T) {
@@ -186,7 +193,10 @@ func TestSummarizeSubAgent_WithFields(t *testing.T) {
 
 func TestSummarizeSubAgent_Defaults(t *testing.T) {
 	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
-	assert.Equal(t, "(defaults)", summarizeSubAgent(rec))
+	s := summarizeSubAgent(rec)
+	assert.Contains(t, s, "model=parent")
+	assert.Contains(t, s, "depth=1")
+	assert.Contains(t, s, "tools=all")
 }
 
 func TestSummarizeMCPServers_None(t *testing.T) {
@@ -574,4 +584,41 @@ func TestModifiedBadge_HiddenWhenClean(t *testing.T) {
 	a.recipeModified = false
 	view := a.View()
 	assert.NotContains(t, view, "[modified]")
+}
+
+// ── configPathDefaults tests ─────────────────────────────────────────────────
+
+func TestConfigPathDefaults_AllPathsHaveDefaults(t *testing.T) {
+	// Every config path should have a default description.
+	for path := range configPaths {
+		_, ok := configPathDefaults[path]
+		assert.True(t, ok, "missing default for config path %q", path)
+	}
+}
+
+func TestConfigPathDefaults_RenderInScalarView(t *testing.T) {
+	rec := &recipe.Recipe{}
+	fields := buildScalarFields("constraints", rec)
+	out := renderConfigOverlay(
+		[]configSection{{Name: "constraints", Kind: "scalar"}},
+		0, 0, false, 80,
+		nil, 0,
+		fields, 0, "",
+	)
+	// Unset fields should show their default values.
+	assert.Contains(t, out, "(default: 5m)")
+	assert.Contains(t, out, "(default: unlimited)")
+}
+
+func TestSummarizeSandbox_ShowsDefaults(t *testing.T) {
+	rec := &recipe.Recipe{}
+	s := summarizeSandbox(rec)
+	assert.Contains(t, s, "filesystem=unrestricted")
+	assert.Contains(t, s, "network=full")
+}
+
+func TestSummarizeContextSummarization_ShowsDefault(t *testing.T) {
+	rec := &recipe.Recipe{}
+	s := summarizeContextSummarization(rec)
+	assert.Contains(t, s, "built-in prompt")
 }
