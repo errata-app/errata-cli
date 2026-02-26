@@ -18,8 +18,27 @@ var (
 	removeHighlight = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Background(lipgloss.Color("#AF0000"))
 )
 
+// wrapLine breaks a long line into multiple lines at maxW runes each.
+func wrapLine(s string, maxW int) []string {
+	runes := []rune(s)
+	if len(runes) <= maxW {
+		return []string{s}
+	}
+	var out []string
+	for len(runes) > maxW {
+		out = append(out, string(runes[:maxW]))
+		runes = runes[maxW:]
+	}
+	out = append(out, string(runes))
+	return out
+}
+
 // RenderDiffs returns a multi-line string showing diffs for all responses, including errors.
-func RenderDiffs(responses []models.ModelResponse) string {
+func RenderDiffs(responses []models.ModelResponse, width ...int) string {
+	termW := 80
+	if len(width) > 0 && width[0] > 0 {
+		termW = width[0]
+	}
 	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000"))
 	var sb strings.Builder
 	for i, resp := range responses {
@@ -46,9 +65,15 @@ func RenderDiffs(responses []models.ModelResponse) string {
 
 		if len(resp.ProposedWrites) == 0 {
 			if resp.Text != "" {
+				maxW := termW - 2 // 2 for "  " indent
+				if maxW < 10 {
+					maxW = 10
+				}
 				for _, line := range strings.Split(resp.Text, "\n") {
-					sb.WriteString(contextStyle.Render("  " + line))
-					sb.WriteByte('\n')
+					for _, wl := range wrapLine(line, maxW) {
+						sb.WriteString(contextStyle.Render("  " + wl))
+						sb.WriteByte('\n')
+					}
 				}
 			}
 			sb.WriteByte('\n')
@@ -62,10 +87,16 @@ func RenderDiffs(responses []models.ModelResponse) string {
 		if resp.Text != "" {
 			sb.WriteString(contextStyle.Render("  ── reasoning ──"))
 			sb.WriteByte('\n')
+			maxW := termW - 2
+			if maxW < 10 {
+				maxW = 10
+			}
 			for _, line := range strings.Split(resp.Text, "\n") {
 				if line != "" {
-					sb.WriteString(contextStyle.Render("  " + line))
-					sb.WriteByte('\n')
+					for _, wl := range wrapLine(line, maxW) {
+						sb.WriteString(contextStyle.Render("  " + wl))
+						sb.WriteByte('\n')
+					}
 				}
 			}
 		}
