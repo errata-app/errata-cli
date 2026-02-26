@@ -185,6 +185,15 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict subsequent runs to specific model(s) |
 | `/model` | Reset model filter — all configured models run again |
+| `/config` | View/edit configuration interactively; `/config <section>` jumps to a section |
+| `/set <path> [value]` | Get or set a config value (e.g. `/set constraints.timeout 10m`) |
+| `/seed <n>` | Set seed for reproducibility; bare `/seed` clears |
+| `/subset <id...>` | Target specific model(s); bare `/subset` shows current |
+| `/all` | Reset to all models |
+| `/remind [name]` | Fire a named reminder; bare `/remind` lists available |
+| `/export recipe [path]` | Export the session recipe to Markdown (default: `recipe_export.md`) |
+| `/export output [path]` | Export the latest run's output report |
+| `/import recipe <path>` | Import a recipe file, replacing the session config |
 | `/resume` | Resume an interrupted run — re-runs only interrupted models |
 | `/exit` or `/quit` | Exit |
 | `Ctrl-D` | Exit |
@@ -232,6 +241,48 @@ ERRATA_ACTIVE_MODELS=litellm/claude-sonnet-4-6,litellm/gpt-4o
 
 # Mix native and OpenRouter
 ERRATA_ACTIVE_MODELS=claude-sonnet-4-6,anthropic/claude-opus-4-6
+```
+
+---
+
+## Interactive configuration (`/config`)
+
+The `/config` command opens a full-screen overlay for browsing and editing the session
+recipe. Navigate sections with arrow keys, expand with Enter, and collapse with Escape.
+
+Each section shows a brief description and its current summary. Scalar fields (like
+`constraints.timeout` or `context.max_history_turns`) display their default values when
+no override is set. Text sections (system prompt, context summarization prompt) support
+inline editing — press Enter to open the editor, Ctrl+S to save, Escape to cancel.
+
+Jump directly to a section: `/config constraints`, `/config system-prompt`, etc.
+
+Changes made in `/config` are session-local. Use `/config reset` to revert to recipe
+defaults, or `/export recipe` to save your modifications.
+
+---
+
+## Recipe export and import
+
+Export the current session recipe (including any `/config` or `/set` modifications) to
+a Markdown file:
+
+```
+/export recipe                    # writes recipe_export.md in cwd
+/export recipe ~/my-recipe.md     # custom path
+```
+
+Import a recipe file, replacing the current session configuration:
+
+```
+/import recipe path/to/recipe.md
+```
+
+Export the latest run's output report:
+
+```
+/export output                    # writes to data/outputs/
+/export output ~/reports/         # custom directory
 ```
 
 ---
@@ -584,7 +635,7 @@ errata/
 │   ├── prompthistory/
 │   │   └── prompthistory.go     # prompt history persistence (Up-arrow / Ctrl-R)
 │   ├── recipe/
-│   │   └── recipe.go            # Recipe struct, Discover(), Parse(), Default(), ApplyTo()
+│   │   └── recipe.go            # Recipe struct, Discover(), Parse(), Default(), ApplyTo(), MarshalMarkdown()
 │   ├── reminders/
 │   │   └── reminders.go         # trigger-based system reminders mid-conversation
 │   ├── runner/
@@ -599,9 +650,9 @@ errata/
 │   │   └── tools.go             # ToolDef, Definitions, Execute* functions, MCP helpers
 │   ├── ui/
 │   │   ├── app.go               # bubbletea program, mode state machine
-│   │   ├── cmd_handlers.go      # slash command dispatch
-│   │   ├── complete.go          # tab completion for /commands
-│   │   ├── config_panel.go      # recipe configuration panel (interactive editing)
+│   │   ├── cmd_handlers.go      # slash command dispatch + export/import handlers
+│   │   ├── complete.go          # tab completion and hint rendering (capped at 8 lines)
+│   │   ├── config_panel.go      # /config overlay: sections, scalar/list/text editing
 │   │   ├── diff.go              # diff + selection menu rendering
 │   │   ├── input.go             # textarea input handling, prompt history
 │   │   ├── mention.go           # @file mention expansion

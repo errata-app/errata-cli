@@ -76,6 +76,9 @@ errata/
 │   │   └── prompthistory.go # Load(), Append() — prompt history JSONL persistence
 │   ├── ui/
 │   │   ├── app.go           # bubbletea program, mode state machine
+│   │   ├── cmd_handlers.go  # slash command dispatch and handlers
+│   │   ├── config_panel.go  # /config overlay: sections, scalar/list/text editing
+│   │   ├── complete.go      # tab completion and hint rendering (capped at 8 lines)
 │   │   ├── panels.go        # live agent panel rendering + fmtTokens()
 │   │   └── diff.go          # diff + selection menu rendering
 │   └── web/
@@ -113,6 +116,7 @@ Both the TUI and the web textarea accept slash commands.
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
+| `/clear` | Clear display history and conversation memory |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/compact` | Summarize conversation history to free up context window |
 | `/models` | Query each configured provider for all available models; shows per-model pricing ($X in / $Y out /1M tokens); for OpenAI and Gemini shows only chat-capable models with a "N of M, chat only" count; caps display at 10 per provider with "… and N more" notice |
@@ -124,6 +128,15 @@ Both the TUI and the web textarea accept slash commands.
 | `/totalcost` | Show total inference cost accumulated this session |
 | `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
 | `/model` | Reset model filter back to all configured models |
+| `/config` | View/edit configuration; `/config <section>` jumps to section; inline text editing with Ctrl+S to save |
+| `/set <path> [value]` | Get or set a config path (e.g. `/set constraints.timeout 10m`); bare path queries current value |
+| `/seed <n>` | Set seed for reproducibility; bare `/seed` clears |
+| `/subset <id...>` | Target specific model(s); bare `/subset` shows current |
+| `/all` | Reset to all models |
+| `/remind [name]` | Fire a named reminder; bare `/remind` lists available |
+| `/export recipe [path]` | Export the current session recipe to Markdown (default: `recipe_export.md`) |
+| `/export output [path]` | Export the latest run's output report (default: `data/outputs/`) |
+| `/import recipe <path>` | Import a recipe file, replacing the current session recipe |
 | `/resume` | Resume an interrupted run — re-runs only the interrupted models, preserving completed results |
 | `/exit` or `/quit` | Exit (TUI only) |
 | `Ctrl-D` | Exit (TUI only) |
