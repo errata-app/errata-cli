@@ -100,6 +100,7 @@ seed: 42
 
 ## Constraints
 timeout: 10m
+bash_timeout: 2m
 max_steps: 50
 
 ## Context
@@ -218,6 +219,7 @@ tools: inherit
 ## Sandbox
 filesystem: project_only
 network: full
+allow_local_fetch: true
 
 ## Tasks
 - Audit all Go files for unused error return values and fix them
