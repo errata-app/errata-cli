@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -138,6 +139,7 @@ func (a App) tryArgComplete(val string) (string, bool) { //nolint:gocritic // ca
 		{"/tools off ", a.toolNameCandidates()},
 		{"/config ", interactiveSections},
 		{"/set ", configPathCandidates()},
+		{"/keys ", providerNameCandidates()},
 	}
 
 	for _, cmd := range cmds {
@@ -175,6 +177,16 @@ func (a App) tryMentionComplete(val string) (string, bool) { //nolint:gocritic /
 	// Replace the last word with @<completed>
 	prefix := val[:len(val)-len(lw)]
 	return prefix + "@" + replacement, true
+}
+
+// providerNameCandidates returns shorthand names for all supported providers.
+func providerNameCandidates() []string {
+	providers := config.ProviderEnvInfo()
+	names := make([]string, len(providers))
+	for i, p := range providers {
+		names[i] = p.Name
+	}
+	return names
 }
 
 // renderModelHints writes matching model ID suggestions to sb (capped).

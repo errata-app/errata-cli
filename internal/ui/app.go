@@ -49,6 +49,8 @@ type listModelsResultMsg struct {
 	results []adapters.ProviderModels
 }
 
+type welcomeMsg struct{}
+
 // ---- app modes ----
 
 type mode int
@@ -333,6 +335,9 @@ func (a *App) withMessage(text string) App {
 
 //nolint:gocritic // bubbletea requires value receiver for tea.Model interface
 func (a App) Init() tea.Cmd {
+	if len(a.adapters) == 0 {
+		return tea.Batch(textarea.Blink, func() tea.Msg { return welcomeMsg{} })
+	}
 	return textarea.Blink
 }
 
@@ -396,6 +401,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a.withMessage(formatAvailableModels(msg.results, activeSet)), nil
+
+	case welcomeMsg:
+		return a.withMessage(
+			"Welcome to Errata! No API keys are configured.\n" +
+				"Use /keys to view provider status and add keys.\n" +
+				"  e.g.  /keys anthropic sk-ant-...\n" +
+				"  e.g.  /keys openai sk-...\n" +
+				"Type /keys for the full list of providers.",
+		), nil
 
 	case compactCompleteMsg:
 		a.conversationHistories = msg.histories
@@ -636,6 +650,17 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 					partial := lastWord(val[len("/tools off "):])
 					a.renderToolHints(&sb, partial, nameStyle, descStyle)
 
+				case strings.HasPrefix(lower, "/keys "):
+					partial := lastWord(val[len("/keys "):])
+					lp := strings.ToLower(partial)
+					hw := newHintWriter(&sb, descStyle)
+					for _, name := range providerNameCandidates() {
+						if strings.HasPrefix(name, lp) {
+							hw.add(nameStyle.Render("  " + name))
+						}
+					}
+					hw.flush()
+
 				case strings.HasPrefix(lower, "/config "):
 					partial := lastWord(val[len("/config "):])
 					lp := strings.ToLower(partial)
@@ -725,7 +750,7 @@ func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 	}()
 
 	for _, w := range warnings {
-		fmt.Fprintln(os.Stderr, "warning:", w)
+		app.feed = append(app.feed, feedItem{kind: "message", text: "warning: " + w})
 	}
 
 	_, err := p.Run()
