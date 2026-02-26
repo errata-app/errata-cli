@@ -272,7 +272,7 @@ func TestHintWriter_CapsAtMaxHintLines(t *testing.T) {
 
 	// Add more items than maxHintLines.
 	total := maxHintLines + 5
-	for i := 0; i < total; i++ {
+	for range total {
 		hw.add("item")
 	}
 	hw.flush()
@@ -311,7 +311,7 @@ func TestHintWriter_ExactlyAtCap(t *testing.T) {
 	plain := lipgloss.NewStyle()
 	hw := newHintWriter(&sb, plain)
 
-	for i := 0; i < maxHintLines; i++ {
+	for range maxHintLines {
 		hw.add("item")
 	}
 	hw.flush()

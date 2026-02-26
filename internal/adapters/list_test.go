@@ -94,7 +94,7 @@ func TestListAvailableModels_LiteLLM(t *testing.T) {
 	require.Len(t, results, 1, "expected exactly one ProviderModels entry")
 
 	pm := findProvider(t, results, "LiteLLM")
-	assert.NoError(t, pm.Err, "LiteLLM provider should not report an error")
+	require.NoError(t, pm.Err, "LiteLLM provider should not report an error")
 
 	// The adapter prepends "litellm/" to each ID and sorts the slice.
 	want := []string{"litellm/claude-3", "litellm/gpt-4o"}
@@ -134,7 +134,7 @@ func TestListAvailableModels_LiteLLMError(t *testing.T) {
 	require.Len(t, results, 1, "expected exactly one ProviderModels entry even on error")
 
 	pm := findProvider(t, results, "LiteLLM")
-	assert.Error(t, pm.Err, "a connection-refused error should result in a non-nil Err")
+	require.Error(t, pm.Err, "a connection-refused error should result in a non-nil Err")
 	assert.Empty(t, pm.Models, "no models should be returned when the server is unreachable")
 }
 
@@ -159,6 +159,6 @@ func TestListAvailableModels_LiteLLMBadJSON(t *testing.T) {
 
 	pm := findProvider(t, results, "LiteLLM")
 	// json.Decoder succeeds (the JSON is valid) but finds no "data" items.
-	assert.NoError(t, pm.Err, "mismatched JSON shape should not produce an error")
+	require.NoError(t, pm.Err, "mismatched JSON shape should not produce an error")
 	assert.Empty(t, pm.Models, "no models should be decoded from a mismatched JSON shape")
 }

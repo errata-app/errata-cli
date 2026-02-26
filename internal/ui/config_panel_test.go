@@ -269,23 +269,23 @@ func TestSetConfigValue_RoundTrip(t *testing.T) {
 func TestSetConfigValue_InvalidPath(t *testing.T) {
 	rec := &recipe.Recipe{}
 	err := setConfigValue(rec, "bogus.path", "value")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown config path")
 }
 
 func TestSetConfigValue_InvalidValue(t *testing.T) {
 	rec := &recipe.Recipe{}
 	err := setConfigValue(rec, "constraints.timeout", "not-a-duration")
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	err = setConfigValue(rec, "constraints.max_steps", "abc")
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	err = setConfigValue(rec, "context.strategy", "invalid")
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	err = setConfigValue(rec, "context.compact_threshold", "2.0")
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 // ── configPathCandidates ────────────────────────────────────────────────────

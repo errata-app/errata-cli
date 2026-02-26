@@ -65,11 +65,8 @@ func RenderDiffs(responses []models.ModelResponse, width ...int) string {
 
 		if len(resp.ProposedWrites) == 0 {
 			if resp.Text != "" {
-				maxW := termW - 2 // 2 for "  " indent
-				if maxW < 10 {
-					maxW = 10
-				}
-				for _, line := range strings.Split(resp.Text, "\n") {
+				maxW := max(termW-2, 10) // 2 for "  " indent
+				for line := range strings.SplitSeq(resp.Text, "\n") {
 					for _, wl := range wrapLine(line, maxW) {
 						sb.WriteString(contextStyle.Render("  " + wl))
 						sb.WriteByte('\n')
@@ -87,11 +84,8 @@ func RenderDiffs(responses []models.ModelResponse, width ...int) string {
 		if resp.Text != "" {
 			sb.WriteString(contextStyle.Render("  ── reasoning ──"))
 			sb.WriteByte('\n')
-			maxW := termW - 2
-			if maxW < 10 {
-				maxW = 10
-			}
-			for _, line := range strings.Split(resp.Text, "\n") {
+			maxW := max(termW-2, 10)
+			for line := range strings.SplitSeq(resp.Text, "\n") {
 				if line != "" {
 					for _, wl := range wrapLine(line, maxW) {
 						sb.WriteString(contextStyle.Render("  " + wl))

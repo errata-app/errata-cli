@@ -347,7 +347,7 @@ func buildSummary(tasks []TaskResult, parsedCriteria []criteria.Criterion, total
 			}
 		}
 		if taskCount > 0 {
-			ms.AvgLatencyMS = ms.AvgLatencyMS / float64(taskCount)
+			ms.AvgLatencyMS /= float64(taskCount)
 		}
 		perModel[id] = ms
 	}

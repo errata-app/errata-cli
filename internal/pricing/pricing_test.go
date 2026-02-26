@@ -34,7 +34,7 @@ func TestCostUSD_HardcodedModel(t *testing.T) {
 
 func TestCostUSD_UnknownModel_ReturnsZero(t *testing.T) {
 	resetDynamicPricing(t)
-	assert.Equal(t, 0.0, CostUSD("no-such-model-xyz", 1_000_000, 0, 0, 1_000_000))
+	assert.Zero(t, CostUSD("no-such-model-xyz", 1_000_000, 0, 0, 1_000_000))
 }
 
 // TestCostUSD_QualifiedIDFallback verifies that "provider/model" strips the
@@ -48,7 +48,7 @@ func TestCostUSD_QualifiedIDFallback(t *testing.T) {
 
 func TestCostUSD_ZeroTokens(t *testing.T) {
 	resetDynamicPricing(t)
-	assert.Equal(t, 0.0, CostUSD("claude-sonnet-4-6", 0, 0, 0, 0))
+	assert.Zero(t, CostUSD("claude-sonnet-4-6", 0, 0, 0, 0))
 }
 
 func TestCostUSD_OnlyInputTokens(t *testing.T) {
@@ -262,8 +262,8 @@ func TestPricingFor_QualifiedIDFallback(t *testing.T) {
 	in2, out2, ok2 := PricingFor("anthropic/claude-sonnet-4-6")
 	assert.True(t, ok1)
 	assert.True(t, ok2)
-	assert.Equal(t, in1, in2)
-	assert.Equal(t, out1, out2)
+	assert.InDelta(t, in1, in2, 0.0001)
+	assert.InDelta(t, out1, out2, 0.0001)
 }
 
 func TestPricingFor_UnknownModel_ReturnsFalse(t *testing.T) {
@@ -370,7 +370,7 @@ func TestCostUSD_DateSuffix_DynamicExactMatchTakesPrecedence(t *testing.T) {
 func TestCostUSD_DateSuffix_NoBaseMatch(t *testing.T) {
 	resetDynamicPricing(t)
 	cost := CostUSD("unknown/mystery-model-20250714", 1_000_000, 0, 0, 1_000_000)
-	assert.Equal(t, 0.0, cost)
+	assert.Zero(t, cost)
 }
 
 // TestCostUSD_NonDateSuffix_NotStripped ensures that non-date suffixes like

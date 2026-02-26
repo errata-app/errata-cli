@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -119,7 +121,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	ctx := r.Context()
 
@@ -132,7 +134,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case <-ctx.Done():
-				conn.Close(websocket.StatusNormalClosure, "")
+				_ = conn.Close(websocket.StatusNormalClosure, "")
 				return
 			case msg := <-writeCh:
 				if err := wsjson.Write(ctx, conn, msg); err != nil {
@@ -659,7 +661,7 @@ func (wc *wsConn) wsHandleResume() {
 		)
 
 		// Merge completed (from checkpoint) + fresh re-run responses.
-		allResponses := append(completedResponses, rs...)
+		allResponses := slices.Concat(completedResponses, rs)
 
 		if runCtx.Err() != nil {
 			// Save updated checkpoint if interrupted again.
@@ -708,9 +710,7 @@ func (wc *wsConn) wsHandleCompact() {
 
 	wc.s.histMu.RLock()
 	histsToCompact := make(map[string][]models.ConversationTurn, len(wc.s.histories))
-	for k, v := range wc.s.histories {
-		histsToCompact[k] = v
-	}
+	maps.Copy(histsToCompact, wc.s.histories)
 	wc.s.histMu.RUnlock()
 
 	go func() {
@@ -751,7 +751,7 @@ func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
 		Description string `json:"description"`
 		Source      string `json:"source"` // "builtin" or "mcp"
 	}
-	var list []toolEntry
+	list := make([]toolEntry, 0, len(tools.Definitions)+len(s.mcpDefs))
 	for _, d := range tools.Definitions {
 		list = append(list, toolEntry{Name: d.Name, Description: d.Description, Source: "builtin"})
 	}
@@ -759,7 +759,10 @@ func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
 		list = append(list, toolEntry{Name: d.Name, Description: d.Description, Source: "mcp"})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(list)
+	if err := json.NewEncoder(w).Encode(list); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -768,7 +771,10 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		tally = map[string]int{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"tally": tally})
+	if err := json.NewEncoder(w).Encode(map[string]any{"tally": tally}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -777,7 +783,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		ids[i] = a.ID()
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"models": ids})
+	if err := json.NewEncoder(w).Encode(map[string]any{"models": ids}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
@@ -791,7 +800,10 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 		out[i] = entry{c.Name, c.Desc}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(out)
+	if err := json.NewEncoder(w).Encode(out); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 // ─── Available models handler ─────────────────────────────────────────────────
@@ -851,10 +863,13 @@ func (s *Server) handleAvailableModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"active":    active,
 		"providers": providers,
-	})
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 // ─── Serialisation helper ─────────────────────────────────────────────────────

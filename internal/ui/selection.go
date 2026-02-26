@@ -14,7 +14,7 @@ import (
 
 // handleRatingKey handles y/n/s input in modeRating (single-model response).
 // y = thumbs up (records a preference win), n = thumbs down (skipped, no record), s = skip.
-func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	setNote := func(note string) {
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].note = note
@@ -79,7 +79,7 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	switch msg.Type {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
 		return a, tea.Quit
@@ -110,7 +110,7 @@ func (a App) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) applySelection(choice string) (tea.Model, tea.Cmd) {
+func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	setNote := func(note string) {
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].note = note

@@ -3,6 +3,7 @@ package mcp
 import (
 	"fmt"
 	"log"
+	"maps"
 	"os/exec"
 	"strings"
 
@@ -30,18 +31,18 @@ func ParseServerConfigs(raw string) []ServerConfig {
 		return nil
 	}
 	var out []ServerConfig
-	for _, entry := range strings.Split(raw, ",") {
+	for entry := range strings.SplitSeq(raw, ",") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
 		}
-		idx := strings.IndexByte(entry, ':')
-		if idx < 0 {
+		name, cmdStr, found := strings.Cut(entry, ":")
+		if !found {
 			log.Printf("mcp: ignoring malformed entry (no ':') %q", entry)
 			continue
 		}
-		name := strings.TrimSpace(entry[:idx])
-		cmdStr := strings.TrimSpace(entry[idx+1:])
+		name = strings.TrimSpace(name)
+		cmdStr = strings.TrimSpace(cmdStr)
 		if name == "" || cmdStr == "" {
 			log.Printf("mcp: ignoring empty name or command in entry %q", entry)
 			continue
@@ -91,9 +92,7 @@ func StartServers(configs []ServerConfig, env []string) (
 			continue
 		}
 		extra = append(extra, defs...)
-		for name, d := range disp {
-			dispatchers[name] = d
-		}
+		maps.Copy(dispatchers, disp)
 		mgr.servers = append(mgr.servers, srv)
 	}
 	return

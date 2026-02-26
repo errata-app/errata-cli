@@ -21,7 +21,7 @@ type hintWriter struct {
 	style lipgloss.Style // style for the "... and N more" line
 }
 
-func newHintWriter(sb *strings.Builder, moreStyle lipgloss.Style) *hintWriter {
+func newHintWriter(sb *strings.Builder, moreStyle lipgloss.Style) *hintWriter { //nolint:gocritic // lipgloss.Style is idiomatically passed by value
 	return &hintWriter{sb: sb, style: moreStyle}
 }
 
@@ -101,7 +101,7 @@ func lastWord(s string) string {
 }
 
 // modelIDCandidates returns the IDs of all configured adapters.
-func (a App) modelIDCandidates() []string {
+func (a App) modelIDCandidates() []string { //nolint:gocritic // called from bubbletea value-receiver methods
 	ids := make([]string, len(a.adapters))
 	for i, ad := range a.adapters {
 		ids[i] = ad.ID()
@@ -110,7 +110,7 @@ func (a App) modelIDCandidates() []string {
 }
 
 // toolNameCandidates returns the names of all built-in and MCP tools.
-func (a App) toolNameCandidates() []string {
+func (a App) toolNameCandidates() []string { //nolint:gocritic // called from bubbletea value-receiver methods
 	names := make([]string, 0, len(tools.Definitions)+len(a.mcpDefs))
 	for _, d := range tools.Definitions {
 		names = append(names, d.Name)
@@ -124,7 +124,7 @@ func (a App) toolNameCandidates() []string {
 // tryArgComplete attempts tab-completion of the last word for commands that
 // support argument completion (/model, /tools on, /tools off).
 // Returns the full replacement input line and true if completion occurred.
-func (a App) tryArgComplete(val string) (string, bool) {
+func (a App) tryArgComplete(val string) (string, bool) { //nolint:gocritic // called from bubbletea value-receiver methods
 	lower := strings.ToLower(val)
 
 	type argCmd struct {
@@ -162,7 +162,7 @@ func (a App) tryArgComplete(val string) (string, bool) {
 
 // tryMentionComplete attempts tab-completion when the last word starts with @.
 // Returns the completed input line and true if completion occurred.
-func (a App) tryMentionComplete(val string) (string, bool) {
+func (a App) tryMentionComplete(val string) (string, bool) { //nolint:gocritic // called from bubbletea value-receiver methods
 	lw := lastWord(val)
 	if !strings.HasPrefix(lw, "@") || len(lw) < 2 {
 		return "", false
@@ -178,7 +178,7 @@ func (a App) tryMentionComplete(val string) (string, bool) {
 }
 
 // renderModelHints writes matching model ID suggestions to sb (capped).
-func (a App) renderModelHints(sb *strings.Builder, partial string, nameStyle lipgloss.Style) {
+func (a App) renderModelHints(sb *strings.Builder, partial string, nameStyle lipgloss.Style) { //nolint:gocritic // called from bubbletea value-receiver methods
 	lp := strings.ToLower(partial)
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	hw := newHintWriter(sb, dimStyle)
@@ -191,7 +191,7 @@ func (a App) renderModelHints(sb *strings.Builder, partial string, nameStyle lip
 }
 
 // renderToolHints writes matching tool name suggestions to sb (capped).
-func (a App) renderToolHints(sb *strings.Builder, partial string, nameStyle, descStyle lipgloss.Style) {
+func (a App) renderToolHints(sb *strings.Builder, partial string, nameStyle, descStyle lipgloss.Style) { //nolint:gocritic // called from bubbletea value-receiver methods
 	lp := strings.ToLower(partial)
 	hw := newHintWriter(sb, descStyle)
 	for _, d := range tools.Definitions {

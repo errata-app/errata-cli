@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,7 +100,7 @@ func cwdTempDir(t *testing.T) string {
 }
 
 // lastFeedNote returns the note of the last feed item, or "" if no feed items.
-func lastFeedNote(a App) string {
+func lastFeedNote(a *App) string {
 	if len(a.feed) == 0 {
 		return ""
 	}
@@ -145,7 +144,7 @@ func TestStateMachine_IdleToRunningToSelectingToIdle(t *testing.T) {
 	a = appFrom(t, result)
 	assert.Equal(t, modeSelecting, a.mode)
 	assert.NotNil(t, a.responses)
-	assert.Equal(t, "", a.selection)
+	assert.Empty(t, a.selection)
 
 	// Select response 1 (type "1" then Enter).
 	result, _ = a.handleSelectKey(keyRunes("1"))
@@ -155,7 +154,7 @@ func TestStateMachine_IdleToRunningToSelectingToIdle(t *testing.T) {
 
 	assert.Equal(t, modeIdle, a.mode)
 	assert.Nil(t, a.responses)
-	assert.Contains(t, lastFeedNote(a), "Applied:")
+	assert.Contains(t, lastFeedNote(&a), "Applied:")
 }
 
 func TestStateMachine_IdleToRunningToRatingToIdle(t *testing.T) {
@@ -174,7 +173,7 @@ func TestStateMachine_IdleToRunningToRatingToIdle(t *testing.T) {
 	result, _ = a.handleRatingKey(keyRunes("y"))
 	a = appFrom(t, result)
 	assert.Equal(t, modeIdle, a.mode)
-	assert.Contains(t, lastFeedNote(a), "Rated good")
+	assert.Contains(t, lastFeedNote(&a), "Rated good")
 }
 
 func TestStateMachine_RunCompleteAllErrors_GoesIdle(t *testing.T) {
@@ -273,7 +272,7 @@ func TestEventStreaming_UnknownModelIDIgnored(t *testing.T) {
 	a = appFrom(t, result)
 
 	// m1 panel should be unaffected.
-	assert.Len(t, a.panels[0].events, 0)
+	assert.Empty(t, a.panels[0].events)
 }
 
 // ── Group C: Selection Flow ─────────────────────────────────────────────────
@@ -315,8 +314,8 @@ func TestSelection_NumericChoiceAppliesWrites(t *testing.T) {
 	a = appFrom(t, result)
 
 	assert.Equal(t, modeIdle, a.mode)
-	assert.Contains(t, lastFeedNote(a), "Applied:")
-	assert.Contains(t, lastFeedNote(a), "out.go")
+	assert.Contains(t, lastFeedNote(&a), "Applied:")
+	assert.Contains(t, lastFeedNote(&a), "out.go")
 }
 
 func TestSelection_SkipSetsNote(t *testing.T) {
@@ -331,7 +330,7 @@ func TestSelection_SkipSetsNote(t *testing.T) {
 	a = appFrom(t, result)
 
 	assert.Equal(t, modeIdle, a.mode)
-	assert.Equal(t, "Skipped.", lastFeedNote(a))
+	assert.Equal(t, "Skipped.", lastFeedNote(&a))
 }
 
 func TestSelection_InvalidInputShowsError(t *testing.T) {
@@ -401,8 +400,8 @@ func TestSelection_BackspaceEditsSelection(t *testing.T) {
 	a = appFrom(t, result)
 
 	assert.Equal(t, modeIdle, a.mode)
-	assert.Contains(t, lastFeedNote(a), "Applied:")
-	assert.Contains(t, lastFeedNote(a), "f1.go")
+	assert.Contains(t, lastFeedNote(&a), "Applied:")
+	assert.Contains(t, lastFeedNote(&a), "f1.go")
 }
 
 func TestSelection_VoteWhenNoWrites(t *testing.T) {
@@ -418,7 +417,7 @@ func TestSelection_VoteWhenNoWrites(t *testing.T) {
 	a = appFrom(t, result)
 
 	assert.Equal(t, modeIdle, a.mode)
-	assert.Contains(t, lastFeedNote(a), "Voted for:")
+	assert.Contains(t, lastFeedNote(&a), "Voted for:")
 }
 
 // ── Group D: Rating Flow ────────────────────────────────────────────────────
@@ -439,8 +438,8 @@ func TestRating_YRecordsGood(t *testing.T) {
 
 	assert.Equal(t, modeIdle, a.mode)
 	assert.Nil(t, a.responses)
-	assert.Contains(t, lastFeedNote(a), "Rated good")
-	assert.Contains(t, lastFeedNote(a), "m1")
+	assert.Contains(t, lastFeedNote(&a), "Rated good")
+	assert.Contains(t, lastFeedNote(&a), "m1")
 }
 
 func TestRating_NRecordsBad(t *testing.T) {
@@ -450,8 +449,8 @@ func TestRating_NRecordsBad(t *testing.T) {
 
 	assert.Equal(t, modeIdle, a.mode)
 	assert.Nil(t, a.responses)
-	assert.Contains(t, lastFeedNote(a), "Rated bad")
-	assert.Contains(t, lastFeedNote(a), "m1")
+	assert.Contains(t, lastFeedNote(&a), "Rated bad")
+	assert.Contains(t, lastFeedNote(&a), "m1")
 }
 
 func TestRating_SSkips(t *testing.T) {
@@ -461,7 +460,7 @@ func TestRating_SSkips(t *testing.T) {
 
 	assert.Equal(t, modeIdle, a.mode)
 	assert.Nil(t, a.responses)
-	assert.Equal(t, "Skipped.", lastFeedNote(a))
+	assert.Equal(t, "Skipped.", lastFeedNote(&a))
 }
 
 func TestRating_CtrlDQuits(t *testing.T) {
@@ -677,7 +676,7 @@ func TestFeed_NoteSetAfterSelection(t *testing.T) {
 	}})
 	a = appFrom(t, result)
 	assert.Equal(t, modeSelecting, a.mode)
-	assert.Empty(t, lastFeedNote(a))
+	assert.Empty(t, lastFeedNote(&a))
 
 	// Skip selection.
 	result, _ = a.handleSelectKey(keyRunes("s"))
@@ -685,7 +684,7 @@ func TestFeed_NoteSetAfterSelection(t *testing.T) {
 	result, _ = a.handleSelectKey(keyType(tea.KeyEnter))
 	a = appFrom(t, result)
 
-	assert.Equal(t, "Skipped.", lastFeedNote(a))
+	assert.Equal(t, "Skipped.", lastFeedNote(&a))
 }
 
 // ── Group G: Input Handling ─────────────────────────────────────────────────
@@ -723,7 +722,7 @@ func TestInput_CtrlREntersSearchMode(t *testing.T) {
 	a = appFrom(t, result)
 
 	assert.True(t, a.searchActive)
-	assert.Equal(t, "", a.searchQuery)
+	assert.Empty(t, a.searchQuery)
 }
 
 func TestInput_EscExitsSearchMode(t *testing.T) {
@@ -735,7 +734,7 @@ func TestInput_EscExitsSearchMode(t *testing.T) {
 	a = appFrom(t, result)
 
 	assert.False(t, a.searchActive)
-	assert.Equal(t, "", a.searchQuery)
+	assert.Empty(t, a.searchQuery)
 }
 
 func TestInput_RunningModeIgnoresKeys(t *testing.T) {
@@ -864,8 +863,8 @@ func TestSelection_ErrorResponseSkippedInNumbering(t *testing.T) {
 	a = appFrom(t, result)
 
 	assert.Equal(t, modeIdle, a.mode)
-	assert.Contains(t, lastFeedNote(a), "Applied:")
-	assert.Contains(t, lastFeedNote(a), "out.go")
+	assert.Contains(t, lastFeedNote(&a), "Applied:")
+	assert.Contains(t, lastFeedNote(&a), "out.go")
 }
 
 func TestSelection_CtrlDQuitsFromSelecting(t *testing.T) {
@@ -933,7 +932,7 @@ func TestCompactCompleteMsg_UpdatesHistories(t *testing.T) {
 	// Feed should contain the compaction message.
 	found := false
 	for _, item := range a.feed {
-		if item.kind == "message" && fmt.Sprintf("%s", item.text) == "History compacted." {
+		if item.kind == "message" && item.text == "History compacted." {
 			found = true
 		}
 	}

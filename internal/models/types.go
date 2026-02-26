@@ -10,8 +10,8 @@ import (
 // ConversationTurn is one prior exchange in the conversation history.
 // Role is "user" or "assistant".
 type ConversationTurn struct {
-	Role    string
-	Content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // AgentEvent is a single observable event emitted by an agent during its run.

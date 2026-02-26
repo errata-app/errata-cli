@@ -3,6 +3,7 @@ package diff_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,15 +32,15 @@ func TestCompute_ExistingFile(t *testing.T) {
 
 func TestCompute_Truncated(t *testing.T) {
 	// Generate more lines than MaxDiffLines to trigger truncation.
-	var new_ string
+	var sb strings.Builder
 	for range diff.MaxDiffLines + 10 {
-		new_ += "changed\n"
+		sb.WriteString("changed\n")
 	}
-	fd := diff.Compute("phantom.txt", new_)
+	fd := diff.Compute("phantom.txt", sb.String())
 	assert.True(t, fd.IsNew)
 	// Lines should be capped at MaxDiffLines
 	assert.LessOrEqual(t, len(fd.Lines), diff.MaxDiffLines)
-	assert.Greater(t, fd.Truncated, 0)
+	assert.Positive(t, fd.Truncated)
 }
 
 func TestCompute_UnchangedFile(t *testing.T) {
@@ -150,8 +151,8 @@ func TestCompute_CRLFLineEndings(t *testing.T) {
 	require.NoError(t, os.Chdir(dir))
 
 	fd := diff.Compute("crlf.txt", "line1\r\nchanged\r\n")
-	assert.Greater(t, fd.Adds, 0)
-	assert.Greater(t, fd.Removes, 0)
+	assert.Positive(t, fd.Adds)
+	assert.Positive(t, fd.Removes)
 }
 
 func TestCompute_SingleLineNoNewline(t *testing.T) {
@@ -162,8 +163,8 @@ func TestCompute_SingleLineNoNewline(t *testing.T) {
 	require.NoError(t, os.Chdir(dir))
 
 	fd := diff.Compute("single.txt", "world")
-	assert.Greater(t, fd.Adds, 0)
-	assert.Greater(t, fd.Removes, 0)
+	assert.Positive(t, fd.Adds)
+	assert.Positive(t, fd.Removes)
 }
 
 func TestCompute_ContentPrefixCharacters(t *testing.T) {
@@ -197,11 +198,11 @@ func TestCompute_WordSpans_SpanTextReconstructsLine(t *testing.T) {
 		if len(line.Spans) == 0 {
 			continue
 		}
-		var reconstructed string
+		var sb2 strings.Builder
 		for _, sp := range line.Spans {
-			reconstructed += sp.Text
+			sb2.WriteString(sp.Text)
 		}
-		assert.Equal(t, line.Content[1:], reconstructed,
+		assert.Equal(t, line.Content[1:], sb2.String(),
 			"span texts for %q should reconstruct the content without prefix", line.Content)
 	}
 }

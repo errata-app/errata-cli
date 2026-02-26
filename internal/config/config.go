@@ -133,7 +133,7 @@ func Load() Config {
 	cfg.LiteLLMAPIKey = os.Getenv("LITELLM_API_KEY")
 
 	if v := os.Getenv("ERRATA_ACTIVE_MODELS"); v != "" {
-		for _, m := range strings.Split(v, ",") {
+		for m := range strings.SplitSeq(v, ",") {
 			if m = strings.TrimSpace(m); m != "" {
 				cfg.ActiveModels = append(cfg.ActiveModels, m)
 			}

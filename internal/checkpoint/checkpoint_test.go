@@ -303,18 +303,15 @@ func TestIncrementalSaver_ConcurrentUpdates(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for _, id := range ids {
-		id := id
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for turn := 0; turn < 10; turn++ {
+		wg.Go(func() {
+			for range 10 {
 				saver.Update(id, ResponseSnapshot{
 					ModelID:     id,
 					Text:        "turn data",
 					Interrupted: true,
 				})
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -48,7 +48,7 @@ func buildProfile(cfg Config) string {
 		b.WriteString("(allow file-write* (literal \"/dev/null\"))\n")
 		b.WriteString("(allow file-write* (subpath \"/private/tmp\"))\n")
 		b.WriteString("(allow file-write* (subpath \"/var/tmp\"))\n")
-		b.WriteString(fmt.Sprintf("(allow file-write* (subpath %q))\n", root))
+		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", root)
 	case "read_only":
 		// No writes anywhere except temp (needed by compilers, go toolchain, etc.)
 		b.WriteString("(deny file-write*)\n")
@@ -69,7 +69,8 @@ func buildCmd(ctx context.Context, cfg Config, name string, args ...string) *exe
 		return exec.CommandContext(ctx, name, args...)
 	}
 	profile := buildProfile(cfg)
-	sbArgs := []string{"-p", profile, "--", name}
+	sbArgs := make([]string, 0, 4+len(args))
+	sbArgs = append(sbArgs, "-p", profile, "--", name)
 	sbArgs = append(sbArgs, args...)
 	return exec.CommandContext(ctx, sandboxExecPath, sbArgs...)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,7 +27,7 @@ import (
 	"github.com/suarezc/errata/internal/tools"
 )
 
-func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
+func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
 	trimmed := strings.TrimSpace(prompt)
 	lower := strings.ToLower(trimmed)
 
@@ -114,7 +115,7 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	return a.launchRun(trimmed)
 }
 
-func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) {
+func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
 	a.verbose = !a.verbose
 	state := "off"
 	if a.verbose {
@@ -123,12 +124,12 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) {
 	return a.withMessage(fmt.Sprintf("Verbose mode %s.", state)), nil
 }
 
-func (a App) handleModelsListCmd() (tea.Model, tea.Cmd) {
+func (a App) handleModelsListCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	active := a.activeAdapters
 	if active == nil {
 		active = a.adapters
 	}
-	var ids []string
+	ids := make([]string, 0, len(active))
 	for _, ad := range active {
 		ids = append(ids, ad.ID())
 	}
@@ -145,7 +146,7 @@ func (a App) handleModelsListCmd() (tea.Model, tea.Cmd) {
 	}
 }
 
-func (a App) handleClearCmd() (tea.Model, tea.Cmd) {
+func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
 	a.feedVP.Width = a.width
 	a.feedVP.Height = a.feedVPHeight()
@@ -153,7 +154,7 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handleWipeCmd() (tea.Model, tea.Cmd) {
+func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
 	a.conversationHistories = nil
 	if err := history.Clear(a.histPath); err != nil {
@@ -165,7 +166,7 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handleCompactCmd() (tea.Model, tea.Cmd) {
+func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	toCompact := a.adapters
 	if a.activeAdapters != nil {
 		toCompact = a.activeAdapters
@@ -183,7 +184,7 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) {
 	}
 }
 
-func (a App) handleStatsCmd() (tea.Model, tea.Cmd) {
+func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	stats := preferences.SummarizeDetailed(a.prefPath)
 	var sb strings.Builder
 	sb.WriteString("Stats:\n")
@@ -214,14 +215,14 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) {
 			if r.s.ThumbsDown > 0 {
 				signals += fmt.Sprintf(" / %d👎", r.s.ThumbsDown)
 			}
-			sb.WriteString(fmt.Sprintf("    %s: %s  %.1f%% win  avg %dms%s  (%d runs)\n",
+			fmt.Fprintf(&sb, "    %s: %s  %.1f%% win  avg %dms%s  (%d runs)\n",
 				r.id,
 				signals,
 				r.s.WinRate,
 				int64(r.s.AvgLatencyMS),
 				cost,
 				r.s.Participations,
-			))
+			)
 		}
 	}
 	if len(a.sessionCostPerModel) > 0 {
@@ -234,18 +235,18 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) {
 			return a.sessionCostPerModel[ids[i]] > a.sessionCostPerModel[ids[j]]
 		})
 		for _, id := range ids {
-			sb.WriteString(fmt.Sprintf("    %s: $%.4f\n", id, a.sessionCostPerModel[id]))
+			fmt.Fprintf(&sb, "    %s: $%.4f\n", id, a.sessionCostPerModel[id])
 		}
-		sb.WriteString(fmt.Sprintf("  Total: $%.4f\n", a.totalCostUSD))
+		fmt.Fprintf(&sb, "  Total: $%.4f\n", a.totalCostUSD)
 	}
 	return a.withMessage(strings.TrimRight(sb.String(), "\n")), nil
 }
 
-func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) {
+func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	return a.launchRunTargeted(trimmed, nil)
 }
 
-func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdapter) (tea.Model, tea.Cmd) {
+func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdapter) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	toRun := a.adapters
 	if mentionTargets != nil {
 		toRun = mentionTargets
@@ -394,7 +395,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	}
 }
 
-func (a App) handleResumeCmd() (tea.Model, tea.Cmd) {
+func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	cp, err := checkpoint.Load(checkpoint.DefaultPath)
 	if err != nil {
 		return a.withMessage(fmt.Sprintf("Error loading checkpoint: %v", err)), nil
@@ -441,7 +442,7 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) {
 	return a.launchResumeRun(cp.Prompt, rerunAdapters, completedResponses, cp.Verbose)
 }
 
-func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) {
+func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.lastPrompt = prompt
 	a.mode = modeRunning
 	a.panels = nil
@@ -560,7 +561,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 		// Save checkpoint if interrupted.
 		if baseCtx.Err() != nil {
 			// Merge completed + new for checkpoint so completed models stay preserved.
-			allResp := append(completedResponses, responses...)
+			allResp := slices.Concat(completedResponses, responses)
 			allIDs := make([]string, len(allResp))
 			for i, r := range allResp {
 				allIDs[i] = r.ModelID
@@ -571,7 +572,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 		}
 
 		// Merge completed responses (from checkpoint) with fresh re-run responses.
-		allResponses := append(completedResponses, responses...)
+		allResponses := slices.Concat(completedResponses, responses)
 
 		toolNames := make([]string, len(activeDefs))
 		for i, d := range activeDefs {
@@ -586,7 +587,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 	}
 }
 
-func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	lower := strings.ToLower(strings.TrimSpace(args))
 
 	// /tools reset — re-enable all tools
@@ -663,10 +664,10 @@ func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) {
 	return a.handleToolsCommand("")
 }
 
-func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if args == "" {
 		a.activeAdapters = nil
-		var ids []string
+		ids := make([]string, 0, len(a.adapters))
 		for _, ad := range a.adapters {
 			ids = append(ids, ad.ID())
 		}
@@ -707,7 +708,7 @@ func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) {
 	return a.withMessage("Active models: " + strings.Join(ids, ", ")), nil
 }
 
-func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if a.sessionRecipe == nil {
 		a.sessionRecipe = cloneRecipe(a.recipe)
 	}
@@ -768,7 +769,7 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handleSetCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleSetCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if args == "" {
 		return a.withMessage("Usage: /set <path> [value]"), nil
 	}
@@ -794,7 +795,7 @@ func (a App) handleSetCommand(args string) (tea.Model, tea.Cmd) {
 	return a.withMessage(fmt.Sprintf("Set %s = %s", path, value)), nil
 }
 
-func (a App) handleRemindCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleRemindCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if a.reminderState == nil {
 		return a.withMessage("No reminders configured in recipe."), nil
 	}
@@ -814,7 +815,7 @@ func (a App) handleRemindCommand(args string) (tea.Model, tea.Cmd) {
 	return a.withMessage(fmt.Sprintf("[reminder: %s fired]\n%s", r.Name, r.Content)), nil
 }
 
-func (a App) handleSeedCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleSeedCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if args == "" {
 		a.seed = nil
 		return a.withMessage("Seed cleared."), nil
@@ -827,7 +828,7 @@ func (a App) handleSeedCommand(args string) (tea.Model, tea.Cmd) {
 	return a.withMessage(fmt.Sprintf("Seed set to %d.", n)), nil
 }
 
-func (a App) handleSubsetCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleSubsetCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if args == "" {
 		// Bare /subset: show current targeting state.
 		if a.activeAdapters == nil {
@@ -843,7 +844,7 @@ func (a App) handleSubsetCommand(args string) (tea.Model, tea.Cmd) {
 	return a.handleModelCommand(args)
 }
 
-func (a App) handleAllCommand() (tea.Model, tea.Cmd) {
+func (a App) handleAllCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	return a.handleModelCommand("")
 }
 
@@ -925,7 +926,7 @@ func formatAvailableModels(results []adapters.ProviderModels, activeSet map[stri
 
 // ── export/import handlers ──────────────────────────────────────────────────
 
-func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	parts := strings.SplitN(args, " ", 2)
 	sub := strings.ToLower(parts[0])
 
@@ -939,7 +940,7 @@ func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (a App) handleExportRecipe(parts []string) (tea.Model, tea.Cmd) {
+func (a App) handleExportRecipe(parts []string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	rec := a.sessionRecipe
 	if rec == nil {
 		rec = a.recipe
@@ -954,13 +955,13 @@ func (a App) handleExportRecipe(parts []string) (tea.Model, tea.Cmd) {
 	}
 
 	md := rec.MarshalMarkdown()
-	if err := os.WriteFile(path, []byte(md), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(md), 0o600); err != nil {
 		return a.withMessage(fmt.Sprintf("Export failed: %v", err)), nil
 	}
 	return a.withMessage(fmt.Sprintf("Recipe exported to %s", path)), nil
 }
 
-func (a App) handleExportOutput(parts []string) (tea.Model, tea.Cmd) {
+func (a App) handleExportOutput(parts []string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if a.lastReport == nil {
 		return a.withMessage("No run output to export. Run a prompt first."), nil
 	}
@@ -977,7 +978,7 @@ func (a App) handleExportOutput(parts []string) (tea.Model, tea.Cmd) {
 	return a.withMessage(fmt.Sprintf("Output exported to %s", path)), nil
 }
 
-func (a App) handleImportCommand(args string) (tea.Model, tea.Cmd) {
+func (a App) handleImportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	parts := strings.SplitN(args, " ", 2)
 	sub := strings.ToLower(parts[0])
 
@@ -992,7 +993,7 @@ func (a App) handleImportCommand(args string) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) {
+func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	rec, err := recipe.Parse(path)
 	if err != nil {
 		return a.withMessage(fmt.Sprintf("Import failed: %v", err)), nil

@@ -255,19 +255,16 @@ func TestCollector_ConcurrentEvents(t *testing.T) {
 	var wg sync.WaitGroup
 	const goroutines = 10
 	const eventsEach = 100
-	for g := 0; g < goroutines; g++ {
-		g := g
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for g := range goroutines {
+		wg.Go(func() {
 			modelID := "model-a"
 			if g%2 == 1 {
 				modelID = "model-b"
 			}
-			for i := 0; i < eventsEach; i++ {
+			for range eventsEach {
 				wrapped(modelID, models.AgentEvent{Type: "reading", Data: "data"})
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

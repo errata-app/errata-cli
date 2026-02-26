@@ -64,13 +64,13 @@ func TestParseTrigger_Empty(t *testing.T) {
 
 func TestParseTrigger_UnknownKind(t *testing.T) {
 	_, err := reminders.ParseTrigger("unknown_thing > 5")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown trigger kind")
 }
 
 func TestParseTrigger_UnknownOperator(t *testing.T) {
 	_, err := reminders.ParseTrigger("turn_count != 5")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown operator")
 }
 

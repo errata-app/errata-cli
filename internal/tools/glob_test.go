@@ -109,7 +109,6 @@ var matchGlobCases = []matchGlobCase{
 
 func TestMatchGlob(t *testing.T) {
 	for _, tc := range matchGlobCases {
-		tc := tc
 		name := tc.pattern + " ~ " + tc.path
 		t.Run(name, func(t *testing.T) {
 			got, err := matchGlob(tc.pattern, tc.path)

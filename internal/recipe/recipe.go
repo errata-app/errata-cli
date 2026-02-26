@@ -339,7 +339,7 @@ func parseBytes(data []byte) (*Recipe, error) {
 // Items may be "- text" or "- key: value" form; returned as raw strings.
 func parseList(body string) []string {
 	var out []string
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "- ") {
 			item := strings.TrimSpace(line[2:])
@@ -355,7 +355,7 @@ func parseList(body string) []string {
 // Accepts both "key: value" and "- key: value" line forms.
 func parseMap(body string) map[string]string {
 	m := make(map[string]string)
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		line = strings.TrimSpace(line)
 		line = strings.TrimPrefix(line, "- ")
 		key, val, ok := strings.Cut(line, ":")
@@ -399,7 +399,7 @@ func splitDeepSubSections(body string) []subSection {
 func splitOnPrefix(body, prefix string) []subSection {
 	var out []subSection
 	var cur *subSection
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if strings.HasPrefix(line, prefix) {
 			name := strings.TrimSpace(line[len(prefix):])
 			out = append(out, subSection{name: name})
@@ -502,7 +502,7 @@ func parseTwoLevelMap(body string) map[string]map[string]string {
 // parseSystemReminders parses ### sub-sections into SystemReminderConfig entries.
 func parseSystemReminders(body string) []SystemReminderConfig {
 	subs := splitSubSections(body)
-	var out []SystemReminderConfig
+	out := make([]SystemReminderConfig, 0, len(subs))
 	for _, s := range subs {
 		kv, prose := parseMapProse(s.body)
 		out = append(out, SystemReminderConfig{
@@ -517,7 +517,7 @@ func parseSystemReminders(body string) []SystemReminderConfig {
 // parseHooks parses ### sub-sections into HookConfig entries.
 func parseHooks(body string) []HookConfig {
 	subs := splitSubSections(body)
-	var out []HookConfig
+	out := make([]HookConfig, 0, len(subs))
 	for _, s := range subs {
 		m := parseMap(s.body)
 		h := HookConfig{
@@ -531,7 +531,7 @@ func parseHooks(body string) []HookConfig {
 		if h.Action == "" && h.Command != "" {
 			h.Action = "command" // default action
 		}
-		if v := m["inject_output"]; strings.ToLower(v) == "true" {
+		if v := m["inject_output"]; strings.EqualFold(v, "true") {
 			h.InjectOutput = true
 		}
 		out = append(out, h)
@@ -621,11 +621,11 @@ func parseModelProfiles(body string) map[string]ModelProfileConfig {
 			p.Tier = v
 		}
 		if v, ok := kv["system_role"]; ok {
-			b := strings.ToLower(v) == "true"
+			b := strings.EqualFold(v, "true")
 			p.SystemRole = &b
 		}
 		if v, ok := kv["mid_convo_system"]; ok {
-			b := strings.ToLower(v) == "true"
+			b := strings.EqualFold(v, "true")
 			p.MidConvoSystem = &b
 		}
 		m[s.name] = p
@@ -641,7 +641,7 @@ func parseTools(body string) *ToolsConfig {
 			// bash(prefix1, prefix2, ...)
 			inner := item[5 : len(item)-1]
 			var prefixes []string
-			for _, p := range strings.Split(inner, ",") {
+			for p := range strings.SplitSeq(inner, ",") {
 				if p = strings.TrimSpace(p); p != "" {
 					prefixes = append(prefixes, p)
 				}
@@ -803,14 +803,14 @@ func parseMetadata(body string) MetadataConfig {
 	cfg.Extends = m["extends"]
 	cfg.ProjectRoot = m["project_root"]
 	if v, ok := m["tags"]; ok {
-		for _, t := range strings.Split(v, ",") {
+		for t := range strings.SplitSeq(v, ",") {
 			if t = strings.TrimSpace(t); t != "" {
 				cfg.Tags = append(cfg.Tags, t)
 			}
 		}
 	}
 	if v, ok := m["contribute"]; ok {
-		cfg.Contribute = strings.ToLower(v) == "true"
+		cfg.Contribute = strings.EqualFold(v, "true")
 	}
 	return cfg
 }

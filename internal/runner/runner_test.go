@@ -160,7 +160,7 @@ func TestRunAll_ErrorSurfacesViaOnEventVerbose(t *testing.T) {
 		mu.Unlock()
 	}, true)
 
-	assert.True(t, len(received) > 0)
+	assert.NotEmpty(t, received)
 	assert.Equal(t, "error", received[len(received)-1].Type)
 }
 
@@ -638,10 +638,6 @@ func TestWithRunOptions_OverridesDefaults(t *testing.T) {
 	// We use a very short timeout so a slow adapter times out.
 	slow := &stubAdapter{id: "slow", response: models.ModelResponse{ModelID: "slow", Text: "late"}}
 
-	// Override the stub to sleep longer than the timeout.
-	type sleepAdapter struct {
-		id string
-	}
 	_ = slow // used above just for structure; test validates via short timeout below
 
 	// Simply verify WithRunOptions returns a usable context that doesn't panic.
@@ -737,7 +733,7 @@ func TestRunAll_CheckpointPreservedOnInterrupt(t *testing.T) {
 
 	// Checkpoint should NOT be cleaned up because there's an interrupted response.
 	cp, err := checkpoint.Load(cpPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, cp, "checkpoint should be preserved when responses are interrupted")
 	assert.Equal(t, "test prompt", cp.Prompt)
 }

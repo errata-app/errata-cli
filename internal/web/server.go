@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
@@ -85,7 +86,7 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("GET /api/available-models", s.handleAvailableModels)
 	mux.HandleFunc("GET /api/tools", s.handleToolsList)
 
-	s.httpServer = &http.Server{Addr: addr, Handler: mux}
+	s.httpServer = &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	return s.httpServer.ListenAndServe()
 }
 

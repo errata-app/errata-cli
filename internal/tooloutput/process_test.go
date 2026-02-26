@@ -23,7 +23,7 @@ func TestProcess_NoRule_PassThrough(t *testing.T) {
 }
 
 func TestProcess_EmptyInput(t *testing.T) {
-	assert.Equal(t, "", tooloutput.Process("", tooloutput.Rule{MaxLines: 10}))
+	assert.Empty(t, tooloutput.Process("", tooloutput.Rule{MaxLines: 10}))
 }
 
 func TestProcess_WithinLimits_PassThrough(t *testing.T) {

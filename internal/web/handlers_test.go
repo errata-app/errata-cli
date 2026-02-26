@@ -152,7 +152,9 @@ func TestHandleAvailableModels_ActiveFieldMatchesAdapters(t *testing.T) {
 	if !ok {
 		t.Fatalf("active field missing or wrong type: %T", body["active"])
 	}
-	if len(raw) != 2 || raw[0].(string) != "m1" || raw[1].(string) != "m2" {
+	s0, _ := raw[0].(string)
+	s1, _ := raw[1].(string)
+	if len(raw) != 2 || s0 != "m1" || s1 != "m2" {
 		t.Errorf("active = %v, want [m1 m2]", raw)
 	}
 }
@@ -186,11 +188,15 @@ func TestHandleAvailableModels_LiteLLMProviderIncluded(t *testing.T) {
 	if !ok || len(providers) != 1 {
 		t.Fatalf("expected 1 provider, got %v", body["providers"])
 	}
-	p := providers[0].(map[string]any)
+	p, ok := providers[0].(map[string]any)
+	if !ok {
+		t.Fatal("expected map[string]any for provider entry")
+	}
 	if p["name"] != "LiteLLM" {
 		t.Errorf("provider name = %v, want LiteLLM", p["name"])
 	}
-	if count := int(p["count"].(float64)); count != 2 {
+	countVal, _ := p["count"].(float64)
+	if count := int(countVal); count != 2 {
 		t.Errorf("count = %d, want 2", count)
 	}
 }
@@ -211,7 +217,10 @@ func wsConnect(t *testing.T, s *Server) (context.Context, *websocket.Conn) {
 	srv := httptest.NewServer(http.HandlerFunc(s.handleWS))
 	t.Cleanup(srv.Close)
 	ctx := context.Background()
-	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket dial: %v", err)
 	}
@@ -313,7 +322,10 @@ func TestHandleAvailableModels_ReturnsAllModelsNoCap(t *testing.T) {
 	if !ok || len(providers) != 1 {
 		t.Fatalf("expected 1 provider, got %v", body["providers"])
 	}
-	p := providers[0].(map[string]any)
+	p, ok := providers[0].(map[string]any)
+	if !ok {
+		t.Fatal("providers[0] is not map[string]any")
+	}
 	models, ok := p["models"].([]any)
 	if !ok {
 		t.Fatalf("models field missing or wrong type")

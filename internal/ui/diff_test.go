@@ -14,7 +14,7 @@ import (
 
 func TestRenderDiffs_EmptyResponses(t *testing.T) {
 	out := ui.RenderDiffs([]models.ModelResponse{})
-	assert.Equal(t, "", out)
+	assert.Empty(t, out)
 }
 
 func TestRenderDiffs_ShowsFailedResponses(t *testing.T) {
@@ -130,7 +130,7 @@ func TestRenderDiffs_WrapsLongTextLines(t *testing.T) {
 	// Render at 40-char width; the 120-char line should be split across
 	// multiple visual lines, none longer than 38 chars (40 - 2 indent).
 	out := ui.RenderDiffs(responses, 40)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		// Skip header lines (contain model ID/stats) and blank lines.
 		if strings.Contains(line, "m1") || strings.TrimSpace(line) == "" {
 			continue
@@ -139,7 +139,7 @@ func TestRenderDiffs_WrapsLongTextLines(t *testing.T) {
 			"visual line exceeds terminal width: %q", line)
 	}
 	// All content should still be present.
-	assert.Equal(t, strings.Count(out, "x"), 120)
+	assert.Equal(t, 120, strings.Count(out, "x"))
 }
 
 func TestRenderDiffs_WrapsLongReasoningLines(t *testing.T) {
@@ -152,7 +152,7 @@ func TestRenderDiffs_WrapsLongReasoningLines(t *testing.T) {
 		},
 	}
 	out := ui.RenderDiffs(responses, 50)
-	assert.Equal(t, strings.Count(out, "y"), 100)
+	assert.Equal(t, 100, strings.Count(out, "y"))
 }
 
 // --- RenderSelectionMenu ---

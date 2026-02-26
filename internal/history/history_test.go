@@ -53,7 +53,7 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 
-	assert.Equal(t, len(input), len(got), "loaded map should have the same number of keys")
+	assert.Len(t, got, len(input), "loaded map should have the same number of keys")
 
 	for modelID, wantTurns := range input {
 		gotTurns, ok := got[modelID]
@@ -74,7 +74,7 @@ func TestLoad_MissingFile(t *testing.T) {
 	path := tmpPath(t, "does-not-exist.json")
 
 	got, err := history.Load(path)
-	assert.NoError(t, err, "missing file should not be an error")
+	require.NoError(t, err, "missing file should not be an error")
 	assert.Nil(t, got, "missing file should return nil map")
 }
 
@@ -85,7 +85,7 @@ func TestLoad_CorruptJSON(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("{this is not valid json!!!"), 0o644))
 
 	got, err := history.Load(path)
-	assert.Error(t, err, "corrupt JSON should return a non-nil error")
+	require.Error(t, err, "corrupt JSON should return a non-nil error")
 	assert.Nil(t, got, "corrupt JSON should return nil map")
 }
 
@@ -140,7 +140,7 @@ func TestClear_MissingFile(t *testing.T) {
 func TestSave_EmptyMap(t *testing.T) {
 	path := tmpPath(t, "history.json")
 	err := history.Save(path, map[string][]models.ConversationTurn{})
-	assert.NoError(t, err, "Save with empty map should not error")
+	require.NoError(t, err, "Save with empty map should not error")
 	_, statErr := os.Stat(path)
 	assert.True(t, os.IsNotExist(statErr), "empty map should not create a file")
 }
@@ -148,7 +148,7 @@ func TestSave_EmptyMap(t *testing.T) {
 func TestSave_NilMap(t *testing.T) {
 	path := tmpPath(t, "history.json")
 	err := history.Save(path, nil)
-	assert.NoError(t, err, "Save with nil map should not error")
+	require.NoError(t, err, "Save with nil map should not error")
 	_, statErr := os.Stat(path)
 	assert.True(t, os.IsNotExist(statErr), "nil map should not create a file")
 }
@@ -159,7 +159,7 @@ func TestLoad_ReadError(t *testing.T) {
 	// Use a directory path as if it were a file → ReadFile returns a non-IsNotExist error.
 	dir := t.TempDir()
 	got, err := history.Load(dir)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, got)
 }
 
@@ -169,7 +169,7 @@ func TestLoad_EmptyJSONObject(t *testing.T) {
 	path := tmpPath(t, "empty.json")
 	require.NoError(t, os.WriteFile(path, []byte("{}"), 0o644))
 	got, err := history.Load(path)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
 }

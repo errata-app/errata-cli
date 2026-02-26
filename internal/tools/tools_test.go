@@ -102,7 +102,7 @@ func TestExecuteRead_OffsetBeyondEnd(t *testing.T) {
 func TestExecuteRead_HardCap(t *testing.T) {
 	dir := t.TempDir()
 	var sb strings.Builder
-	for i := 0; i < 2005; i++ {
+	for range 2005 {
 		sb.WriteString("line\n")
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "big.txt"), []byte(sb.String()), 0o644))
@@ -607,8 +607,7 @@ func TestListDirectory_DirectoriesHaveNoSizeHint(t *testing.T) {
 
 	out := tools.ExecuteListDirectory(".", 1)
 	// The directory line should be "subdir/" with no "(N KB)" attached.
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, "subdir/") {
 			assert.NotContains(t, line, "KB", "directory entry should not have a size hint")
 		}
@@ -619,14 +618,14 @@ func TestListDirectory_DirectoriesHaveNoSizeHint(t *testing.T) {
 
 func TestLoadDisabledTools_EmptyPath(t *testing.T) {
 	m, err := tools.LoadDisabledTools("")
-	assert.NoError(t, err)
-	assert.Nil(t, m)
+	require.NoError(t, err)
+	assert.Empty(t, m)
 }
 
 func TestLoadDisabledTools_NonExistentFile(t *testing.T) {
 	m, err := tools.LoadDisabledTools(t.TempDir() + "/nope.json")
-	assert.NoError(t, err)
-	assert.Nil(t, m)
+	require.NoError(t, err)
+	assert.Empty(t, m)
 }
 
 func TestSaveAndLoadDisabledTools_RoundTrip(t *testing.T) {
@@ -733,7 +732,6 @@ func TestExecuteWebFetch_ConcurrentSameURLDeduplicates(t *testing.T) {
 	results := make([]string, 2)
 	done := make(chan struct{}, 2)
 	for i := range results {
-		i := i
 		go func() {
 			results[i] = tools.ExecuteWebFetch(srv.URL)
 			done <- struct{}{}
@@ -1012,7 +1010,7 @@ func TestDefinitionsAllowed_NilAllowlist_UsesAll(t *testing.T) {
 	got := tools.DefinitionsAllowed(nil, disabled)
 	names := toolNames(got)
 	assert.NotContains(t, names, tools.BashToolName)
-	assert.Greater(t, len(got), 0)
+	assert.NotEmpty(t, got)
 }
 
 func TestDefinitionsAllowed_InvalidNames(t *testing.T) {

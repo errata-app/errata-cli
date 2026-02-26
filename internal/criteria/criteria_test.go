@@ -23,10 +23,10 @@ func TestParse_AllTypes(t *testing.T) {
 	require.Len(t, parsed, 4)
 
 	assert.Equal(t, "no_errors", parsed[0].Type)
-	assert.Equal(t, "", parsed[0].Arg)
+	assert.Empty(t, parsed[0].Arg)
 
 	assert.Equal(t, "has_writes", parsed[1].Type)
-	assert.Equal(t, "", parsed[1].Arg)
+	assert.Empty(t, parsed[1].Arg)
 
 	assert.Equal(t, "contains", parsed[2].Type)
 	assert.Equal(t, "all tests pass", parsed[2].Arg)

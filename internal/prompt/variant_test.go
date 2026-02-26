@@ -10,7 +10,7 @@ import (
 func TestResolve_DefaultWhenEmpty(t *testing.T) {
 	vs := prompt.VariantSet{}
 	content, source := vs.Resolve("gpt-4o", "openai", "")
-	assert.Equal(t, "", content)
+	assert.Empty(t, content)
 	assert.Equal(t, "default", source)
 }
 
