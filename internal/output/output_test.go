@@ -468,6 +468,88 @@ func TestLoad_NonexistentFile(t *testing.T) {
 	}
 }
 
+func TestBuildReport_NilRecipeNilCollector(t *testing.T) {
+	responses := []models.ModelResponse{
+		{ModelID: "m", Text: "answer", LatencyMS: 100},
+	}
+	report := BuildReport("sess", nil, "hello", responses, nil, nil)
+	if report.Recipe.Name != "default" {
+		t.Errorf("Recipe.Name = %q, want default", report.Recipe.Name)
+	}
+	if report.Recipe.Constraints != nil {
+		t.Error("nil recipe should leave Constraints nil")
+	}
+	if report.Recipe.ModelParams != nil {
+		t.Error("nil recipe should leave ModelParams nil")
+	}
+	if len(report.Models) != 1 {
+		t.Fatalf("Models len = %d, want 1", len(report.Models))
+	}
+	if report.Models[0].Events == nil {
+		t.Error("Events should not be nil even without a collector")
+	}
+	if len(report.Models[0].Events) != 0 {
+		t.Errorf("Events len = %d, want 0", len(report.Models[0].Events))
+	}
+}
+
+func TestBuildReport_ZeroConstraints(t *testing.T) {
+	rec := &recipe.Recipe{Name: "test"}
+	report := BuildReport("sess", rec, "hello", nil, nil, nil)
+	if report.Recipe.Constraints != nil {
+		t.Error("zero constraints should leave Constraints nil")
+	}
+	if report.Recipe.ModelParams != nil {
+		t.Error("zero model params should leave ModelParams nil")
+	}
+}
+
+func TestBuildReport_PartialModelParams(t *testing.T) {
+	temp := 0.5
+	rec := &recipe.Recipe{
+		Name:        "test",
+		ModelParams: recipe.ModelParamsConfig{Temperature: &temp},
+	}
+	report := BuildReport("sess", rec, "hello", nil, nil, nil)
+	if report.Recipe.ModelParams == nil {
+		t.Fatal("ModelParams should not be nil when Temperature is set")
+	}
+	if report.Recipe.ModelParams.Temperature == nil || *report.Recipe.ModelParams.Temperature != 0.5 {
+		t.Errorf("Temperature = %v, want 0.5", report.Recipe.ModelParams.Temperature)
+	}
+	if report.Recipe.ModelParams.MaxTokens != nil {
+		t.Errorf("MaxTokens should be nil, got %v", report.Recipe.ModelParams.MaxTokens)
+	}
+	if report.Recipe.ModelParams.Seed != nil {
+		t.Errorf("Seed should be nil, got %v", report.Recipe.ModelParams.Seed)
+	}
+}
+
+func TestBuildReport_AllErrors(t *testing.T) {
+	responses := []models.ModelResponse{
+		{ModelID: "m1", Error: "fail1"},
+		{ModelID: "m2", Error: "fail2"},
+	}
+	report := BuildReport("sess", nil, "hello", responses, nil, nil)
+	if report.Aggregate.SuccessCount != 0 {
+		t.Errorf("SuccessCount = %d, want 0", report.Aggregate.SuccessCount)
+	}
+	if report.Aggregate.FastestModel != "" {
+		t.Errorf("FastestModel = %q, want empty", report.Aggregate.FastestModel)
+	}
+	if report.Aggregate.FastestMS != 0 {
+		t.Errorf("FastestMS = %d, want 0", report.Aggregate.FastestMS)
+	}
+}
+
+func TestSave_MkdirAllError(t *testing.T) {
+	report := BuildReport("sess", nil, "hello", nil, nil, nil)
+	_, err := Save("/dev/null/sub/outputs", report)
+	if err == nil {
+		t.Error("Save to impossible path should error")
+	}
+}
+
 func TestLoad_InvalidJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
