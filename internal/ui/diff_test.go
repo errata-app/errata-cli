@@ -122,6 +122,39 @@ func TestRenderDiffs_NoDuplicatePrefix(t *testing.T) {
 	assert.Contains(t, out, "world")
 }
 
+func TestRenderDiffs_WrapsLongTextLines(t *testing.T) {
+	longLine := strings.Repeat("x", 120)
+	responses := []models.ModelResponse{
+		{ModelID: "m1", Text: longLine},
+	}
+	// Render at 40-char width; the 120-char line should be split across
+	// multiple visual lines, none longer than 38 chars (40 - 2 indent).
+	out := ui.RenderDiffs(responses, 40)
+	for _, line := range strings.Split(out, "\n") {
+		// Skip header lines (contain model ID/stats) and blank lines.
+		if strings.Contains(line, "m1") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		assert.LessOrEqual(t, len([]rune(line)), 40,
+			"visual line exceeds terminal width: %q", line)
+	}
+	// All content should still be present.
+	assert.Equal(t, strings.Count(out, "x"), 120)
+}
+
+func TestRenderDiffs_WrapsLongReasoningLines(t *testing.T) {
+	longLine := strings.Repeat("y", 100)
+	responses := []models.ModelResponse{
+		{
+			ModelID:        "m1",
+			Text:           longLine,
+			ProposedWrites: []tools.FileWrite{{Path: "f.txt", Content: "a"}},
+		},
+	}
+	out := ui.RenderDiffs(responses, 50)
+	assert.Equal(t, strings.Count(out, "y"), 100)
+}
+
 // --- RenderSelectionMenu ---
 
 func TestRenderSelectionMenu_ContainsSkipOption(t *testing.T) {

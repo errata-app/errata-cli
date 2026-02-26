@@ -1104,7 +1104,7 @@ func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !a.configTextEditing {
-		// Not actively editing — Escape goes back.
+		// Not actively editing — Enter starts, Escape goes back.
 		if msg.Type == tea.KeyEsc {
 			a.configExpandedIdx = -1
 			a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
@@ -1120,6 +1120,7 @@ func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch sec.Name {
 		case "system-prompt":
 			a.sessionRecipe.SystemPrompt = val
+			tools.SetSystemPromptExtra(val)
 		case "context-summarization":
 			a.sessionRecipe.SummarizationPrompt = val
 		}

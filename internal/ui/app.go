@@ -305,7 +305,7 @@ func (a App) renderFeedContent() string {
 				sb.WriteByte('\n')
 			}
 			if item.responses != nil {
-				d := RenderDiffs(item.responses)
+				d := RenderDiffs(item.responses, a.width)
 				if d != "" {
 					sb.WriteString(d)
 				}
