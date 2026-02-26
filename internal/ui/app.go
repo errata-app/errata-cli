@@ -163,6 +163,8 @@ type App struct {
 	configScalarFields  []scalarField
 	configScalarCursor  int
 	configEditBuf       string
+	configTextArea      textarea.Model // textarea for text section editing
+	configTextEditing   bool           // true when textarea is active in a text section
 	sessionRecipe       *recipe.Recipe // working copy; nil until first /config or /set
 	recipeModified      bool
 }
@@ -192,6 +194,13 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		fmt.Fprintf(os.Stderr, "warning: could not load tool state: %v\n", err)
 	}
 
+	cta := textarea.New()
+	cta.Placeholder = "Enter text…"
+	cta.SetHeight(8)
+	cta.SetWidth(80)
+	cta.CharLimit = 0
+	cta.ShowLineNumbers = false
+
 	app := &App{
 		adapters:              adapters,
 		prefPath:              prefPath,
@@ -202,6 +211,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		historyIdx:            -1,
 		sessionID:             sessionID,
 		input:                 ta,
+		configTextArea:        cta,
 		feedVP:                viewport.New(80, 20),
 		panelIdx:              make(map[string]int),
 		conversationHistories: h,
@@ -567,6 +577,7 @@ func (a App) View() string {
 				a.configListItems, a.configListCursor,
 				a.configScalarFields, a.configScalarCursor,
 				a.configEditBuf,
+				a.configTextEditing, a.configTextArea.View(),
 			))
 			break
 		}

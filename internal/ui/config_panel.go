@@ -766,7 +766,7 @@ func (a *App) applySessionRecipe() {
 
 // ── rendering ───────────────────────────────────────────────────────────────
 
-func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width int, listItems []listItem, listCursor int, scalarFields []scalarField, scalarCursor int, editBuf string) string {
+func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width int, listItems []listItem, listCursor int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string) string {
 	var sb strings.Builder
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
@@ -839,9 +839,23 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 			sb.WriteString(dimStyle.Render("  Enter = edit field  Escape = back"))
 
 		case "text":
-			sb.WriteString(dimStyle.Render(fmt.Sprintf("  %s", editBuf)))
-			sb.WriteByte('\n')
-			sb.WriteString(dimStyle.Render("  (editing not yet implemented — use /set)"))
+			if textEditing {
+				sb.WriteString(textAreaView)
+				sb.WriteByte('\n')
+				sb.WriteString(dimStyle.Render("  Ctrl+S = save  Escape = cancel"))
+			} else {
+				preview := editBuf
+				if preview == "" {
+					preview = "(empty)"
+				} else if runes := []rune(preview); len(runes) > 200 {
+					preview = string(runes[:200]) + "..."
+				}
+				for _, line := range strings.Split(preview, "\n") {
+					sb.WriteString(dimStyle.Render("  " + line))
+					sb.WriteByte('\n')
+				}
+				sb.WriteString(dimStyle.Render("  Enter = edit  Escape = back"))
+			}
 		}
 
 		sb.WriteByte('\n')
@@ -883,11 +897,8 @@ func (a App) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a.handleConfigListKey(msg)
 		case "scalar":
 			return a.handleConfigScalarKey(msg)
-		}
-		// text: fall through to close on escape
-		if msg.Type == tea.KeyEsc {
-			a.configExpandedIdx = -1
-			return a, nil
+		case "text":
+			return a.handleConfigTextKey(msg)
 		}
 		return a, nil
 	}
@@ -937,12 +948,17 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.configScalarCursor = 0
 			a.configEditBuf = ""
 		case "text":
+			var content string
 			switch sec.Name {
 			case "system-prompt":
-				a.configEditBuf = a.sessionRecipe.SystemPrompt
+				content = a.sessionRecipe.SystemPrompt
 			case "context-summarization":
-				a.configEditBuf = a.sessionRecipe.SummarizationPrompt
+				content = a.sessionRecipe.SummarizationPrompt
 			}
+			a.configEditBuf = content
+			a.configTextArea.SetValue(content)
+			a.configTextArea.Focus()
+			a.configTextEditing = true
 		}
 		return a, nil
 	case tea.KeyRunes:
@@ -1084,4 +1100,46 @@ func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	return a, nil
+}
+
+func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !a.configTextEditing {
+		// Not actively editing — Escape goes back.
+		if msg.Type == tea.KeyEsc {
+			a.configExpandedIdx = -1
+			a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+			return a, nil
+		}
+		return a, nil
+	}
+
+	// Ctrl+S or Ctrl+D saves the text.
+	if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyCtrlD {
+		sec := a.configSections[a.configExpandedIdx]
+		val := a.configTextArea.Value()
+		switch sec.Name {
+		case "system-prompt":
+			a.sessionRecipe.SystemPrompt = val
+		case "context-summarization":
+			a.sessionRecipe.SummarizationPrompt = val
+		}
+		a.recipeModified = true
+		a.configTextEditing = false
+		a.configTextArea.Blur()
+		a.applySessionRecipe()
+		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+		return a, nil
+	}
+
+	// Escape cancels editing.
+	if msg.Type == tea.KeyEsc {
+		a.configTextEditing = false
+		a.configTextArea.Blur()
+		return a, nil
+	}
+
+	// Delegate all other keys to the textarea.
+	var cmd tea.Cmd
+	a.configTextArea, cmd = a.configTextArea.Update(msg)
+	return a, cmd
 }

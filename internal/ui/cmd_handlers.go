@@ -733,7 +733,16 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) {
 					a.configScalarCursor = 0
 					a.configEditBuf = ""
 				case "text":
-					a.configEditBuf = a.sessionRecipe.SystemPrompt
+					var content string
+					switch sec.Name {
+					case "system-prompt":
+						content = a.sessionRecipe.SystemPrompt
+					case "context-summarization":
+						content = a.sessionRecipe.SummarizationPrompt
+					}
+					a.configTextArea.SetValue(content)
+					a.configTextArea.Focus()
+					a.configTextEditing = true
 				}
 				break
 			}
