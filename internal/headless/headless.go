@@ -43,7 +43,7 @@ type Options struct {
 	Stderr io.Writer
 }
 
-func (o Options) stderr() io.Writer {
+func (o *Options) stderr() io.Writer {
 	if o.Stderr != nil {
 		return o.Stderr
 	}
@@ -51,7 +51,7 @@ func (o Options) stderr() io.Writer {
 }
 
 // Run executes all recipe tasks and returns the headless report.
-func Run(ctx context.Context, opts Options) (*RunReport, error) {
+func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	rec := opts.Recipe
 	if len(rec.Tasks) == 0 {
 		return nil, fmt.Errorf("recipe has no tasks — ## Tasks section is required for headless mode")
@@ -241,7 +241,7 @@ func buildActiveDefs(rec *recipe.Recipe, mcpDefs []tools.ToolDef) []tools.ToolDe
 }
 
 // buildRunContext creates the fully-wired context for a single task run.
-func buildRunContext(parent context.Context, opts Options, rec *recipe.Recipe, activeDefs []tools.ToolDef) context.Context {
+func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, activeDefs []tools.ToolDef) context.Context {
 	var bashPrefixes []string
 	if rec.Tools != nil {
 		bashPrefixes = rec.Tools.BashPrefixes

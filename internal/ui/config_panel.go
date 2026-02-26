@@ -22,6 +22,7 @@ type configSection struct {
 	Kind       string // "list" | "scalar" | "text"
 	Desc       string // brief one-line description (shown in nav view)
 	DetailDesc string // detailed description (shown in expanded view)
+	Path       string // dot-path into configPaths (text sections)
 }
 
 // listItem is one toggleable row in a list-type section editor.
@@ -117,7 +118,7 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 	}
 	sections := []configSection{
 		{Name: "models", Summary: summarizeModels(rec, adapters), Kind: "list"},
-		{Name: "system-prompt", Summary: summarizeSystemPrompt(rec), Kind: "text"},
+		{Name: "system-prompt", Summary: summarizeSystemPrompt(rec), Kind: "text", Path: "system_prompt"},
 		{Name: "tools", Summary: summarizeTools(rec, disabled), Kind: "list"},
 		{Name: "mcp-servers", Summary: summarizeMCPServers(rec), Kind: "list"},
 		{Name: "parameters", Summary: summarizeParameters(rec), Kind: "scalar"},
@@ -128,7 +129,7 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 		{Name: "reminders", Summary: summarizeReminders(rec), Kind: "list"},
 		{Name: "hooks", Summary: summarizeHooks(rec), Kind: "list"},
 		{Name: "output-processing", Summary: summarizeOutputProcessing(rec), Kind: "scalar"},
-		{Name: "context-summarization", Summary: summarizeContextSummarization(rec), Kind: "text"},
+		{Name: "context-summarization", Summary: summarizeContextSummarization(rec), Kind: "text", Path: "context_summarization.prompt"},
 	}
 	for i := range sections {
 		if desc, ok := sectionDescriptions[sections[i].Name]; ok {
@@ -626,6 +627,14 @@ var configPaths = map[string]configPathEntry{
 			return nil
 		},
 	},
+	"system_prompt": {
+		Get: func(r *recipe.Recipe) string { return r.SystemPrompt },
+		Set: func(r *recipe.Recipe, v string) error {
+			r.SystemPrompt = v
+			tools.SetSystemPromptExtra(v)
+			return nil
+		},
+	},
 }
 
 // configPathGet returns the current string value for a dot-path.
@@ -674,6 +683,7 @@ var configPathDefaults = map[string]string{
 	"parameters.temperature":      "provider default",
 	"parameters.max_tokens":       "provider default",
 	"context_summarization.prompt": "built-in prompt",
+	"system_prompt":                "none",
 }
 
 // configPathCandidates returns all valid config dot-paths for tab-completion.
@@ -946,13 +956,7 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:
 			a.configScalarCursor = 0
 			a.configEditBuf = ""
 		case "text":
-			var content string
-			switch sec.Name {
-			case "system-prompt":
-				content = a.sessionRecipe.SystemPrompt
-			case "context-summarization":
-				content = a.sessionRecipe.SummarizationPrompt
-			}
+			content := configPathGet(a.sessionRecipe, sec.Path)
 			a.configEditBuf = content
 			a.configTextArea.SetValue(content)
 			a.configTextArea.Focus()
@@ -1115,13 +1119,7 @@ func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint
 	if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyCtrlD {
 		sec := a.configSections[a.configExpandedIdx]
 		val := a.configTextArea.Value()
-		switch sec.Name {
-		case "system-prompt":
-			a.sessionRecipe.SystemPrompt = val
-			tools.SetSystemPromptExtra(val)
-		case "context-summarization":
-			a.sessionRecipe.SummarizationPrompt = val
-		}
+		_ = setConfigValue(a.sessionRecipe, sec.Path, val)
 		a.recipeModified = true
 		a.configTextEditing = false
 		a.configTextArea.Blur()

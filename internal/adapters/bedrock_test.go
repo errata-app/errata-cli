@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,7 +60,7 @@ func TestNewBedrockAdapter_PrefixStripping(t *testing.T) {
 func TestNewBedrockAdapter_Capabilities(t *testing.T) {
 	a := NewBedrockAdapter("bedrock/anthropic.claude-sonnet-4-20250514-v1:0", "us-east-1")
 	// Capabilities should infer sub-provider from the dotted ID.
-	caps := a.Capabilities(nil)
+	caps := a.Capabilities(context.Background())
 	assert.Equal(t, "bedrock", caps.Provider)
 	assert.Equal(t, "bedrock/anthropic.claude-sonnet-4-20250514-v1:0", caps.ModelID)
 	// Should inherit anthropic defaults (context window ≥ 200k).

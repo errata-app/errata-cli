@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,7 +18,7 @@ func TestNewAzureOpenAIAdapter_PrefixStripping(t *testing.T) {
 
 func TestNewAzureOpenAIAdapter_Capabilities(t *testing.T) {
 	a := NewAzureOpenAIAdapter("azure/gpt-4o", "key", "https://endpoint", "2024-10-21")
-	caps := a.Capabilities(nil)
+	caps := a.Capabilities(context.Background())
 	assert.Equal(t, "azure", caps.Provider)
 	assert.Equal(t, "azure/gpt-4o", caps.ModelID)
 	// Should inherit OpenAI defaults.
