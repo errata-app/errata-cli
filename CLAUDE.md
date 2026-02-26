@@ -97,14 +97,16 @@ errata/
 ## Key Commands
 
 ```bash
-go build -o errata ./cmd/errata   # build binary
-./errata                           # start TUI REPL
-./errata serve                     # start web server (default :8080)
-./errata serve --port 3000         # custom port
-./errata stats                     # print preference summary (non-interactive)
-make test                          # go test ./...
-make lint                          # golangci-lint run ./...
-make build-all                     # cross-compile darwin/linux/windows to dist/
+go build -o errata ./cmd/errata            # build binary
+./errata                                    # start TUI REPL
+./errata serve                              # start web server (default :8080)
+./errata serve --port 3000                  # custom port
+./errata stats                              # print preference summary (non-interactive)
+./errata --debug-log data/log.jsonl         # enable JSONL debug logging
+./errata -r myrecipe.md                     # use explicit recipe file
+make test                                   # go test ./...
+make lint                                   # golangci-lint run ./...
+make build-all                              # cross-compile darwin/linux/windows to dist/
 ```
 
 ---
@@ -176,7 +178,7 @@ Both surfaces derive their lists from this single source; web commands are serve
    - `web_search(query)` — DuckDuckGo instant answers (knowledge panels; no API key required)
 
    **MCP tools (dynamically registered at startup):**
-   - Any tool exposed by servers in `ERRATA_MCP_SERVERS` — injected into the same dispatch table
+   - Any tool exposed by servers in recipe `## MCP Servers` — injected into the same dispatch table
    - Models see and can call MCP tools identically to built-in tools
    - Loop exits when the model stops calling tools
 
@@ -269,7 +271,7 @@ history fill relative to the model's known context window.
 
 **Sliding window (automatic, in `RunAll`):**
 `runner.TrimHistory` keeps the most recent `maxHistoryTurns` turns (default 20, rounded
-to whole user+assistant pairs) before each API call. Override via `ERRATA_MAX_HISTORY_TURNS`.
+to whole user+assistant pairs) before each API call. Override via recipe `## Context` `max_history_turns:`.
 
 **Compaction (manual + automatic):**
 - `/compact` (both surfaces) calls `runner.CompactHistories`, which runs each adapter
@@ -560,7 +562,9 @@ Used by both TUI (`internal/ui/diff.go`) and web (`internal/web/handlers.go`).
 ## Model Configuration
 
 ```bash
-# .env
+# .env — API keys and credentials only
+# All behavioural config (models, system prompt, MCP servers, constraints, etc.)
+# is configured via recipe.md. See recipe.example.md for the full reference.
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=AIza...
@@ -571,24 +575,11 @@ OPENROUTER_API_KEY=sk-or-...
 # LiteLLM — self-hosted proxy; base URL must include /v1
 LITELLM_BASE_URL=http://localhost:4000/v1
 LITELLM_API_KEY=optional
+```
 
-# Optional: pin specific models (comma-separated)
-ERRATA_ACTIVE_MODELS=claude-opus-4-6,anthropic/claude-sonnet-4-6
-
-# MCP tool servers — each server exposes additional tools to all models
-# Format: "name:command arg1 arg2,name2:command2 arg1"
-# The subprocess inherits the full process environment (API keys, etc.)
-ERRATA_MCP_SERVERS=exa:npx @exa-ai/exa-mcp-server
-
-# Custom system prompt appended to the built-in tool guidance (all adapters)
-# Use for project-specific context, conventions, or domain knowledge
-ERRATA_SYSTEM_PROMPT=You are working on a Go codebase. Always run go vet and go test after making changes.
-
-# Optional: override how many history turns are kept per model (default 20)
-ERRATA_MAX_HISTORY_TURNS=10
-
-# Optional: enable per-run JSONL debug logging
-ERRATA_DEBUG_LOG=data/log.jsonl
+Debug logging is enabled via the `--debug-log` CLI flag:
+```bash
+./errata --debug-log data/log.jsonl
 ```
 
 Default models (auto-detected from available API keys; native providers only):
@@ -598,8 +589,8 @@ Default models (auto-detected from available API keys; native providers only):
 | Anthropic | `claude-sonnet-4-6`  | prefix `claude`              |
 | OpenAI    | `gpt-4o`             | prefix `gpt-`, `o1`, `o3`    |
 | Google    | `gemini-2.0-flash`   | prefix `gemini`              |
-| OpenRouter | _(none; must set `ERRATA_ACTIVE_MODELS`)_ | contains `/` |
-| LiteLLM   | _(none; must set `ERRATA_ACTIVE_MODELS`)_ | prefix `litellm/` |
+| OpenRouter | _(none; must set recipe ## Models)_ | contains `/` |
+| LiteLLM   | _(none; must set recipe ## Models)_ | prefix `litellm/` |
 
 **OpenRouter** model IDs use `provider/model` format (e.g. `anthropic/claude-sonnet-4-6`,
 `meta-llama/llama-3-70b-instruct`). Any model ID containing `/` routes to OpenRouter.
@@ -632,15 +623,17 @@ Append-only. Corrupt lines are skipped with `log.Printf` (never crash on bad dat
 
 Errata supports the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) for
 extending the tool set at runtime. Any MCP server that speaks stdio transport and exposes
-the `tools` capability can be connected via `ERRATA_MCP_SERVERS`.
+the `tools` capability can be connected via the recipe `## MCP Servers` section.
 
-### Configuration format
+### Configuration format (recipe.md)
 
+```markdown
+## MCP Servers
+- name1: command arg1 arg2
+- name2: command
 ```
-ERRATA_MCP_SERVERS=name1:command arg1 arg2,name2:command
-```
 
-- Comma-separated list of `name:command` pairs
+- Bullet list of `name: command` pairs
 - `name` is used in log messages only
 - `command` is passed to `exec.Command` (the subprocess inherits the full process environment)
 - API keys for the MCP server (e.g. `EXA_API_KEY`) should be set in `.env` alongside Errata's own keys
@@ -699,15 +692,15 @@ MCP `inputSchema` (JSON Schema) is translated to Errata's `ToolDef` properties o
 Errata is designed to be used as a development harness that matches your real-world agentic
 setup. Key configuration knobs for production/team deployments:
 
-### Custom system prompt (`ERRATA_SYSTEM_PROMPT`)
+### Custom system prompt (recipe `## System Prompt`)
 
 Injected after the built-in tool guidance in every adapter's system prompt:
 
-```bash
-# Describe the project to every model on every prompt
-ERRATA_SYSTEM_PROMPT="You are working on the Acme platform, a Go monorepo at /opt/acme.\
- The main service is in cmd/acme/. Always run \`go test ./...\` before proposing writes.\
- The team uses conventional commits (feat:, fix:, chore:)."
+```markdown
+## System Prompt
+You are working on the Acme platform, a Go monorepo at /opt/acme.
+The main service is in cmd/acme/. Always run `go test ./...` before proposing writes.
+The team uses conventional commits (feat:, fix:, chore:).
 ```
 
 Implementation: `tools.SetSystemPromptExtra(cfg.SystemPromptExtra)` is called once at
@@ -729,17 +722,20 @@ For persistent per-project defaults, the `/tools off` state is saved to `.errata
 
 ### Pointing at a self-hosted model proxy
 
-```bash
-# LiteLLM proxy exposing any model — Ollama, local llms, internal endpoints
-LITELLM_BASE_URL=http://10.0.0.5:4000/v1
-ERRATA_ACTIVE_MODELS=litellm/llama-3-70b,litellm/codestral
+Set `LITELLM_BASE_URL` in `.env` and specify models via recipe:
+
+```markdown
+## Models
+- litellm/llama-3-70b
+- litellm/codestral
 ```
 
 ### Restricting to specific models
 
-```bash
-# Only compare these two models; ignore any other configured keys
-ERRATA_ACTIVE_MODELS=claude-opus-4-6,gpt-4o
+```markdown
+## Models
+- claude-opus-4-6
+- gpt-4o
 ```
 
 ### Running as a web service

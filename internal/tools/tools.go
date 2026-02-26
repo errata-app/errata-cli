@@ -50,13 +50,25 @@ const searchCommandTimeout = 30 * time.Second
 // defaultBashTimeout is the production timeout for bash tool execution.
 const defaultBashTimeout = 2 * time.Minute
 
-// bashTimeout returns the effective bash timeout, allowing ERRATA_BASH_TIMEOUT
-// to override (e.g. "2s") in tests without modifying global state.
+// bashTimeoutOverride, when > 0, overrides the default bash timeout.
+// Set via SetBashTimeout (recipe ## Constraints bash_timeout:).
+var bashTimeoutOverride time.Duration
+
+// SetBashTimeout overrides the default bash tool timeout.
+// Pass 0 to reset to the default.
+func SetBashTimeout(d time.Duration) { bashTimeoutOverride = d }
+
+// allowLocalFetch controls whether web_fetch may target localhost URLs.
+// Set via SetAllowLocalFetch (recipe ## Sandbox allow_local_fetch:).
+var allowLocalFetch bool
+
+// SetAllowLocalFetch enables or disables web_fetch for localhost URLs.
+func SetAllowLocalFetch(b bool) { allowLocalFetch = b }
+
+// bashTimeout returns the effective bash timeout.
 func bashTimeout() time.Duration {
-	if v := os.Getenv("ERRATA_BASH_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			return d
-		}
+	if bashTimeoutOverride > 0 {
+		return bashTimeoutOverride
 	}
 	return defaultBashTimeout
 }
@@ -818,8 +830,8 @@ func ExecuteWebFetch(rawURL string) string {
 	}
 	host := u.Hostname()
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		if os.Getenv("ERRATA_ALLOW_LOCAL_FETCH") != "true" {
-			return "[error: fetching localhost URLs is disabled; set ERRATA_ALLOW_LOCAL_FETCH=true to enable]"
+		if !allowLocalFetch {
+			return "[error: fetching localhost URLs is disabled; set allow_local_fetch: true in recipe ## Sandbox to enable]"
 		}
 	}
 
@@ -969,11 +981,18 @@ const webSearchTimeout = 10 * time.Second
 // webSearchOutputLimit is the maximum bytes returned from a web_search call.
 const webSearchOutputLimit = 8_000
 
+// webSearchAPIBaseOverride, when non-empty, replaces the DuckDuckGo API URL.
+// Used in tests to point at a local HTTP server.
+var webSearchAPIBaseOverride string
+
+// SetWebSearchAPIBase overrides the DuckDuckGo API base URL (for tests).
+// Pass "" to reset to the default.
+func SetWebSearchAPIBase(u string) { webSearchAPIBaseOverride = u }
+
 // webSearchAPIBase returns the DuckDuckGo API base URL.
-// ERRATA_DDGSEARCH_URL overrides it — used in tests to point at a local server.
 func webSearchAPIBase() string {
-	if v := os.Getenv("ERRATA_DDGSEARCH_URL"); v != "" {
-		return strings.TrimRight(v, "/") + "/"
+	if webSearchAPIBaseOverride != "" {
+		return strings.TrimRight(webSearchAPIBaseOverride, "/") + "/"
 	}
 	return "https://api.duckduckgo.com/"
 }

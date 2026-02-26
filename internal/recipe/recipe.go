@@ -111,8 +111,9 @@ type ModelParamsConfig struct {
 
 // ConstraintsConfig limits agentic loop execution.
 type ConstraintsConfig struct {
-	MaxSteps int           // 0 = not set (unlimited)
-	Timeout  time.Duration // 0 = not set (use runner default)
+	MaxSteps    int           // 0 = not set (unlimited)
+	Timeout     time.Duration // 0 = not set (use runner default)
+	BashTimeout time.Duration // 0 = not set (use tools default 2m)
 }
 
 // ContextConfig controls conversation history management.
@@ -132,8 +133,9 @@ type SubAgentConfig struct {
 
 // SandboxConfig restricts the execution environment.
 type SandboxConfig struct {
-	Filesystem string // "" | "unrestricted" | "project_only" | "read_only"
-	Network    string // "" | "full" | "none"
+	Filesystem      string // "" | "unrestricted" | "project_only" | "read_only"
+	Network         string // "" | "full" | "none"
+	AllowLocalFetch bool   // allow web_fetch to target localhost URLs
 }
 
 // MetadataConfig carries recipe labels and sharing settings.
@@ -710,6 +712,13 @@ func parseConstraints(body string) ConstraintsConfig {
 			cfg.Timeout = time.Duration(n) * time.Second
 		}
 	}
+	if v, ok := m["bash_timeout"]; ok {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.BashTimeout = d
+		} else if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.BashTimeout = time.Duration(n) * time.Second
+		}
+	}
 	if v, ok := m["max_steps"]; ok {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			cfg.MaxSteps = n
@@ -788,6 +797,9 @@ func parseSandbox(body string) SandboxConfig {
 		default:
 			fmt.Fprintf(os.Stderr, "recipe: unknown sandbox network %q, ignoring\n", v)
 		}
+	}
+	if v, ok := m["allow_local_fetch"]; ok {
+		cfg.AllowLocalFetch = strings.EqualFold(v, "true")
 	}
 	return cfg
 }
@@ -1082,10 +1094,13 @@ func (r *Recipe) MarshalMarkdown() string {
 	}
 
 	// Constraints
-	if r.Constraints.Timeout > 0 || r.Constraints.MaxSteps > 0 {
+	if r.Constraints.Timeout > 0 || r.Constraints.MaxSteps > 0 || r.Constraints.BashTimeout > 0 {
 		sb.WriteString("\n## Constraints\n")
 		if r.Constraints.Timeout > 0 {
 			fmt.Fprintf(&sb, "timeout: %s\n", r.Constraints.Timeout.String())
+		}
+		if r.Constraints.BashTimeout > 0 {
+			fmt.Fprintf(&sb, "bash_timeout: %s\n", r.Constraints.BashTimeout.String())
 		}
 		if r.Constraints.MaxSteps > 0 {
 			fmt.Fprintf(&sb, "max_steps: %d\n", r.Constraints.MaxSteps)
@@ -1121,13 +1136,16 @@ func (r *Recipe) MarshalMarkdown() string {
 	}
 
 	// Sandbox
-	if r.Sandbox.Filesystem != "" || r.Sandbox.Network != "" {
+	if r.Sandbox.Filesystem != "" || r.Sandbox.Network != "" || r.Sandbox.AllowLocalFetch {
 		sb.WriteString("\n## Sandbox\n")
 		if r.Sandbox.Filesystem != "" {
 			fmt.Fprintf(&sb, "filesystem: %s\n", r.Sandbox.Filesystem)
 		}
 		if r.Sandbox.Network != "" {
 			fmt.Fprintf(&sb, "network: %s\n", r.Sandbox.Network)
+		}
+		if r.Sandbox.AllowLocalFetch {
+			sb.WriteString("allow_local_fetch: true\n")
 		}
 	}
 

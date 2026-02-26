@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -46,7 +45,7 @@ type Config struct {
 	// Both project and location must be set to enable the Vertex AI adapter.
 	VertexAILocation string
 
-	// ActiveModels is the explicit list from ERRATA_ACTIVE_MODELS (comma-separated).
+	// ActiveModels is the explicit model list (set via recipe ## Models).
 	// Empty means auto-detect one model per available provider.
 	// OpenRouter models use "provider/model" format (e.g. "anthropic/claude-sonnet-4-6").
 	// LiteLLM models use "litellm/<model>" format (e.g. "litellm/claude-sonnet-4-6").
@@ -59,16 +58,12 @@ type Config struct {
 	DefaultAzureModel     string
 	DefaultVertexModel    string
 
-	PreferencesPath  string
-	PricingCachePath string
-	HistoryPath      string
+	PreferencesPath   string
+	PricingCachePath  string
+	HistoryPath       string
 	PromptHistoryPath string
 
-	// DebugLogPath is the path for the append-only JSONL debug log.
-	// Empty (default) disables debug logging entirely.
-	DebugLogPath string
-
-	// MCPServers is the raw value of ERRATA_MCP_SERVERS.
+	// MCPServers is the serialised MCP server config (set via recipe ## MCP Servers).
 	// Format: "name:command arg1 arg2,name2:command2"
 	// Empty disables MCP entirely.
 	MCPServers string
@@ -76,21 +71,21 @@ type Config struct {
 	// SystemPromptExtra is appended after the built-in tool guidance in every
 	// adapter's system prompt. Use for project-specific context, coding conventions,
 	// or domain knowledge that should influence all models.
-	// Loaded from ERRATA_SYSTEM_PROMPT.
+	// Set via recipe ## System Prompt.
 	SystemPromptExtra string
 
 	// SubagentModel is the model ID used when spawning sub-agents via spawn_agent.
-	// Empty means use the same model as the parent. Loaded from ERRATA_SUBAGENT_MODEL.
+	// Empty means use the same model as the parent. Set via recipe ## Sub-Agent model:.
 	SubagentModel string
 
 	// SubagentMaxDepth is the maximum spawn_agent recursion depth.
 	// 1 (default) means sub-agents cannot spawn further sub-agents.
-	// 0 disables spawn_agent entirely. Loaded from ERRATA_SUBAGENT_MAX_DEPTH.
+	// 0 disables spawn_agent entirely. Set via recipe ## Sub-Agent max_depth:.
 	SubagentMaxDepth int
 
 	// AgentTimeout is the per-adapter wall-clock timeout for a single RunAgent call.
 	// 0 means use the runner's built-in default (5 minutes).
-	// Set via recipe ## Constraints timeout: or ERRATA_AGENT_TIMEOUT env var.
+	// Set via recipe ## Constraints timeout:.
 	AgentTimeout time.Duration
 
 	// CompactThreshold is the context fill fraction that triggers auto-compact.
@@ -99,13 +94,12 @@ type Config struct {
 	CompactThreshold float64
 
 	// MaxHistoryTurns is the maximum number of conversation turns kept per model.
-	// Load() sets this to 20 by default; ERRATA_MAX_HISTORY_TURNS overrides it.
-	// A recipe can further override via ## Context max_history_turns:.
+	// Default is 20. Set via recipe ## Context max_history_turns:.
 	MaxHistoryTurns int
 
 	// Seed is the pseudorandom seed passed to model APIs for reproducible sampling.
 	// nil means not set (provider default); non-nil is passed through even if 0.
-	// Set via ERRATA_SEED env var, recipe ## Model Parameters seed:, or /seed command.
+	// Set via recipe ## Model Parameters seed: or /seed command.
 	Seed *int64
 }
 
@@ -127,32 +121,8 @@ func Load() Config {
 		PromptHistoryPath:     "data/prompt_history.jsonl",
 	}
 
-	cfg.DebugLogPath = os.Getenv("ERRATA_DEBUG_LOG")
-	cfg.MCPServers = os.Getenv("ERRATA_MCP_SERVERS")
-	cfg.SystemPromptExtra = os.Getenv("ERRATA_SYSTEM_PROMPT")
-	cfg.SubagentModel = os.Getenv("ERRATA_SUBAGENT_MODEL")
 	cfg.SubagentMaxDepth = 1 // default: sub-agents cannot spawn sub-agents
-	if v := os.Getenv("ERRATA_SUBAGENT_MAX_DEPTH"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			cfg.SubagentMaxDepth = n
-		}
-	}
 	cfg.MaxHistoryTurns = 20
-	if v := os.Getenv("ERRATA_MAX_HISTORY_TURNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.MaxHistoryTurns = n
-		}
-	}
-	if v := os.Getenv("ERRATA_AGENT_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			cfg.AgentTimeout = d
-		}
-	}
-	if v := os.Getenv("ERRATA_SEED"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Seed = &n
-		}
-	}
 
 	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
@@ -175,14 +145,6 @@ func Load() Config {
 
 	cfg.VertexAIProject = os.Getenv("VERTEX_AI_PROJECT")
 	cfg.VertexAILocation = os.Getenv("VERTEX_AI_LOCATION")
-
-	if v := os.Getenv("ERRATA_ACTIVE_MODELS"); v != "" {
-		for m := range strings.SplitSeq(v, ",") {
-			if m = strings.TrimSpace(m); m != "" {
-				cfg.ActiveModels = append(cfg.ActiveModels, m)
-			}
-		}
-	}
 
 	return cfg
 }

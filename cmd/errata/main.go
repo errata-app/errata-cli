@@ -24,7 +24,10 @@ import (
 	"github.com/suarezc/errata/internal/web"
 )
 
-var recipePath string
+var (
+	recipePath   string
+	debugLogPath string
+)
 
 func main() {
 	root := &cobra.Command{
@@ -33,6 +36,7 @@ func main() {
 		RunE:  runREPL,
 	}
 	root.PersistentFlags().StringVarP(&recipePath, "recipe", "r", "", "recipe file (default: auto-discover recipe.md)")
+	root.PersistentFlags().StringVar(&debugLogPath, "debug-log", "", "path to JSONL debug log")
 
 	statsCmd := &cobra.Command{
 		Use:   "stats",
@@ -88,10 +92,24 @@ func applyProjectRoot(rec *recipe.Recipe) {
 	}
 }
 
+// applyRecipeToolSettings applies recipe-level tool package settings
+// that are not represented in config.Config (they configure the tools package directly).
+func applyRecipeToolSettings(rec *recipe.Recipe) {
+	if rec == nil {
+		return
+	}
+	if rec.Constraints.BashTimeout > 0 {
+		tools.SetBashTimeout(rec.Constraints.BashTimeout)
+	}
+	if rec.Sandbox.AllowLocalFetch {
+		tools.SetAllowLocalFetch(true)
+	}
+}
+
 // setupAdapters loads config, pricing, adapters, and MCP servers.
 // Returns adapters, session ID, warnings, MCP state (defs + dispatchers),
 // and a cleanup function the caller must defer.
-func setupAdapters(cfg config.Config) (
+func setupAdapters(cfg config.Config, debugLog string) (
 	ads []models.ModelAdapter,
 	sessionID string,
 	warnings []string,
@@ -109,14 +127,14 @@ func setupAdapters(cfg config.Config) (
 		tools.SetSystemPromptExtra(cfg.SystemPromptExtra)
 	}
 
-	if cfg.DebugLogPath != "" {
-		logger, err := logging.NewLogger(cfg.DebugLogPath)
+	if debugLog != "" {
+		logger, err := logging.NewLogger(debugLog)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not open log file %q: %v\n", cfg.DebugLogPath, err)
+			fmt.Fprintf(os.Stderr, "warning: could not open log file %q: %v\n", debugLog, err)
 		} else {
 			cleanup = func() { _ = logger.Close() }
 			ads = logging.WrapAll(ads, sessionID, logger)
-			fmt.Fprintf(os.Stderr, "logging runs to %s\n", cfg.DebugLogPath)
+			fmt.Fprintf(os.Stderr, "logging runs to %s\n", debugLog)
 		}
 	}
 
@@ -137,7 +155,8 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
 	applyProjectRoot(rec)
-	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
+	applyRecipeToolSettings(rec)
+	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath)
 	defer cleanup()
 	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec)
 }
@@ -147,7 +166,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
 	applyProjectRoot(rec)
-	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
+	applyRecipeToolSettings(rec)
+	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath)
 	defer cleanup()
 	if len(ads) == 0 {
 		return fmt.Errorf("no models available — set at least one API key in .env")
@@ -183,8 +203,9 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
 	applyProjectRoot(rec)
+	applyRecipeToolSettings(rec)
 
-	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
+	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath)
 	defer cleanup()
 
 	if len(ads) == 0 {

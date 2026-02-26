@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -523,8 +524,9 @@ func TestExecuteBash_OutputCapped(t *testing.T) {
 }
 
 func TestExecuteBash_Timeout(t *testing.T) {
-	t.Setenv("ERRATA_BASH_TIMEOUT", "2s")
-	out := tools.ExecuteBash(context.Background(),"sleep 60")
+	tools.SetBashTimeout(2 * time.Second)
+	defer tools.SetBashTimeout(0)
+	out := tools.ExecuteBash(context.Background(), "sleep 60")
 	assert.Contains(t, out, "[error:")
 	assert.Contains(t, out, "timed out")
 }
@@ -668,7 +670,8 @@ func TestExecuteWebFetch_PlainText(t *testing.T) {
 		_, _ = w.Write([]byte("hello world"))
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_ALLOW_LOCAL_FETCH", "true")
+	tools.SetAllowLocalFetch(true)
+	defer tools.SetAllowLocalFetch(false)
 
 	out := tools.ExecuteWebFetch(srv.URL)
 	assert.Equal(t, "hello world", out)
@@ -680,7 +683,8 @@ func TestExecuteWebFetch_HTMLStripped(t *testing.T) {
 		_, _ = w.Write([]byte(`<html><head><title>T</title></head><body><p>visible text</p><script>alert(1)</script></body></html>`))
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_ALLOW_LOCAL_FETCH", "true")
+	tools.SetAllowLocalFetch(true)
+	defer tools.SetAllowLocalFetch(false)
 
 	out := tools.ExecuteWebFetch(srv.URL)
 	assert.Contains(t, out, "visible text")
@@ -693,7 +697,8 @@ func TestExecuteWebFetch_HTTP4xx(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_ALLOW_LOCAL_FETCH", "true")
+	tools.SetAllowLocalFetch(true)
+	defer tools.SetAllowLocalFetch(false)
 
 	out := tools.ExecuteWebFetch(srv.URL)
 	assert.Contains(t, out, "[error:")
@@ -727,7 +732,8 @@ func TestExecuteWebFetch_ConcurrentSameURLDeduplicates(t *testing.T) {
 		_, _ = w.Write([]byte("poem content"))
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_ALLOW_LOCAL_FETCH", "true")
+	tools.SetAllowLocalFetch(true)
+	defer tools.SetAllowLocalFetch(false)
 
 	results := make([]string, 2)
 	done := make(chan struct{}, 2)
@@ -770,7 +776,8 @@ func TestExecuteWebSearch_AbstractResult(t *testing.T) {
 		_, _ = w.Write([]byte(ddgJSON("Go is a language.", "Wikipedia", "https://en.wikipedia.org/wiki/Go", "", nil)))
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+	tools.SetWebSearchAPIBase(srv.URL)
+	defer tools.SetWebSearchAPIBase("")
 
 	out := tools.ExecuteWebSearch("golang")
 	assert.Contains(t, out, "Go is a language.")
@@ -783,7 +790,8 @@ func TestExecuteWebSearch_AnswerField(t *testing.T) {
 		_, _ = w.Write([]byte(ddgJSON("", "", "", "42 is the answer.", nil)))
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+	tools.SetWebSearchAPIBase(srv.URL)
+	defer tools.SetWebSearchAPIBase("")
 
 	out := tools.ExecuteWebSearch("answer to life")
 	assert.Contains(t, out, "42 is the answer.")
@@ -798,7 +806,8 @@ func TestExecuteWebSearch_RelatedTopics(t *testing.T) {
 		})))
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+	tools.SetWebSearchAPIBase(srv.URL)
+	defer tools.SetWebSearchAPIBase("")
 
 	out := tools.ExecuteWebSearch("something")
 	assert.Contains(t, out, "Topic A")
@@ -811,7 +820,8 @@ func TestExecuteWebSearch_EmptyResult(t *testing.T) {
 		_, _ = w.Write([]byte(ddgJSON("", "", "", "", nil)))
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+	tools.SetWebSearchAPIBase(srv.URL)
+	defer tools.SetWebSearchAPIBase("")
 
 	out := tools.ExecuteWebSearch("xyzzy12345")
 	assert.Contains(t, out, "no instant answer found")
@@ -823,7 +833,8 @@ func TestExecuteWebSearch_HTTP500(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+	tools.SetWebSearchAPIBase(srv.URL)
+	defer tools.SetWebSearchAPIBase("")
 
 	out := tools.ExecuteWebSearch("anything")
 	assert.Contains(t, out, "[error:")
@@ -844,7 +855,8 @@ func TestExecuteWebSearch_QueryForwardedToServer(t *testing.T) {
 		_, _ = w.Write([]byte(ddgJSON("", "", "", "", nil)))
 	}))
 	defer srv.Close()
-	t.Setenv("ERRATA_DDGSEARCH_URL", srv.URL)
+	tools.SetWebSearchAPIBase(srv.URL)
+	defer tools.SetWebSearchAPIBase("")
 
 	tools.ExecuteWebSearch("my test query")
 	assert.Equal(t, "my test query", receivedQuery)

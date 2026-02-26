@@ -1282,8 +1282,9 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 			Seed:        &seed,
 		},
 		Constraints: recipe.ConstraintsConfig{
-			Timeout:  10 * time.Minute,
-			MaxSteps: 50,
+			Timeout:     10 * time.Minute,
+			BashTimeout: 30 * time.Second,
+			MaxSteps:    50,
 		},
 		Context: recipe.ContextConfig{
 			Strategy:         "auto_compact",
@@ -1296,8 +1297,9 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 			Tools:    "inherit",
 		},
 		Sandbox: recipe.SandboxConfig{
-			Filesystem: "project_only",
-			Network:    "full",
+			Filesystem:      "project_only",
+			Network:         "full",
+			AllowLocalFetch: true,
 		},
 	}
 
@@ -1321,6 +1323,7 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 	assert.InDelta(t, *orig.ModelParams.Temperature, *parsed.ModelParams.Temperature, 1e-9)
 	assert.Equal(t, *orig.ModelParams.MaxTokens, *parsed.ModelParams.MaxTokens)
 	assert.Equal(t, orig.Constraints.Timeout, parsed.Constraints.Timeout)
+	assert.Equal(t, orig.Constraints.BashTimeout, parsed.Constraints.BashTimeout)
 	assert.Equal(t, orig.Constraints.MaxSteps, parsed.Constraints.MaxSteps)
 	assert.Equal(t, orig.Context.Strategy, parsed.Context.Strategy)
 	assert.Equal(t, orig.Context.MaxHistoryTurns, parsed.Context.MaxHistoryTurns)
@@ -1330,6 +1333,7 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 	assert.Equal(t, orig.SubAgent.Tools, parsed.SubAgent.Tools)
 	assert.Equal(t, orig.Sandbox.Filesystem, parsed.Sandbox.Filesystem)
 	assert.Equal(t, orig.Sandbox.Network, parsed.Sandbox.Network)
+	assert.Equal(t, orig.Sandbox.AllowLocalFetch, parsed.Sandbox.AllowLocalFetch)
 }
 
 func TestMarshalMarkdown_DefaultRecipe(t *testing.T) {
@@ -1346,4 +1350,62 @@ func TestMarshalMarkdown_EmptyRecipe(t *testing.T) {
 	// Should not contain section headers for empty fields.
 	assert.NotContains(t, md, "## Models")
 	assert.NotContains(t, md, "## Constraints")
+}
+
+// ─── bash_timeout in Constraints ─────────────────────────────────────────────
+
+func TestParse_Constraints_BashTimeout(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Constraints
+timeout: 10m
+bash_timeout: 30s
+max_steps: 50
+`))
+	require.NoError(t, err)
+	assert.Equal(t, 10*time.Minute, r.Constraints.Timeout)
+	assert.Equal(t, 30*time.Second, r.Constraints.BashTimeout)
+	assert.Equal(t, 50, r.Constraints.MaxSteps)
+}
+
+func TestParse_Constraints_BashTimeoutIntegerSeconds(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Constraints\nbash_timeout: 120\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 120*time.Second, r.Constraints.BashTimeout)
+}
+
+func TestParse_Constraints_BashTimeoutInvalid(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Constraints\nbash_timeout: abc\n"))
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(0), r.Constraints.BashTimeout)
+}
+
+// ─── allow_local_fetch in Sandbox ────────────────────────────────────────────
+
+func TestParse_Sandbox_AllowLocalFetch(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sandbox
+filesystem: project_only
+allow_local_fetch: true
+`))
+	require.NoError(t, err)
+	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
+	assert.True(t, r.Sandbox.AllowLocalFetch)
+}
+
+func TestParse_Sandbox_AllowLocalFetchFalse(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sandbox
+allow_local_fetch: false
+`))
+	require.NoError(t, err)
+	assert.False(t, r.Sandbox.AllowLocalFetch)
+}
+
+func TestParse_Sandbox_AllowLocalFetchDefault(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sandbox
+filesystem: project_only
+`))
+	require.NoError(t, err)
+	assert.False(t, r.Sandbox.AllowLocalFetch)
 }
