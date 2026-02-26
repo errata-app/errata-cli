@@ -15,7 +15,8 @@ type Command struct {
 // TUIOnly commands are omitted from the /api/commands REST response.
 var All = []Command{
 	{"/help",      "Show available commands",                           false},
-	{"/clear",     "Clear display history and conversation memory",     false},
+	{"/clear",     "Clear display (preserves conversation context)",     false},
+	{"/wipe",      "Wipe display and conversation memory",              false},
 	{"/compact",   "Summarise conversation history to free up context", false},
 	{"/verbose",   "Toggle verbose mode",                               false},
 	{"/models",    "List active and all available models by provider",  false},

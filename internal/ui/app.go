@@ -431,7 +431,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if resp.Error != "" {
 				p.errMsg = resp.Error
 				if runner.IsContextOverflowError(resp.Error) {
-					p.errMsg = "context limit reached — use /clear or /compact to reset"
+					p.errMsg = "context limit reached — use /wipe or /compact to reset"
 				}
 			}
 		}

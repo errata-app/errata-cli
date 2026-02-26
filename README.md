@@ -173,7 +173,8 @@ Pick a number — that model's writes are applied to disk immediately.
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/clear` | Clear display history and wipe conversation context |
+| `/clear` | Clear display (preserves conversation context) |
+| `/wipe` | Wipe display and conversation memory |
 | `/compact` | Summarize conversation history to free up context window |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/models` | List all available models from each configured provider with per-model pricing |
@@ -298,7 +299,7 @@ mode is off by default in the TUI and on by default in the web UI.
 
 Errata maintains a per-model conversation history across prompts. History is saved to
 `data/history.json` after every run so you can close the client and pick up exactly
-where you left off. Use `/clear` to deliberately wipe it. Each panel's status line shows
+where you left off. Use `/wipe` to deliberately wipe it. Each panel's status line shows
 the estimated context fill (e.g. `~42% ctx`) so you can see how much of a model's window
 is in use.
 

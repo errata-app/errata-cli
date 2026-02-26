@@ -180,6 +180,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			wc.wsHandleResume()
 		case "compact":
 			wc.wsHandleCompact()
+		case "clear_display":
+			wc.send(wsServerMsg{Type: "display_cleared"})
 		case "clear_history":
 			wc.wsHandleClearHistory()
 		case "set_tools":

@@ -69,6 +69,8 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 		return a.handleModelsListCmd()
 	case "/clear":
 		return a.handleClearCmd()
+	case "/wipe":
+		return a.handleWipeCmd()
 	case "/compact":
 		return a.handleCompactCmd()
 	case "/resume":
@@ -144,6 +146,14 @@ func (a App) handleModelsListCmd() (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) {
+	a.feed = nil
+	a.feedVP.Width = a.width
+	a.feedVP.Height = a.feedVPHeight()
+	a.feedVP.SetContent("")
+	return a, nil
+}
+
+func (a App) handleWipeCmd() (tea.Model, tea.Cmd) {
 	a.feed = nil
 	a.conversationHistories = nil
 	if err := history.Clear(a.histPath); err != nil {

@@ -36,6 +36,44 @@ func TestFmtPrice(t *testing.T) {
 	}
 }
 
+// ── /clear and /wipe command tests ───────────────────────────────────────────
+
+func TestHandleClearCmd_PreservesConversationHistories(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+	a.conversationHistories = map[string][]models.ConversationTurn{
+		"m1": {{Role: "user", Content: "hello"}},
+	}
+	a.feed = []feedItem{{kind: "msg", text: "old message"}}
+
+	result, cmd := a.handleClearCmd()
+	assert.Nil(t, cmd)
+	app := result.(App)
+
+	// Display feed should be cleared.
+	assert.Nil(t, app.feed)
+	// Conversation histories should be preserved.
+	assert.NotNil(t, app.conversationHistories)
+	assert.Len(t, app.conversationHistories["m1"], 1)
+}
+
+func TestHandleWipeCmd_ClearsConversationHistories(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+	a.conversationHistories = map[string][]models.ConversationTurn{
+		"m1": {{Role: "user", Content: "hello"}},
+	}
+	a.feed = []feedItem{{kind: "msg", text: "old message"}}
+
+	result, cmd := a.handleWipeCmd()
+	assert.Nil(t, cmd)
+	app := result.(App)
+
+	// Both display feed and conversation histories should be cleared.
+	assert.Nil(t, app.feed)
+	assert.Nil(t, app.conversationHistories)
+}
+
 // ── /export command tests ────────────────────────────────────────────────────
 
 func TestHandleExportCommand_BareShowsUsage(t *testing.T) {

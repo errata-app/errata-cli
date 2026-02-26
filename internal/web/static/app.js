@@ -268,8 +268,12 @@ function handleServerMessage(msg) {
       appendHistoryMsg('History compacted.', '');
       break;
 
+    case 'display_cleared':
+      appendHistoryMsg('Display cleared.', '');
+      break;
+
     case 'history_cleared':
-      appendHistoryMsg('Conversation history cleared.', '');
+      appendHistoryMsg('Conversation history wiped.', '');
       break;
 
     case 'cancelled': {
@@ -995,8 +999,18 @@ function handleSend() {
     return;
   }
 
-  // Handle /clear slash command client-side.
+  // Handle /clear slash command client-side (display only, preserves context).
   if (/^\/clear$/i.test(prompt)) {
+    inputEl.value = '';
+    history.length = 0;
+    saveHistory();
+    renderIdle();
+    wsSend({ type: 'clear_display' });
+    return;
+  }
+
+  // Handle /wipe slash command client-side (display + conversation context).
+  if (/^\/wipe$/i.test(prompt)) {
     inputEl.value = '';
     history.length = 0;
     saveHistory();
