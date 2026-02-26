@@ -662,6 +662,26 @@ func (a App) View() string {
 					}
 					hw.flush()
 
+				case strings.HasPrefix(lower, "/export "):
+					partial := lastWord(val[len("/export "):])
+					lp := strings.ToLower(partial)
+					for _, sub := range []string{"recipe", "output"} {
+						if strings.HasPrefix(sub, lp) {
+							sb.WriteByte('\n')
+							sb.WriteString(nameStyle.Render("  " + sub))
+						}
+					}
+
+				case strings.HasPrefix(lower, "/import "):
+					partial := lastWord(val[len("/import "):])
+					lp := strings.ToLower(partial)
+					for _, sub := range []string{"recipe"} {
+						if strings.HasPrefix(sub, lp) {
+							sb.WriteByte('\n')
+							sb.WriteString(nameStyle.Render("  " + sub))
+						}
+					}
+
 				default:
 					prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
 					hw := newHintWriter(&sb, descStyle)

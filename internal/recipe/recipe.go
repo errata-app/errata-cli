@@ -1019,3 +1019,190 @@ func (r *Recipe) TierForModel(modelID string) string {
 	}
 	return ""
 }
+
+// MarshalMarkdown serializes the recipe back to the Markdown format used by
+// recipe.md files. Only non-zero/non-default fields are included.
+func (r *Recipe) MarshalMarkdown() string {
+	var sb strings.Builder
+
+	// Title
+	name := r.Name
+	if name == "" {
+		name = "Errata Recipe"
+	}
+	fmt.Fprintf(&sb, "# %s\n", name)
+
+	// Models
+	if len(r.Models) > 0 {
+		sb.WriteString("\n## Models\n")
+		for _, m := range r.Models {
+			fmt.Fprintf(&sb, "- %s\n", m)
+		}
+	}
+
+	// System Prompt
+	if r.SystemPrompt != "" {
+		sb.WriteString("\n## System Prompt\n")
+		sb.WriteString(r.SystemPrompt)
+		sb.WriteByte('\n')
+	}
+
+	// Tools
+	if r.Tools != nil && len(r.Tools.Allowlist) > 0 {
+		sb.WriteString("\n## Tools\n")
+		for _, t := range r.Tools.Allowlist {
+			if t == "bash" && len(r.Tools.BashPrefixes) > 0 {
+				fmt.Fprintf(&sb, "- bash(%s)\n", strings.Join(r.Tools.BashPrefixes, ", "))
+			} else {
+				fmt.Fprintf(&sb, "- %s\n", t)
+			}
+		}
+	}
+
+	// MCP Servers
+	if len(r.MCPServers) > 0 {
+		sb.WriteString("\n## MCP Servers\n")
+		for _, s := range r.MCPServers {
+			fmt.Fprintf(&sb, "- %s: %s\n", s.Name, s.Command)
+		}
+	}
+
+	// Model Parameters
+	if r.ModelParams.Temperature != nil || r.ModelParams.MaxTokens != nil || r.ModelParams.Seed != nil {
+		sb.WriteString("\n## Model Parameters\n")
+		if r.ModelParams.Temperature != nil {
+			fmt.Fprintf(&sb, "temperature: %s\n", strconv.FormatFloat(*r.ModelParams.Temperature, 'f', -1, 64))
+		}
+		if r.ModelParams.MaxTokens != nil {
+			fmt.Fprintf(&sb, "max_tokens: %d\n", *r.ModelParams.MaxTokens)
+		}
+		if r.ModelParams.Seed != nil {
+			fmt.Fprintf(&sb, "seed: %d\n", *r.ModelParams.Seed)
+		}
+	}
+
+	// Constraints
+	if r.Constraints.Timeout > 0 || r.Constraints.MaxSteps > 0 {
+		sb.WriteString("\n## Constraints\n")
+		if r.Constraints.Timeout > 0 {
+			fmt.Fprintf(&sb, "timeout: %s\n", r.Constraints.Timeout.String())
+		}
+		if r.Constraints.MaxSteps > 0 {
+			fmt.Fprintf(&sb, "max_steps: %d\n", r.Constraints.MaxSteps)
+		}
+	}
+
+	// Context
+	if r.Context.Strategy != "" || r.Context.MaxHistoryTurns > 0 || r.Context.CompactThreshold > 0 {
+		sb.WriteString("\n## Context\n")
+		if r.Context.MaxHistoryTurns > 0 {
+			fmt.Fprintf(&sb, "max_history_turns: %d\n", r.Context.MaxHistoryTurns)
+		}
+		if r.Context.Strategy != "" {
+			fmt.Fprintf(&sb, "strategy: %s\n", r.Context.Strategy)
+		}
+		if r.Context.CompactThreshold > 0 {
+			fmt.Fprintf(&sb, "compact_threshold: %s\n", strconv.FormatFloat(r.Context.CompactThreshold, 'f', -1, 64))
+		}
+	}
+
+	// Sub-Agent
+	if r.SubAgent.Model != "" || r.SubAgent.MaxDepth > 0 || r.SubAgent.Tools != "" {
+		sb.WriteString("\n## Sub-Agent\n")
+		if r.SubAgent.Model != "" {
+			fmt.Fprintf(&sb, "model: %s\n", r.SubAgent.Model)
+		}
+		if r.SubAgent.MaxDepth > 0 {
+			fmt.Fprintf(&sb, "max_depth: %d\n", r.SubAgent.MaxDepth)
+		}
+		if r.SubAgent.Tools != "" {
+			fmt.Fprintf(&sb, "tools: %s\n", r.SubAgent.Tools)
+		}
+	}
+
+	// Sandbox
+	if r.Sandbox.Filesystem != "" || r.Sandbox.Network != "" {
+		sb.WriteString("\n## Sandbox\n")
+		if r.Sandbox.Filesystem != "" {
+			fmt.Fprintf(&sb, "filesystem: %s\n", r.Sandbox.Filesystem)
+		}
+		if r.Sandbox.Network != "" {
+			fmt.Fprintf(&sb, "network: %s\n", r.Sandbox.Network)
+		}
+	}
+
+	// Tasks
+	if len(r.Tasks) > 0 {
+		sb.WriteString("\n## Tasks\n")
+		for _, t := range r.Tasks {
+			fmt.Fprintf(&sb, "- %s\n", t)
+		}
+	}
+
+	// Success Criteria
+	if len(r.SuccessCriteria) > 0 {
+		sb.WriteString("\n## Success Criteria\n")
+		for _, c := range r.SuccessCriteria {
+			fmt.Fprintf(&sb, "- %s\n", c)
+		}
+	}
+
+	// Context Summarization Prompt
+	if r.SummarizationPrompt != "" {
+		sb.WriteString("\n## Context Summarization Prompt\n")
+		sb.WriteString(r.SummarizationPrompt)
+		sb.WriteByte('\n')
+	}
+
+	// System Reminders
+	if len(r.SystemReminders) > 0 {
+		sb.WriteString("\n## System Reminders\n")
+		for _, rem := range r.SystemReminders {
+			fmt.Fprintf(&sb, "### %s\n", rem.Name)
+			if rem.Trigger != "" {
+				fmt.Fprintf(&sb, "trigger: %s\n", rem.Trigger)
+			}
+			if rem.Content != "" {
+				sb.WriteString(rem.Content)
+				sb.WriteByte('\n')
+			}
+		}
+	}
+
+	// Hooks
+	if len(r.Hooks) > 0 {
+		sb.WriteString("\n## Hooks\n")
+		for _, h := range r.Hooks {
+			fmt.Fprintf(&sb, "### %s\n", h.Name)
+			fmt.Fprintf(&sb, "event: %s\n", h.Event)
+			if h.Matcher != "" {
+				fmt.Fprintf(&sb, "matcher: %s\n", h.Matcher)
+			}
+			fmt.Fprintf(&sb, "command: %s\n", h.Command)
+		}
+	}
+
+	// Metadata
+	hasMeta := r.Metadata.Description != "" || r.Metadata.Author != "" ||
+		r.Metadata.Version != "" || len(r.Metadata.Tags) > 0 || r.Metadata.ProjectRoot != ""
+	if hasMeta {
+		sb.WriteString("\n## Metadata\n")
+		if r.Metadata.Description != "" {
+			fmt.Fprintf(&sb, "description: %s\n", r.Metadata.Description)
+		}
+		if r.Metadata.Author != "" {
+			fmt.Fprintf(&sb, "author: %s\n", r.Metadata.Author)
+		}
+		if r.Metadata.Version != "" {
+			fmt.Fprintf(&sb, "version: %s\n", r.Metadata.Version)
+		}
+		if len(r.Metadata.Tags) > 0 {
+			fmt.Fprintf(&sb, "tags: %s\n", strings.Join(r.Metadata.Tags, ", "))
+		}
+		if r.Metadata.ProjectRoot != "" {
+			fmt.Fprintf(&sb, "project_root: %s\n", r.Metadata.ProjectRoot)
+		}
+	}
+
+	return sb.String()
+}

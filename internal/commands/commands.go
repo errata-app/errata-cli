@@ -28,6 +28,8 @@ var All = []Command{
 	{"/set",       "Set config: /set <path> <value>; bare path shows current",    false},
 	{"/resume",    "Resume interrupted run — re-runs only interrupted models", false},
 	{"/remind",    "Fire a named reminder; bare /remind lists available",        false},
+	{"/export",    "Export: /export recipe [path]; /export output [path]", true},
+	{"/import",    "Import: /import recipe <path>",                      true},
 	{"/stats",     "Show preference wins and session cost",             false},
 	{"/totalcost", "Show total inference cost for this session",        false},
 	{"/exit",      "Exit",                                              true},
