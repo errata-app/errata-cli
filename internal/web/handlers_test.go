@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -420,6 +421,129 @@ func TestHandleWS_SetTools_EmptyDisabledEnablesAll(t *testing.T) {
 	}
 	if len(msg.Models) == 0 {
 		t.Error("expected all tools active when disabled list is empty")
+	}
+}
+
+// ─── handleToolsList ──────────────────────────────────────────────────────────
+
+func TestHandleToolsList_ReturnsBuiltinTools(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	w := httptest.NewRecorder()
+	s.handleToolsList(w, httptest.NewRequest("GET", "/api/tools", nil))
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var toolList []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&toolList); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(toolList) == 0 {
+		t.Fatal("expected non-empty tools list")
+	}
+	// All should be builtin since no MCP defs are configured.
+	for _, tool := range toolList {
+		if tool["source"] != "builtin" {
+			t.Errorf("expected source=builtin, got %v", tool["source"])
+		}
+		if tool["name"] == nil || tool["name"] == "" {
+			t.Error("tool should have a name")
+		}
+	}
+}
+
+func TestHandleToolsList_IncludesMCPDefs(t *testing.T) {
+	mcpDefs := []tools.ToolDef{
+		{Name: "mcp_search", Description: "MCP search tool"},
+	}
+	s := New(nil, t.TempDir()+"/pref.jsonl", t.TempDir()+"/hist.json", config.Config{}, mcpDefs, nil, nil, nil)
+	w := httptest.NewRecorder()
+	s.handleToolsList(w, httptest.NewRequest("GET", "/api/tools", nil))
+
+	var toolList []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&toolList); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Find the MCP tool.
+	found := false
+	for _, tool := range toolList {
+		if tool["name"] == "mcp_search" && tool["source"] == "mcp" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("mcp_search tool not found in response")
+	}
+}
+
+// ─── buildCompletePayload ─────────────────────────────────────────────────────
+
+func TestBuildCompletePayload_EmptyResponses(t *testing.T) {
+	result := buildCompletePayload(nil)
+	if len(result) != 0 {
+		t.Errorf("expected empty result, got %d", len(result))
+	}
+}
+
+func TestBuildCompletePayload_TextOnlyResponse(t *testing.T) {
+	responses := []models.ModelResponse{
+		{ModelID: "m1", Text: "hello", LatencyMS: 100, InputTokens: 50, OutputTokens: 20, CostUSD: 0.001},
+	}
+	result := buildCompletePayload(responses)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+	r := result[0]
+	if r.ModelID != "m1" {
+		t.Errorf("ModelID = %q, want m1", r.ModelID)
+	}
+	if r.Text != "hello" {
+		t.Errorf("Text = %q, want hello", r.Text)
+	}
+	if r.LatencyMS != 100 {
+		t.Errorf("LatencyMS = %d, want 100", r.LatencyMS)
+	}
+	if len(r.ProposedWrites) != 0 {
+		t.Errorf("expected no writes, got %d", len(r.ProposedWrites))
+	}
+}
+
+func TestBuildCompletePayload_ErrorResponse(t *testing.T) {
+	responses := []models.ModelResponse{
+		{ModelID: "m1", Error: "api error"},
+	}
+	result := buildCompletePayload(responses)
+	if result[0].Error != "api error" {
+		t.Errorf("Error = %q, want 'api error'", result[0].Error)
+	}
+}
+
+func TestBuildCompletePayload_ContextOverflowError(t *testing.T) {
+	responses := []models.ModelResponse{
+		{ModelID: "m1", Error: "context_length_exceeded"},
+	}
+	result := buildCompletePayload(responses)
+	if !strings.Contains(result[0].Error, "context_length_exceeded") {
+		t.Errorf("expected original error, got %q", result[0].Error)
+	}
+	if !strings.Contains(result[0].Error, "/compact") {
+		t.Errorf("expected /compact hint appended, got %q", result[0].Error)
+	}
+}
+
+func TestBuildCompletePayload_InterruptedFlag(t *testing.T) {
+	responses := []models.ModelResponse{
+		{ModelID: "m1", Interrupted: true},
+	}
+	result := buildCompletePayload(responses)
+	if !result[0].Interrupted {
+		t.Error("expected Interrupted=true in payload")
 	}
 }
 

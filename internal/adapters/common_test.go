@@ -366,6 +366,96 @@ func TestBuildErrorResponse_NoCacheTokens(t *testing.T) {
 	assert.GreaterOrEqual(t, resp.CostUSD, 0.0)
 }
 
+// ─── BuildInterruptedResponse ─────────────────────────────────────────────────
+
+func TestBuildInterruptedResponse_Fields(t *testing.T) {
+	start := time.Now().Add(-75 * time.Millisecond)
+	fw := []tools.FileWrite{{Path: "partial.go", Content: "package partial"}}
+
+	resp := BuildInterruptedResponse("gpt-4o", "openai/gpt-4o",
+		[]string{"partial ", "text"}, start, 300, 100, fw, fmt.Errorf("context cancelled"))
+
+	assert.Equal(t, "gpt-4o", resp.ModelID)
+	assert.Equal(t, "partial text", resp.Text)
+	assert.True(t, resp.Interrupted)
+	assert.Equal(t, "context cancelled", resp.Error)
+	assert.GreaterOrEqual(t, resp.LatencyMS, int64(0))
+	assert.Equal(t, int64(300), resp.InputTokens)
+	assert.Equal(t, int64(100), resp.OutputTokens)
+	require.Len(t, resp.ProposedWrites, 1)
+	assert.Equal(t, "partial.go", resp.ProposedWrites[0].Path)
+	assert.False(t, resp.OK()) // interrupted + error ⇒ not OK
+}
+
+func TestBuildInterruptedResponse_NilWrites(t *testing.T) {
+	resp := BuildInterruptedResponse("m", "m", nil, time.Now(), 0, 0, nil, fmt.Errorf("cancelled"))
+	assert.True(t, resp.Interrupted)
+	assert.Empty(t, resp.ProposedWrites)
+	assert.Equal(t, "", resp.Text)
+}
+
+// ─── EmitSnapshot ─────────────────────────────────────────────────────────────
+
+func TestEmitSnapshot_EmitsSnapshotEvent(t *testing.T) {
+	var events []models.AgentEvent
+	start := time.Now().Add(-200 * time.Millisecond)
+
+	EmitSnapshot(
+		func(e models.AgentEvent) { events = append(events, e) },
+		"openai/gpt-4o",
+		[]string{"hello ", "world"},
+		start, 500, 100,
+		[]tools.FileWrite{{Path: "f.go", Content: "c"}},
+	)
+
+	require.Len(t, events, 1)
+	assert.Equal(t, "snapshot", events[0].Type)
+	assert.Contains(t, events[0].Data, `"text":"hello world"`)
+	assert.Contains(t, events[0].Data, `"input_tokens":500`)
+	assert.Contains(t, events[0].Data, `"output_tokens":100`)
+}
+
+func TestEmitSnapshot_NilWritesOK(t *testing.T) {
+	var events []models.AgentEvent
+	EmitSnapshot(
+		func(e models.AgentEvent) { events = append(events, e) },
+		"m", nil, time.Now(), 0, 0, nil,
+	)
+	require.Len(t, events, 1)
+	assert.Equal(t, "snapshot", events[0].Type)
+}
+
+// ─── applyOutputProcessing ──────────────────────────────────────────────────
+
+func TestApplyOutputProcessing_NoRuleReturnsUnchanged(t *testing.T) {
+	// No rule in context → output returned as-is.
+	output := "line1\nline2\nline3"
+	result := applyOutputProcessing(context.Background(), "read_file", output)
+	assert.Equal(t, output, result)
+}
+
+// ─── DispatchTool MCP error event ───────────────────────────────────────────
+
+func TestDispatchTool_MCPError_EmitsErrorEvent(t *testing.T) {
+	dispatchers := map[string]tools.MCPDispatcher{
+		"broken_tool": func(args map[string]string) string {
+			return "[mcp error: connection lost]"
+		},
+	}
+	ctx := tools.WithMCPDispatchers(context.Background(), dispatchers)
+
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(ctx, "broken_tool", nil,
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed)
+
+	assert.True(t, ok)
+	assert.Equal(t, "[mcp error: connection lost]", result)
+	require.Len(t, events, 2)
+	assert.Equal(t, "reading", events[0].Type)
+	assert.Equal(t, "error", events[1].Type)
+}
+
 // ─── spawn_agent dispatch ─────────────────────────────────────────────────────
 
 func TestDispatchTool_SpawnAgent_CallsDispatcher(t *testing.T) {

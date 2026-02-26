@@ -106,6 +106,107 @@ func TestSummarizeSandbox_WithValues(t *testing.T) {
 	assert.Contains(t, s, "network: full")
 }
 
+// ── additional summarize tests ───────────────────────────────────────────────
+
+func TestSummarizeTools_NoToolsConfig(t *testing.T) {
+	rec := &recipe.Recipe{} // Tools = nil
+	s := summarizeTools(rec, nil)
+	assert.Contains(t, s, "enabled")
+}
+
+func TestSummarizeTools_WithDisabled(t *testing.T) {
+	rec := &recipe.Recipe{}
+	disabled := map[string]bool{"bash": true, "web_fetch": true}
+	s := summarizeTools(rec, disabled)
+	assert.Contains(t, s, "enabled")
+}
+
+func TestSummarizeTools_WithAllowlist(t *testing.T) {
+	rec := &recipe.Recipe{
+		Tools: &recipe.ToolsConfig{Allowlist: []string{"read_file", "bash", "write_file"}},
+	}
+	s := summarizeTools(rec, map[string]bool{"bash": true})
+	assert.Equal(t, "2 enabled", s) // read_file + write_file (bash disabled)
+}
+
+func TestSummarizeParameters_AllSet(t *testing.T) {
+	seed := int64(42)
+	temp := 0.7
+	maxTok := 4096
+	rec := &recipe.Recipe{
+		ModelParams: recipe.ModelParamsConfig{
+			Seed:        &seed,
+			Temperature: &temp,
+			MaxTokens:   &maxTok,
+		},
+	}
+	s := summarizeParameters(rec)
+	assert.Contains(t, s, "seed: 42")
+	assert.Contains(t, s, "temperature: 0.7")
+	assert.Contains(t, s, "max_tokens: 4096")
+}
+
+func TestSummarizeParameters_Defaults(t *testing.T) {
+	rec := &recipe.Recipe{}
+	assert.Equal(t, "(defaults)", summarizeParameters(rec))
+}
+
+func TestSummarizeContext_AllSet(t *testing.T) {
+	rec := &recipe.Recipe{
+		Context: recipe.ContextConfig{
+			Strategy:         "auto_compact",
+			MaxHistoryTurns:  30,
+			CompactThreshold: 0.75,
+		},
+	}
+	s := summarizeContext(rec)
+	assert.Contains(t, s, "auto_compact")
+	assert.Contains(t, s, "30 turns")
+	assert.Contains(t, s, "threshold: 0.75")
+}
+
+func TestSummarizeContext_Defaults(t *testing.T) {
+	rec := &recipe.Recipe{}
+	assert.Equal(t, "(defaults)", summarizeContext(rec))
+}
+
+func TestSummarizeSubAgent_WithFields(t *testing.T) {
+	rec := &recipe.Recipe{
+		SubAgent: recipe.SubAgentConfig{
+			Model:    "gpt-4o",
+			MaxDepth: 2,
+			Tools:    "inherit",
+		},
+	}
+	s := summarizeSubAgent(rec)
+	assert.Contains(t, s, "gpt-4o")
+	assert.Contains(t, s, "depth: 2")
+	assert.Contains(t, s, "tools: inherit")
+}
+
+func TestSummarizeSubAgent_Defaults(t *testing.T) {
+	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
+	assert.Equal(t, "(defaults)", summarizeSubAgent(rec))
+}
+
+func TestSummarizeMCPServers_None(t *testing.T) {
+	rec := &recipe.Recipe{}
+	assert.Equal(t, "(none)", summarizeMCPServers(rec))
+}
+
+func TestSummarizeMCPServers_WithServers(t *testing.T) {
+	rec := &recipe.Recipe{
+		MCPServers: []recipe.MCPServerEntry{
+			{Name: "exa", Command: "npx exa"},
+			{Name: "brave", Command: "npx brave"},
+		},
+	}
+	s := summarizeMCPServers(rec)
+	assert.Contains(t, s, "2 configured")
+	assert.Contains(t, s, "exa")
+	assert.Contains(t, s, "brave")
+}
+
 // ── getConfigValue / setConfigValue ─────────────────────────────────────────
 
 func TestGetConfigValue_KnownPaths(t *testing.T) {
