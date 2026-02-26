@@ -280,9 +280,7 @@ func init() {
 // It maps provider-prefixed Bedrock model IDs to the OpenRouter-style "provider/model" format.
 // E.g. "anthropic.claude-sonnet-4-20250514-v1:0" → "anthropic/claude-sonnet-4-20250514-v1:0".
 func bedrockQualifiedID(bareModelID string) string {
-	if i := strings.Index(bareModelID, "."); i >= 0 {
-		provider := bareModelID[:i]
-		model := bareModelID[i+1:]
+	if provider, model, ok := strings.Cut(bareModelID, "."); ok {
 		// Strip Bedrock version suffix (":0", ":1") for pricing lookup.
 		if j := strings.LastIndex(model, ":"); j >= 0 {
 			model = model[:j]

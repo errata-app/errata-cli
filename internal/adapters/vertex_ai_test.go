@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,7 +19,7 @@ func TestNewVertexAIAdapter_Capabilities(t *testing.T) {
 	a := NewVertexAIAdapter("vertex/gemini-2.0-flash", "my-project", "us-central1")
 	// Capabilities queries the API but falls back to defaults on error.
 	// Since we don't have real credentials, it should fall back to google defaults.
-	caps := a.Capabilities(nil)
+	caps := a.Capabilities(context.Background())
 	assert.Equal(t, "vertex", caps.Provider)
 	assert.Equal(t, "vertex/gemini-2.0-flash", caps.ModelID)
 	// Should inherit google defaults.

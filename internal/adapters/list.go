@@ -261,14 +261,7 @@ func listBedrockModels(ctx context.Context, region string) ([]string, int, error
 	var ids []string
 	for _, m := range result.ModelSummaries {
 		// Only include models that support the Converse inference type.
-		supportsConverse := false
-		for _, it := range m.InferenceTypesSupported {
-			if it == bedrocktypes.InferenceTypeOnDemand {
-				supportsConverse = true
-				break
-			}
-		}
-		if supportsConverse && m.ModelId != nil {
+		if slices.Contains(m.InferenceTypesSupported, bedrocktypes.InferenceTypeOnDemand) && m.ModelId != nil {
 			ids = append(ids, "bedrock/"+*m.ModelId)
 		}
 	}
@@ -298,14 +291,7 @@ func listVertexAIModels(ctx context.Context, project, location string) ([]string
 				continue
 			}
 			// Filter to models that support generateContent.
-			supportsGenerate := false
-			for _, m := range model.SupportedActions {
-				if m == "generateContent" {
-					supportsGenerate = true
-					break
-				}
-			}
-			if supportsGenerate {
+			if slices.Contains(model.SupportedActions, "generateContent") {
 				name := model.Name
 				// Strip "models/" or "publishers/google/models/" prefix.
 				if i := strings.LastIndex(name, "/"); i >= 0 {
@@ -319,7 +305,9 @@ func listVertexAIModels(ctx context.Context, project, location string) ([]string
 		}
 		page, err = page.Next(ctx)
 		if err != nil {
-			break // return what we have
+			// Partial results are usable; return what we have.
+			sort.Strings(all)
+			return all, len(all), nil //nolint:nilerr // intentional: partial page results are valid
 		}
 	}
 	sort.Strings(all)

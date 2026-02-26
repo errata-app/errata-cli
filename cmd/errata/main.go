@@ -213,7 +213,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	_, err := headless.Run(ctx, headless.Options{
+	_, err := headless.Run(ctx, &headless.Options{
 		Recipe:         rec,
 		Adapters:       ads,
 		SessionID:      sessionID,

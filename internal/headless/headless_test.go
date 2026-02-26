@@ -60,8 +60,8 @@ func testRecipe(tasks []string, criteriaItems []string) *recipe.Recipe {
 	}
 }
 
-func testOpts(rec *recipe.Recipe, adapters []models.ModelAdapter, outputDir string) headless.Options {
-	return headless.Options{
+func testOpts(rec *recipe.Recipe, adapters []models.ModelAdapter, outputDir string) *headless.Options {
+	return &headless.Options{
 		Recipe:    rec,
 		Adapters:  adapters,
 		SessionID: "test-session",

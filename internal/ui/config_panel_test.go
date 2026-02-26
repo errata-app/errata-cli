@@ -254,6 +254,7 @@ func TestSetConfigValue_RoundTrip(t *testing.T) {
 		{"parameters.seed", "42", "42"},
 		{"parameters.temperature", "0.7", "0.7"},
 		{"parameters.max_tokens", "4096", "4096"},
+		{"system_prompt", "You are helpful.", "You are helpful."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -301,6 +302,7 @@ func TestConfigPathCandidates_ReturnsAllPaths(t *testing.T) {
 	assert.True(t, pathSet["constraints.timeout"])
 	assert.True(t, pathSet["sandbox.filesystem"])
 	assert.True(t, pathSet["parameters.seed"])
+	assert.True(t, pathSet["system_prompt"])
 }
 
 // ── cloneRecipe ─────────────────────────────────────────────────────────────
@@ -701,6 +703,32 @@ func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
 	app := result.(App)
 	assert.Equal(t, "Custom summarization prompt", app.sessionRecipe.SummarizationPrompt)
 	assert.True(t, app.recipeModified)
+}
+
+func TestTextSections_HavePaths(t *testing.T) {
+	rec := recipe.Default()
+	sections := buildConfigSections(rec, nil, nil)
+	for _, sec := range sections {
+		if sec.Kind == "text" {
+			assert.NotEmpty(t, sec.Path, "text section %q should have a Path", sec.Name)
+			_, ok := configPaths[sec.Path]
+			assert.True(t, ok, "text section %q Path %q not in configPaths", sec.Name, sec.Path)
+		}
+	}
+}
+
+func TestHandleSetCommand_SystemPrompt(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, _ := a.handleSetCommand("system_prompt Hello world")
+	app := result.(App)
+	assert.True(t, app.recipeModified)
+	assert.Equal(t, "Hello world", app.sessionRecipe.SystemPrompt)
+
+	// Query the value back.
+	result2, _ := app.handleSetCommand("system_prompt")
+	app2 := result2.(App)
+	last := app2.feed[len(app2.feed)-1].text
+	assert.Contains(t, last, "Hello world")
 }
 
 func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {

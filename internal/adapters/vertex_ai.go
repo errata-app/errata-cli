@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -112,7 +113,7 @@ func (a *VertexAIAdapter) RunAgent(
 		SystemInstruction: genai.NewContentFromText(systemMsg, ""),
 	}
 	if seed, ok := tools.SeedFromContext(ctx); ok {
-		s := int32(seed)
+		s := int32(min(seed, math.MaxInt32)) //nolint:gosec // clamped to int32 range
 		config.Seed = &s
 	}
 	contents := make([]*genai.Content, 0, len(history)+1)

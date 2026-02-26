@@ -1,6 +1,6 @@
 .env
 data/
-errata
+/errata
 poem_test.txt
 tool_test.go
 data/preferences.jsonl
