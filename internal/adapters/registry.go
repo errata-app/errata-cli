@@ -12,10 +12,13 @@ import (
 //
 // Routing rules (checked in order):
 //  1. "litellm/<model>"     → LiteLLMAdapter (requires LITELLM_BASE_URL)
-//  2. "provider/model"      → OpenRouterAdapter (requires OPENROUTER_API_KEY)
-//  3. "claude*"             → AnthropicAdapter
-//  4. "gpt-*", "o1", "o3*" → OpenAIAdapter
-//  5. "gemini*"             → GeminiAdapter
+//  2. "bedrock/<model>"     → BedrockAdapter (requires AWS_REGION)
+//  3. "azure/<model>"       → AzureOpenAIAdapter (requires AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT)
+//  4. "vertex/<model>"      → VertexAIAdapter (requires VERTEX_AI_PROJECT + VERTEX_AI_LOCATION)
+//  5. "provider/model"      → OpenRouterAdapter (requires OPENROUTER_API_KEY)
+//  6. "claude*"             → AnthropicAdapter
+//  7. "gpt-*", "o1", "o3*" → OpenAIAdapter
+//  8. "gemini*"             → GeminiAdapter
 func NewAdapter(modelID string, cfg config.Config) (models.ModelAdapter, error) {
 	switch {
 	case strings.HasPrefix(modelID, "litellm/"):
@@ -23,6 +26,24 @@ func NewAdapter(modelID string, cfg config.Config) (models.ModelAdapter, error) 
 			return nil, fmt.Errorf("LITELLM_BASE_URL not set")
 		}
 		return NewLiteLLMAdapter(modelID, cfg.LiteLLMAPIKey, cfg.LiteLLMBaseURL), nil
+
+	case strings.HasPrefix(modelID, "bedrock/"):
+		if cfg.BedrockRegion == "" {
+			return nil, fmt.Errorf("AWS_REGION not set (required for Bedrock)")
+		}
+		return NewBedrockAdapter(modelID, cfg.BedrockRegion), nil
+
+	case strings.HasPrefix(modelID, "azure/"):
+		if cfg.AzureOpenAIAPIKey == "" || cfg.AzureOpenAIEndpoint == "" {
+			return nil, fmt.Errorf("AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT must both be set")
+		}
+		return NewAzureOpenAIAdapter(modelID, cfg.AzureOpenAIAPIKey, cfg.AzureOpenAIEndpoint, cfg.AzureOpenAIAPIVersion), nil
+
+	case strings.HasPrefix(modelID, "vertex/"):
+		if cfg.VertexAIProject == "" || cfg.VertexAILocation == "" {
+			return nil, fmt.Errorf("VERTEX_AI_PROJECT and VERTEX_AI_LOCATION must both be set")
+		}
+		return NewVertexAIAdapter(modelID, cfg.VertexAIProject, cfg.VertexAILocation), nil
 
 	case strings.Contains(modelID, "/"):
 		if cfg.OpenRouterAPIKey == "" {
@@ -75,6 +96,21 @@ func NewAdapterForProvider(modelID, provider string, cfg config.Config) (models.
 			return nil, fmt.Errorf("GOOGLE_API_KEY not set")
 		}
 		return NewGeminiAdapter(modelID, cfg.GoogleAPIKey), nil
+	case "Bedrock":
+		if cfg.BedrockRegion == "" {
+			return nil, fmt.Errorf("AWS_REGION not set (required for Bedrock)")
+		}
+		return NewBedrockAdapter(modelID, cfg.BedrockRegion), nil
+	case "AzureOpenAI":
+		if cfg.AzureOpenAIAPIKey == "" || cfg.AzureOpenAIEndpoint == "" {
+			return nil, fmt.Errorf("AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT must both be set")
+		}
+		return NewAzureOpenAIAdapter(modelID, cfg.AzureOpenAIAPIKey, cfg.AzureOpenAIEndpoint, cfg.AzureOpenAIAPIVersion), nil
+	case "VertexAI":
+		if cfg.VertexAIProject == "" || cfg.VertexAILocation == "" {
+			return nil, fmt.Errorf("VERTEX_AI_PROJECT and VERTEX_AI_LOCATION must both be set")
+		}
+		return NewVertexAIAdapter(modelID, cfg.VertexAIProject, cfg.VertexAILocation), nil
 	default: // OpenRouter, LiteLLM, unknown → prefix routing
 		return NewAdapter(modelID, cfg)
 	}

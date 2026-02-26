@@ -23,6 +23,26 @@ type Config struct {
 	// LiteLLMAPIKey is optional; many local LiteLLM deployments don't require auth.
 	LiteLLMAPIKey string
 
+	// BedrockRegion is the AWS region for Amazon Bedrock (e.g. "us-east-1").
+	// Uses the AWS SDK default credential chain (AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY,
+	// AWS_PROFILE, or IAM role). Empty disables the Bedrock adapter.
+	BedrockRegion string
+
+	// AzureOpenAIAPIKey is the API key for Azure OpenAI Service.
+	AzureOpenAIAPIKey string
+	// AzureOpenAIEndpoint is the Azure resource endpoint (e.g. "https://myresource.openai.azure.com").
+	// Both key and endpoint must be set to enable the Azure OpenAI adapter.
+	AzureOpenAIEndpoint string
+	// AzureOpenAIAPIVersion is the Azure OpenAI API version (default "2024-10-21").
+	AzureOpenAIAPIVersion string
+
+	// VertexAIProject is the GCP project ID for Vertex AI.
+	// Uses Application Default Credentials (gcloud auth or GOOGLE_APPLICATION_CREDENTIALS).
+	VertexAIProject string
+	// VertexAILocation is the GCP region for Vertex AI (e.g. "us-central1").
+	// Both project and location must be set to enable the Vertex AI adapter.
+	VertexAILocation string
+
 	// ActiveModels is the explicit list from ERRATA_ACTIVE_MODELS (comma-separated).
 	// Empty means auto-detect one model per available provider.
 	// OpenRouter models use "provider/model" format (e.g. "anthropic/claude-sonnet-4-6").
@@ -32,6 +52,9 @@ type Config struct {
 	DefaultAnthropicModel string
 	DefaultOpenAIModel    string
 	DefaultGeminiModel    string
+	DefaultBedrockModel   string
+	DefaultAzureModel     string
+	DefaultVertexModel    string
 
 	PreferencesPath  string
 	PricingCachePath string
@@ -92,6 +115,9 @@ func Load() Config {
 		DefaultAnthropicModel: "claude-sonnet-4-6",
 		DefaultOpenAIModel:    "gpt-4o",
 		DefaultGeminiModel:    "gemini-2.0-flash",
+		DefaultBedrockModel:   "anthropic.claude-sonnet-4-20250514-v1:0",
+		DefaultAzureModel:     "gpt-4o",
+		DefaultVertexModel:    "gemini-2.0-flash",
 		PreferencesPath:       "data/preferences.jsonl",
 		PricingCachePath:      "data/pricing_cache.json",
 		HistoryPath:           "data/history.json",
@@ -132,6 +158,21 @@ func Load() Config {
 	cfg.LiteLLMBaseURL = os.Getenv("LITELLM_BASE_URL")
 	cfg.LiteLLMAPIKey = os.Getenv("LITELLM_API_KEY")
 
+	cfg.BedrockRegion = os.Getenv("AWS_REGION")
+	if cfg.BedrockRegion == "" {
+		cfg.BedrockRegion = os.Getenv("AWS_DEFAULT_REGION")
+	}
+
+	cfg.AzureOpenAIAPIKey = os.Getenv("AZURE_OPENAI_API_KEY")
+	cfg.AzureOpenAIEndpoint = os.Getenv("AZURE_OPENAI_ENDPOINT")
+	cfg.AzureOpenAIAPIVersion = os.Getenv("AZURE_OPENAI_API_VERSION")
+	if cfg.AzureOpenAIAPIVersion == "" {
+		cfg.AzureOpenAIAPIVersion = "2024-10-21"
+	}
+
+	cfg.VertexAIProject = os.Getenv("VERTEX_AI_PROJECT")
+	cfg.VertexAILocation = os.Getenv("VERTEX_AI_LOCATION")
+
 	if v := os.Getenv("ERRATA_ACTIVE_MODELS"); v != "" {
 		for _, m := range strings.Split(v, ",") {
 			if m = strings.TrimSpace(m); m != "" {
@@ -158,6 +199,15 @@ func (c Config) ResolvedActiveModels() []string {
 	}
 	if c.GoogleAPIKey != "" {
 		models = append(models, c.DefaultGeminiModel)
+	}
+	if c.BedrockRegion != "" {
+		models = append(models, "bedrock/"+c.DefaultBedrockModel)
+	}
+	if c.AzureOpenAIAPIKey != "" && c.AzureOpenAIEndpoint != "" {
+		models = append(models, "azure/"+c.DefaultAzureModel)
+	}
+	if c.VertexAIProject != "" && c.VertexAILocation != "" {
+		models = append(models, "vertex/"+c.DefaultVertexModel)
 	}
 	return models
 }

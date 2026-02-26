@@ -185,13 +185,142 @@ func TestNewAdapter_LiteLLMTakesPrecedenceOverOpenRouter(t *testing.T) {
 	assert.True(t, ok, "litellm/ prefix must route to LiteLLMAdapter, not OpenRouterAdapter")
 }
 
+// --- Bedrock ---
+
+func bedrockCfg() config.Config {
+	return config.Config{
+		BedrockRegion: "us-east-1",
+	}
+}
+
+func TestNewAdapter_BedrockReturnsCorrectType(t *testing.T) {
+	a, err := adapters.NewAdapter("bedrock/anthropic.claude-sonnet-4-20250514-v1:0", bedrockCfg())
+	require.NoError(t, err)
+	_, ok := a.(*adapters.BedrockAdapter)
+	assert.True(t, ok, "expected *BedrockAdapter")
+	assert.Equal(t, "bedrock/anthropic.claude-sonnet-4-20250514-v1:0", a.ID())
+}
+
+func TestNewAdapter_BedrockMissingRegion(t *testing.T) {
+	cfg := config.Config{}
+	_, err := adapters.NewAdapter("bedrock/anthropic.claude-sonnet-4-20250514-v1:0", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AWS_REGION")
+}
+
+func TestNewAdapter_BedrockTakesPrecedenceOverOpenRouter(t *testing.T) {
+	// A model starting with "bedrock/" must route to Bedrock even though it contains "/".
+	cfg := config.Config{
+		OpenRouterAPIKey: "sk-or-test",
+		BedrockRegion:    "us-east-1",
+	}
+	a, err := adapters.NewAdapter("bedrock/anthropic.claude-sonnet-4-20250514-v1:0", cfg)
+	require.NoError(t, err)
+	_, ok := a.(*adapters.BedrockAdapter)
+	assert.True(t, ok, "bedrock/ prefix must route to BedrockAdapter, not OpenRouterAdapter")
+}
+
+// --- Azure OpenAI ---
+
+func azureOpenAICfg() config.Config {
+	return config.Config{
+		AzureOpenAIAPIKey:     "test-key",
+		AzureOpenAIEndpoint:   "https://myresource.openai.azure.com",
+		AzureOpenAIAPIVersion: "2024-10-21",
+	}
+}
+
+func TestNewAdapter_AzureOpenAIReturnsCorrectType(t *testing.T) {
+	a, err := adapters.NewAdapter("azure/gpt-4o", azureOpenAICfg())
+	require.NoError(t, err)
+	_, ok := a.(*adapters.AzureOpenAIAdapter)
+	assert.True(t, ok, "expected *AzureOpenAIAdapter")
+	assert.Equal(t, "azure/gpt-4o", a.ID())
+}
+
+func TestNewAdapter_AzureOpenAIMissingKey(t *testing.T) {
+	cfg := config.Config{AzureOpenAIEndpoint: "https://myresource.openai.azure.com"}
+	_, err := adapters.NewAdapter("azure/gpt-4o", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AZURE_OPENAI_API_KEY")
+}
+
+func TestNewAdapter_AzureOpenAIMissingEndpoint(t *testing.T) {
+	cfg := config.Config{AzureOpenAIAPIKey: "test-key"}
+	_, err := adapters.NewAdapter("azure/gpt-4o", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AZURE_OPENAI_ENDPOINT")
+}
+
+func TestNewAdapter_AzureOpenAITakesPrecedenceOverOpenRouter(t *testing.T) {
+	cfg := config.Config{
+		OpenRouterAPIKey:      "sk-or-test",
+		AzureOpenAIAPIKey:     "test-key",
+		AzureOpenAIEndpoint:   "https://myresource.openai.azure.com",
+		AzureOpenAIAPIVersion: "2024-10-21",
+	}
+	a, err := adapters.NewAdapter("azure/gpt-4o", cfg)
+	require.NoError(t, err)
+	_, ok := a.(*adapters.AzureOpenAIAdapter)
+	assert.True(t, ok, "azure/ prefix must route to AzureOpenAIAdapter, not OpenRouterAdapter")
+}
+
+// --- Vertex AI ---
+
+func vertexAICfg() config.Config {
+	return config.Config{
+		VertexAIProject:  "my-project",
+		VertexAILocation: "us-central1",
+	}
+}
+
+func TestNewAdapter_VertexAIReturnsCorrectType(t *testing.T) {
+	a, err := adapters.NewAdapter("vertex/gemini-2.0-flash", vertexAICfg())
+	require.NoError(t, err)
+	_, ok := a.(*adapters.VertexAIAdapter)
+	assert.True(t, ok, "expected *VertexAIAdapter")
+	assert.Equal(t, "vertex/gemini-2.0-flash", a.ID())
+}
+
+func TestNewAdapter_VertexAIMissingProject(t *testing.T) {
+	cfg := config.Config{VertexAILocation: "us-central1"}
+	_, err := adapters.NewAdapter("vertex/gemini-2.0-flash", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "VERTEX_AI_PROJECT")
+}
+
+func TestNewAdapter_VertexAIMissingLocation(t *testing.T) {
+	cfg := config.Config{VertexAIProject: "my-project"}
+	_, err := adapters.NewAdapter("vertex/gemini-2.0-flash", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "VERTEX_AI_LOCATION")
+}
+
+func TestNewAdapter_VertexAITakesPrecedenceOverOpenRouter(t *testing.T) {
+	cfg := config.Config{
+		OpenRouterAPIKey: "sk-or-test",
+		VertexAIProject:  "my-project",
+		VertexAILocation: "us-central1",
+	}
+	a, err := adapters.NewAdapter("vertex/gemini-2.0-flash", cfg)
+	require.NoError(t, err)
+	_, ok := a.(*adapters.VertexAIAdapter)
+	assert.True(t, ok, "vertex/ prefix must route to VertexAIAdapter, not OpenRouterAdapter")
+}
+
 // --- NewAdapterForProvider ---
 
 func TestNewAdapterForProvider_KnownProviders(t *testing.T) {
 	cfg := config.Config{
-		AnthropicAPIKey: "sk-ant-test",
-		OpenAIAPIKey:    "sk-oai-test",
-		GoogleAPIKey:    "AIza-test",
+		AnthropicAPIKey:       "sk-ant-test",
+		OpenAIAPIKey:          "sk-oai-test",
+		GoogleAPIKey:          "AIza-test",
+		BedrockRegion:         "us-east-1",
+		AzureOpenAIAPIKey:     "test-key",
+		AzureOpenAIEndpoint:   "https://myresource.openai.azure.com",
+		AzureOpenAIAPIVersion: "2024-10-21",
+		VertexAIProject:       "my-project",
+		VertexAILocation:      "us-central1",
 	}
 	tests := []struct {
 		provider string
@@ -201,6 +330,9 @@ func TestNewAdapterForProvider_KnownProviders(t *testing.T) {
 		{"Anthropic", "ricky", "*adapters.AnthropicAdapter"},
 		{"OpenAI", "ricky", "*adapters.OpenAIAdapter"},
 		{"Gemini", "ricky", "*adapters.GeminiAdapter"},
+		{"Bedrock", "ricky", "*adapters.BedrockAdapter"},
+		{"AzureOpenAI", "ricky", "*adapters.AzureOpenAIAdapter"},
+		{"VertexAI", "ricky", "*adapters.VertexAIAdapter"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.provider+"/"+tc.modelID, func(t *testing.T) {

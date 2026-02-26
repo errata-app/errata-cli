@@ -238,6 +238,123 @@ func TestLoad_LiteLLM(t *testing.T) {
 	assert.Equal(t, "test-key", cfg.LiteLLMAPIKey)
 }
 
+// ─── Bedrock config ──────────────────────────────────────────────────────────
+
+func TestLoad_BedrockRegion(t *testing.T) {
+	os.Setenv("AWS_REGION", "us-west-2")
+	defer os.Unsetenv("AWS_REGION")
+	assert.Equal(t, "us-west-2", config.Load().BedrockRegion)
+}
+
+func TestLoad_BedrockRegionFallsBackToDefault(t *testing.T) {
+	os.Unsetenv("AWS_REGION")
+	os.Setenv("AWS_DEFAULT_REGION", "eu-west-1")
+	defer os.Unsetenv("AWS_DEFAULT_REGION")
+	assert.Equal(t, "eu-west-1", config.Load().BedrockRegion)
+}
+
+func TestLoad_BedrockDefaultModel(t *testing.T) {
+	cfg := config.Load()
+	assert.Equal(t, "anthropic.claude-sonnet-4-20250514-v1:0", cfg.DefaultBedrockModel)
+}
+
+// ─── Azure OpenAI config ─────────────────────────────────────────────────────
+
+func TestLoad_AzureOpenAI(t *testing.T) {
+	os.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+	os.Setenv("AZURE_OPENAI_ENDPOINT", "https://myresource.openai.azure.com")
+	os.Setenv("AZURE_OPENAI_API_VERSION", "2025-01-01")
+	defer func() {
+		os.Unsetenv("AZURE_OPENAI_API_KEY")
+		os.Unsetenv("AZURE_OPENAI_ENDPOINT")
+		os.Unsetenv("AZURE_OPENAI_API_VERSION")
+	}()
+	cfg := config.Load()
+	assert.Equal(t, "test-key", cfg.AzureOpenAIAPIKey)
+	assert.Equal(t, "https://myresource.openai.azure.com", cfg.AzureOpenAIEndpoint)
+	assert.Equal(t, "2025-01-01", cfg.AzureOpenAIAPIVersion)
+}
+
+func TestLoad_AzureOpenAIAPIVersionDefault(t *testing.T) {
+	os.Unsetenv("AZURE_OPENAI_API_VERSION")
+	cfg := config.Load()
+	assert.Equal(t, "2024-10-21", cfg.AzureOpenAIAPIVersion)
+}
+
+// ─── Vertex AI config ────────────────────────────────────────────────────────
+
+func TestLoad_VertexAI(t *testing.T) {
+	os.Setenv("VERTEX_AI_PROJECT", "my-gcp-project")
+	os.Setenv("VERTEX_AI_LOCATION", "us-central1")
+	defer func() {
+		os.Unsetenv("VERTEX_AI_PROJECT")
+		os.Unsetenv("VERTEX_AI_LOCATION")
+	}()
+	cfg := config.Load()
+	assert.Equal(t, "my-gcp-project", cfg.VertexAIProject)
+	assert.Equal(t, "us-central1", cfg.VertexAILocation)
+}
+
+func TestLoad_VertexDefaultModel(t *testing.T) {
+	cfg := config.Load()
+	assert.Equal(t, "gemini-2.0-flash", cfg.DefaultVertexModel)
+}
+
+// ─── ResolvedActiveModels with new providers ─────────────────────────────────
+
+func TestResolvedActiveModels_BedrockAutoDetection(t *testing.T) {
+	os.Unsetenv("ERRATA_ACTIVE_MODELS")
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	os.Unsetenv("OPENAI_API_KEY")
+	os.Unsetenv("GOOGLE_API_KEY")
+	os.Setenv("AWS_REGION", "us-east-1")
+	defer os.Unsetenv("AWS_REGION")
+
+	cfg := config.Load()
+	resolved := cfg.ResolvedActiveModels()
+	assert.Contains(t, resolved, "bedrock/"+cfg.DefaultBedrockModel)
+}
+
+func TestResolvedActiveModels_AzureAutoDetection(t *testing.T) {
+	os.Unsetenv("ERRATA_ACTIVE_MODELS")
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	os.Unsetenv("OPENAI_API_KEY")
+	os.Unsetenv("GOOGLE_API_KEY")
+	os.Unsetenv("AWS_REGION")
+	os.Unsetenv("AWS_DEFAULT_REGION")
+	os.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+	os.Setenv("AZURE_OPENAI_ENDPOINT", "https://myresource.openai.azure.com")
+	defer func() {
+		os.Unsetenv("AZURE_OPENAI_API_KEY")
+		os.Unsetenv("AZURE_OPENAI_ENDPOINT")
+	}()
+
+	cfg := config.Load()
+	resolved := cfg.ResolvedActiveModels()
+	assert.Contains(t, resolved, "azure/"+cfg.DefaultAzureModel)
+}
+
+func TestResolvedActiveModels_VertexAutoDetection(t *testing.T) {
+	os.Unsetenv("ERRATA_ACTIVE_MODELS")
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	os.Unsetenv("OPENAI_API_KEY")
+	os.Unsetenv("GOOGLE_API_KEY")
+	os.Unsetenv("AWS_REGION")
+	os.Unsetenv("AWS_DEFAULT_REGION")
+	os.Unsetenv("AZURE_OPENAI_API_KEY")
+	os.Unsetenv("AZURE_OPENAI_ENDPOINT")
+	os.Setenv("VERTEX_AI_PROJECT", "my-project")
+	os.Setenv("VERTEX_AI_LOCATION", "us-central1")
+	defer func() {
+		os.Unsetenv("VERTEX_AI_PROJECT")
+		os.Unsetenv("VERTEX_AI_LOCATION")
+	}()
+
+	cfg := config.Load()
+	resolved := cfg.ResolvedActiveModels()
+	assert.Contains(t, resolved, "vertex/"+cfg.DefaultVertexModel)
+}
+
 // ─── ERRATA_ACTIVE_MODELS edge cases ─────────────────────────────────────────
 
 func TestLoad_ActiveModels_WhitespaceHandling(t *testing.T) {

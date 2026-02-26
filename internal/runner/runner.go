@@ -206,6 +206,7 @@ func IsContextOverflowError(errStr string) bool {
 		"prompt_too_long",
 		"exceeds the model's maximum",
 		"too many tokens",
+		"model_context_window_exceeded", // Bedrock Converse stop reason
 	} {
 		if strings.Contains(lower, pat) {
 			return true

@@ -43,6 +43,33 @@ var providerDefaults = map[string]models.ModelCapabilities{
 		MidConvoSystem:      false,
 		SupportedInputMedia: []string{"text", "image", "pdf", "video", "audio"},
 	},
+	"bedrock": {
+		Provider:            "bedrock",
+		ContextWindow:       200_000,
+		MaxOutputTokens:     4096,
+		ToolFormat:          models.ToolFormatNative,
+		SystemRole:          true,
+		MidConvoSystem:      false,
+		SupportedInputMedia: []string{"text", "image"},
+	},
+	"azure": {
+		Provider:            "azure",
+		ContextWindow:       128_000,
+		MaxOutputTokens:     16_384,
+		ToolFormat:          models.ToolFormatFunctionCall,
+		SystemRole:          true,
+		MidConvoSystem:      true,
+		SupportedInputMedia: []string{"text", "image"},
+	},
+	"vertex": {
+		Provider:            "vertex",
+		ContextWindow:       1_000_000,
+		MaxOutputTokens:     8192,
+		ToolFormat:          models.ToolFormatFunctionCall,
+		SystemRole:          true,
+		MidConvoSystem:      false,
+		SupportedInputMedia: []string{"text", "image", "pdf", "video", "audio"},
+	},
 }
 
 // modelDefaults holds model-specific capability overrides.
