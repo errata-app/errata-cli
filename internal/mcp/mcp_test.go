@@ -428,3 +428,236 @@ func TestDispatcher_TypeAlias(t *testing.T) {
 		t.Errorf("dispatcher returned %q, want ok", got)
 	}
 }
+
+// ─── Conn.Call: RPC error response ───────────────────────────────────────────
+
+func TestConn_Call_RPCError(t *testing.T) {
+	serverR, clientW := io.Pipe()
+	clientR, serverW := io.Pipe()
+	defer serverR.Close()
+	defer clientW.Close()
+	defer clientR.Close()
+	defer serverW.Close()
+
+	done := runFakeServer(serverR, serverW, []fakeExchange{
+		{response: map[string]any{
+			"jsonrpc": "2.0",
+			"id":      float64(1),
+			"error":   map[string]any{"code": float64(-32600), "message": "Invalid Request"},
+		}},
+	})
+
+	conn := NewConn(clientR, clientW)
+	err := conn.Call("test", nil, nil)
+	if err == nil {
+		t.Fatal("expected RPC error, got nil")
+	}
+	if !strings.Contains(err.Error(), "Invalid Request") {
+		t.Errorf("error %q should contain 'Invalid Request'", err.Error())
+	}
+
+	clientW.Close()
+	<-done
+}
+
+// ─── readResponse: missing Content-Length ─────────────────────────────────────
+
+func TestConn_ReadResponse_NoContentLength(t *testing.T) {
+	// Simulate a response with no Content-Length header.
+	raw := "Some-Header: value\r\n\r\n{}"
+	conn := NewConn(strings.NewReader(raw), io.Discard)
+	_, err := conn.readResponse()
+	if err == nil {
+		t.Fatal("expected error for missing Content-Length")
+	}
+	if !strings.Contains(err.Error(), "no Content-Length") {
+		t.Errorf("error %q should mention Content-Length", err.Error())
+	}
+}
+
+// ─── readResponse: invalid Content-Length ─────────────────────────────────────
+
+func TestConn_ReadResponse_InvalidContentLength(t *testing.T) {
+	raw := "Content-Length: notanumber\r\n\r\n"
+	conn := NewConn(strings.NewReader(raw), io.Discard)
+	_, err := conn.readResponse()
+	if err == nil {
+		t.Fatal("expected error for invalid Content-Length")
+	}
+	if !strings.Contains(err.Error(), "invalid Content-Length") {
+		t.Errorf("error %q should mention invalid Content-Length", err.Error())
+	}
+}
+
+// ─── readResponse: read header error ─────────────────────────────────────────
+
+func TestConn_ReadResponse_HeaderReadError(t *testing.T) {
+	// Empty reader → immediate EOF.
+	conn := NewConn(strings.NewReader(""), io.Discard)
+	_, err := conn.readResponse()
+	if err == nil {
+		t.Fatal("expected error for EOF during header read")
+	}
+}
+
+// ─── CallTool: multiple content items ────────────────────────────────────────
+
+func TestConn_CallTool_MultipleContent(t *testing.T) {
+	serverR, clientW := io.Pipe()
+	clientR, serverW := io.Pipe()
+	defer serverR.Close()
+	defer clientW.Close()
+	defer clientR.Close()
+	defer serverW.Close()
+
+	response := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      float64(1),
+		"result": map[string]any{
+			"content": []any{
+				map[string]any{"type": "text", "text": "hello "},
+				map[string]any{"type": "image", "data": "..."},
+				map[string]any{"type": "text", "text": "world"},
+			},
+		},
+	}
+
+	done := runFakeServer(serverR, serverW, []fakeExchange{
+		{response: response},
+	})
+
+	conn := NewConn(clientR, clientW)
+	result, err := conn.CallTool("multi", nil)
+	if err != nil {
+		t.Fatalf("CallTool() error: %v", err)
+	}
+	if result != "hello world" {
+		t.Errorf("result = %q, want 'hello world'", result)
+	}
+
+	clientW.Close()
+	<-done
+}
+
+// ─── CallTool: empty content ─────────────────────────────────────────────────
+
+func TestConn_CallTool_EmptyContent(t *testing.T) {
+	serverR, clientW := io.Pipe()
+	clientR, serverW := io.Pipe()
+	defer serverR.Close()
+	defer clientW.Close()
+	defer clientR.Close()
+	defer serverW.Close()
+
+	response := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      float64(1),
+		"result": map[string]any{
+			"content": []any{},
+		},
+	}
+
+	done := runFakeServer(serverR, serverW, []fakeExchange{
+		{response: response},
+	})
+
+	conn := NewConn(clientR, clientW)
+	result, err := conn.CallTool("empty", nil)
+	if err != nil {
+		t.Fatalf("CallTool() error: %v", err)
+	}
+	if result != "" {
+		t.Errorf("result = %q, want empty string", result)
+	}
+
+	clientW.Close()
+	<-done
+}
+
+// ─── Schema edge cases ───────────────────────────────────────────────────────
+
+func TestExtractProperties_NonMapProperty(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			"bad": "string", // not a map
+		},
+	}
+	props := extractProperties(schema)
+	if len(props) != 0 {
+		t.Fatalf("expected 0 properties for non-map value, got %d", len(props))
+	}
+}
+
+func TestExtractRequired_NonStringElement(t *testing.T) {
+	schema := map[string]any{
+		"required": []any{"query", float64(123), "url"},
+	}
+	req := extractRequired(schema)
+	if len(req) != 2 || req[0] != "query" || req[1] != "url" {
+		t.Errorf("expected [query url], got %v", req)
+	}
+}
+
+func TestExtractProperties_PropertiesNotMap(t *testing.T) {
+	schema := map[string]any{
+		"properties": "not-a-map",
+	}
+	props := extractProperties(schema)
+	if len(props) != 0 {
+		t.Fatalf("expected 0 properties when properties is not a map, got %d", len(props))
+	}
+}
+
+func TestExtractRequired_RequiredNotArray(t *testing.T) {
+	schema := map[string]any{
+		"required": "not-an-array",
+	}
+	req := extractRequired(schema)
+	if req != nil {
+		t.Fatalf("expected nil when required is not an array, got %v", req)
+	}
+}
+
+func TestTranslateTool_NilSchema(t *testing.T) {
+	mt := MCPTool{
+		Name:        "minimal",
+		Description: "A tool",
+		InputSchema: nil,
+	}
+	def := translateTool(mt)
+	if def.Name != "minimal" {
+		t.Errorf("name = %q, want minimal", def.Name)
+	}
+	if len(def.Properties) != 0 {
+		t.Errorf("expected empty properties, got %d", len(def.Properties))
+	}
+}
+
+// ─── ParseServerConfigs edge cases ───────────────────────────────────────────
+
+func TestParseServerConfigs_EmptyName(t *testing.T) {
+	got := ParseServerConfigs(":cmd arg1")
+	if len(got) != 0 {
+		t.Errorf("expected 0 entries for empty name, got %d", len(got))
+	}
+}
+
+func TestParseServerConfigs_EmptyCommand(t *testing.T) {
+	got := ParseServerConfigs("name:")
+	if len(got) != 0 {
+		t.Errorf("expected 0 entries for empty command, got %d", len(got))
+	}
+}
+
+// ─── Manager.Shutdown idempotent ─────────────────────────────────────────────
+
+func TestManager_Shutdown_NilSafe(t *testing.T) {
+	var mgr *Manager
+	mgr.Shutdown() // should not panic
+}
+
+func TestManager_Shutdown_Idempotent(t *testing.T) {
+	mgr := &Manager{}
+	mgr.Shutdown()
+	mgr.Shutdown() // should not panic on second call
+}

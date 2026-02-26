@@ -135,6 +135,84 @@ func TestClear_MissingFile(t *testing.T) {
 	assert.NoError(t, err, "Clear on a missing file should not return an error")
 }
 
+// ─── Save: empty/nil map is a no-op ─────────────────────────────────────────
+
+func TestSave_EmptyMap(t *testing.T) {
+	path := tmpPath(t, "history.json")
+	err := history.Save(path, map[string][]models.ConversationTurn{})
+	assert.NoError(t, err, "Save with empty map should not error")
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr), "empty map should not create a file")
+}
+
+func TestSave_NilMap(t *testing.T) {
+	path := tmpPath(t, "history.json")
+	err := history.Save(path, nil)
+	assert.NoError(t, err, "Save with nil map should not error")
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr), "nil map should not create a file")
+}
+
+// ─── Load: ReadFile error that is not IsNotExist ────────────────────────────
+
+func TestLoad_ReadError(t *testing.T) {
+	// Use a directory path as if it were a file → ReadFile returns a non-IsNotExist error.
+	dir := t.TempDir()
+	got, err := history.Load(dir)
+	assert.Error(t, err)
+	assert.Nil(t, got)
+}
+
+// ─── Load: valid but empty JSON object ──────────────────────────────────────
+
+func TestLoad_EmptyJSONObject(t *testing.T) {
+	path := tmpPath(t, "empty.json")
+	require.NoError(t, os.WriteFile(path, []byte("{}"), 0o644))
+	got, err := history.Load(path)
+	assert.NoError(t, err)
+	assert.NotNil(t, got)
+	assert.Empty(t, got)
+}
+
+// ─── Save: MkdirAll error ───────────────────────────────────────────────────
+
+func TestSave_MkdirAllError(t *testing.T) {
+	// /dev/null is a file, not a directory — MkdirAll will fail.
+	input := map[string][]models.ConversationTurn{
+		"m": turns("user", "hello", "assistant", "world"),
+	}
+	err := history.Save("/dev/null/sub/history.json", input)
+	assert.Error(t, err, "MkdirAll with impossible path should error")
+}
+
+// ─── Save: WriteFile error (read-only directory) ────────────────────────────
+
+func TestSave_WriteFileError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0o444))
+	defer os.Chmod(dir, 0o755)
+
+	input := map[string][]models.ConversationTurn{
+		"m": turns("user", "hello", "assistant", "world"),
+	}
+	err := history.Save(filepath.Join(dir, "history.json"), input)
+	assert.Error(t, err, "Save to read-only dir should error")
+}
+
+// ─── Clear: non-IsNotExist error ────────────────────────────────────────────
+
+func TestClear_DirectoryReturnsError(t *testing.T) {
+	// Passing a non-empty directory to os.Remove returns an error that is
+	// not IsNotExist (directories can't be removed with os.Remove when non-empty).
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+	// Write a file inside the dir so Remove on dir fails.
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "f"), []byte("x"), 0o644))
+	err := history.Clear(sub)
+	assert.Error(t, err, "Clear on non-empty directory should error")
+}
+
 // ─── Save: no .tmp file left behind (atomic write) ───────────────────────────
 
 func TestSave_Atomic(t *testing.T) {

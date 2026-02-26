@@ -482,27 +482,34 @@ func SystemPromptSuffix() string {
 	return toolUseGuidance + "\n" + systemPromptExtra
 }
 
+// validatePath resolves path relative to cwd and rejects paths that escape it.
+// Returns (absolutePath, cwd, "") on success or ("", "", errorMessage) on failure.
+func validatePath(path string) (abs, cwd, errMsg string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", "", fmt.Sprintf("[error: cannot determine working directory: %v]", err)
+	}
+	abs, err = filepath.Abs(path)
+	if err != nil {
+		return "", "", fmt.Sprintf("[error: invalid path %q: %v]", path, err)
+	}
+	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
+	absClean := filepath.Clean(abs)
+	if !strings.HasPrefix(absClean+string(filepath.Separator), cwdClean) {
+		return "", "", fmt.Sprintf("[error: path %q is outside the working directory]", path)
+	}
+	return abs, cwd, ""
+}
+
 // ExecuteRead reads a file relative to cwd.
 // offset is 1-indexed (0 or 1 both mean "start at line 1").
 // limit is the max lines to return (0 means use maxReadLines).
 // Returns the file content, or an error string the model can see.
 // Refuses paths that escape the working directory.
 func ExecuteRead(path string, offset, limit int) string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Sprintf("[error: cannot determine working directory: %v]", err)
-	}
-
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Sprintf("[error: invalid path %q: %v]", path, err)
-	}
-
-	// Enforce cwd boundary.
-	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
-	absClean := filepath.Clean(abs)
-	if !strings.HasPrefix(absClean+string(filepath.Separator), cwdClean) {
-		return fmt.Sprintf("[error: path %q is outside the working directory]", path)
+	abs, _, errMsg := validatePath(path)
+	if errMsg != "" {
+		return errMsg
 	}
 
 	data, err := os.ReadFile(abs)
@@ -554,20 +561,9 @@ func ExecuteRead(path string, offset, limit int) string {
 // The caller is responsible for queuing the result as a ProposedWrite.
 // Refuses paths that escape the working directory.
 func ExecuteEditFile(path, oldString, newString string) (string, string) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Sprintf("[error: cannot determine working directory: %v]", err)
-	}
-
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Sprintf("[error: invalid path %q: %v]", path, err)
-	}
-
-	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
-	absClean := filepath.Clean(abs)
-	if !strings.HasPrefix(absClean+string(filepath.Separator), cwdClean) {
-		return "", fmt.Sprintf("[error: path %q is outside the working directory]", path)
+	abs, _, errMsg := validatePath(path)
+	if errMsg != "" {
+		return "", errMsg
 	}
 
 	data, err := os.ReadFile(abs)
@@ -594,19 +590,10 @@ func ExecuteEditFile(path, oldString, newString string) (string, string) {
 // All paths are validated against the current working directory; writes that
 // would escape it via ".." sequences are rejected with an error.
 func ApplyWrites(writes []FileWrite) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("could not determine working directory: %w", err)
-	}
-	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
-
 	for _, fw := range writes {
-		abs, err := filepath.Abs(fw.Path)
-		if err != nil {
-			return fmt.Errorf("invalid write path %q: %w", fw.Path, err)
-		}
-		if !strings.HasPrefix(filepath.Clean(abs)+string(filepath.Separator), cwdClean) {
-			return fmt.Errorf("proposed write to %q is outside the working directory", fw.Path)
+		abs, _, errMsg := validatePath(fw.Path)
+		if errMsg != "" {
+			return fmt.Errorf("%s", errMsg)
 		}
 		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 			return fmt.Errorf("mkdir for %q: %w", fw.Path, err)
@@ -632,20 +619,9 @@ func ExecuteListDirectory(path string, depth int) string {
 		depth = 5
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Sprintf("[error: cannot determine working directory: %v]", err)
-	}
-
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Sprintf("[error: invalid path %q: %v]", path, err)
-	}
-
-	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
-	absClean := filepath.Clean(abs)
-	if !strings.HasPrefix(absClean+string(filepath.Separator), cwdClean) {
-		return fmt.Sprintf("[error: path %q is outside the working directory]", path)
+	abs, _, errMsg := validatePath(path)
+	if errMsg != "" {
+		return errMsg
 	}
 
 	info, err := os.Stat(abs)
@@ -709,23 +685,12 @@ func formatFileSize(bytes int64) string {
 // ExecuteSearchFiles finds files matching a glob pattern relative to basePath.
 // basePath is relative to cwd. Returns newline-separated matching paths, or an error message.
 func ExecuteSearchFiles(pattern, basePath string) string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Sprintf("[error: cannot determine working directory: %v]", err)
-	}
-
 	if basePath == "" {
 		basePath = "."
 	}
-	absBase, err := filepath.Abs(basePath)
-	if err != nil {
-		return fmt.Sprintf("[error: invalid base_path %q: %v]", basePath, err)
-	}
-
-	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
-	absClean := filepath.Clean(absBase)
-	if !strings.HasPrefix(absClean+string(filepath.Separator), cwdClean) {
-		return fmt.Sprintf("[error: base_path %q is outside the working directory]", basePath)
+	absBase, cwd, errMsg := validatePath(basePath)
+	if errMsg != "" {
+		return errMsg
 	}
 
 	info, err := os.Stat(absBase)
@@ -1224,23 +1189,12 @@ func matchParts(pat, fp []string) (bool, error) {
 //
 // DERIVED: subprocess + 30s timeout pattern from codex grep_files.rs
 func ExecuteSearchCode(pattern, path, fileGlob string, contextLines int) string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Sprintf("[error: cannot determine working directory: %v]", err)
-	}
-
 	if path == "" {
 		path = "."
 	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Sprintf("[error: invalid path %q: %v]", path, err)
-	}
-
-	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
-	absClean := filepath.Clean(absPath)
-	if !strings.HasPrefix(absClean+string(filepath.Separator), cwdClean) {
-		return fmt.Sprintf("[error: path %q is outside the working directory]", path)
+	absPath, _, errMsg := validatePath(path)
+	if errMsg != "" {
+		return errMsg
 	}
 
 	args := []string{"-rn"}

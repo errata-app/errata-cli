@@ -43,7 +43,7 @@ func Process(toolOutput string, rule Rule) string {
 		if len(toolOutput) > maxChars {
 			// Re-split to lines that fit within the token budget.
 			lines = truncateByChars(lines, maxChars, rule.truncationMode())
-			totalLines = len(strings.Split(toolOutput, "\n"))
+			totalLines = len(lines)
 		}
 	}
 

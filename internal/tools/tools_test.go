@@ -939,3 +939,139 @@ func toolNames(defs []tools.ToolDef) []string {
 	}
 	return names
 }
+
+// ─── Context function round-trips ───────────────────────────────────────────
+
+func TestWithBashPrefixes_RoundTrip(t *testing.T) {
+	prefixes := []string{"go *", "npm *"}
+	ctx := tools.WithBashPrefixes(context.Background(), prefixes)
+	got := tools.BashPrefixesFromContext(ctx)
+	assert.Equal(t, prefixes, got)
+}
+
+func TestBashPrefixesFromContext_NilWhenAbsent(t *testing.T) {
+	got := tools.BashPrefixesFromContext(context.Background())
+	assert.Nil(t, got)
+}
+
+func TestWithMCPDispatchers_RoundTrip(t *testing.T) {
+	d := map[string]tools.MCPDispatcher{
+		"search": func(args map[string]string) string { return "found" },
+	}
+	ctx := tools.WithMCPDispatchers(context.Background(), d)
+	got := tools.MCPDispatchersFromContext(ctx)
+	assert.NotNil(t, got)
+	assert.Equal(t, "found", got["search"](nil))
+}
+
+func TestMCPDispatchersFromContext_NilWhenAbsent(t *testing.T) {
+	got := tools.MCPDispatchersFromContext(context.Background())
+	assert.Nil(t, got)
+}
+
+func TestWithSeed_RoundTrip(t *testing.T) {
+	ctx := tools.WithSeed(context.Background(), 12345)
+	seed, ok := tools.SeedFromContext(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, int64(12345), seed)
+}
+
+func TestSeedFromContext_FalseWhenAbsent(t *testing.T) {
+	_, ok := tools.SeedFromContext(context.Background())
+	assert.False(t, ok)
+}
+
+func TestWithSeed_ZeroValue(t *testing.T) {
+	ctx := tools.WithSeed(context.Background(), 0)
+	seed, ok := tools.SeedFromContext(ctx)
+	assert.True(t, ok, "zero seed should still be present")
+	assert.Equal(t, int64(0), seed)
+}
+
+// ─── DefinitionsAllowed ─────────────────────────────────────────────────────
+
+func TestDefinitionsAllowed_AllowlistOnly(t *testing.T) {
+	allowlist := []string{tools.ReadToolName, tools.BashToolName}
+	got := tools.DefinitionsAllowed(allowlist, nil)
+	names := toolNames(got)
+	assert.Len(t, got, 2)
+	assert.Contains(t, names, tools.ReadToolName)
+	assert.Contains(t, names, tools.BashToolName)
+}
+
+func TestDefinitionsAllowed_AllowlistPlusDisabled(t *testing.T) {
+	allowlist := []string{tools.ReadToolName, tools.BashToolName}
+	disabled := map[string]bool{tools.BashToolName: true}
+	got := tools.DefinitionsAllowed(allowlist, disabled)
+	assert.Len(t, got, 1)
+	assert.Equal(t, tools.ReadToolName, got[0].Name)
+}
+
+func TestDefinitionsAllowed_NilAllowlist_UsesAll(t *testing.T) {
+	disabled := map[string]bool{tools.BashToolName: true}
+	got := tools.DefinitionsAllowed(nil, disabled)
+	names := toolNames(got)
+	assert.NotContains(t, names, tools.BashToolName)
+	assert.Greater(t, len(got), 0)
+}
+
+func TestDefinitionsAllowed_InvalidNames(t *testing.T) {
+	got := tools.DefinitionsAllowed([]string{"nonexistent_tool"}, nil)
+	assert.Empty(t, got)
+}
+
+// ─── FilterDefs ─────────────────────────────────────────────────────────────
+
+func TestFilterDefs_PreservesOrder(t *testing.T) {
+	defs := []tools.ToolDef{
+		{Name: "a"}, {Name: "b"}, {Name: "c"},
+	}
+	disabled := map[string]bool{"b": true}
+	got := tools.FilterDefs(defs, disabled)
+	assert.Equal(t, []string{"a", "c"}, toolNames(got))
+}
+
+func TestFilterDefs_NilDisabled(t *testing.T) {
+	defs := []tools.ToolDef{{Name: "a"}, {Name: "b"}}
+	got := tools.FilterDefs(defs, nil)
+	assert.Len(t, got, 2)
+}
+
+// ─── SystemPrompt ───────────────────────────────────────────────────────────
+
+func TestSetSystemPromptExtra_AffectsSuffix(t *testing.T) {
+	original := tools.SystemPromptSuffix()
+	tools.SetSystemPromptExtra("TEST_EXTRA_CONTENT")
+	modified := tools.SystemPromptSuffix()
+	assert.Contains(t, modified, "TEST_EXTRA_CONTENT")
+	assert.NotEqual(t, original, modified)
+	// Cleanup
+	tools.SetSystemPromptExtra("")
+}
+
+func TestSystemPromptGuidance_IsSubsetOfSuffix(t *testing.T) {
+	guidance := tools.SystemPromptGuidance()
+	suffix := tools.SystemPromptSuffix()
+	assert.True(t, strings.HasPrefix(suffix, guidance),
+		"SystemPromptSuffix should start with SystemPromptGuidance")
+}
+
+// ─── Bash prefix restriction ────────────────────────────────────────────────
+
+func TestExecuteBash_WithPrefixRestriction_Allowed(t *testing.T) {
+	ctx := tools.WithBashPrefixes(context.Background(), []string{"echo *"})
+	out := tools.ExecuteBash(ctx, "echo hello")
+	assert.Contains(t, out, "hello")
+	assert.NotContains(t, out, "not allowed")
+}
+
+func TestExecuteBash_WithPrefixRestriction_Denied(t *testing.T) {
+	ctx := tools.WithBashPrefixes(context.Background(), []string{"echo *"})
+	out := tools.ExecuteBash(ctx, "ls /tmp")
+	assert.Contains(t, out, "not allowed")
+}
+
+func TestExecuteBash_NoPrefixes_AllAllowed(t *testing.T) {
+	out := tools.ExecuteBash(context.Background(), "echo unrestricted")
+	assert.Contains(t, out, "unrestricted")
+}

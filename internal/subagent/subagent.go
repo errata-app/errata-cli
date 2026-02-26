@@ -97,25 +97,28 @@ func NewDispatcher(
 // resolveAdapter finds the adapter to use for a sub-agent run.
 // Priority: explicit modelID arg → cfg.SubagentModel → first adapter in allAdapters.
 func resolveAdapter(modelIDArg, cfgModel string, all []models.ModelAdapter) models.ModelAdapter {
-	// Try the explicit model_id arg first.
 	if modelIDArg != "" {
-		for _, a := range all {
-			if a.ID() == modelIDArg {
-				return a
-			}
+		if a := findByID(all, modelIDArg); a != nil {
+			return a
 		}
 	}
-	// Fall back to the configured sub-agent model.
 	if cfgModel != "" {
-		for _, a := range all {
-			if a.ID() == cfgModel {
-				return a
-			}
+		if a := findByID(all, cfgModel); a != nil {
+			return a
 		}
 	}
-	// Default to the first configured adapter.
 	if len(all) > 0 {
 		return all[0]
+	}
+	return nil
+}
+
+// findByID returns the first adapter whose ID matches target, or nil.
+func findByID(all []models.ModelAdapter, target string) models.ModelAdapter {
+	for _, a := range all {
+		if a.ID() == target {
+			return a
+		}
 	}
 	return nil
 }

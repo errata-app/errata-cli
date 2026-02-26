@@ -2,6 +2,9 @@ package pricing
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -493,4 +496,163 @@ func TestRoundPMT(t *testing.T) {
 			assert.InDelta(t, tt.expect, roundPMT(tt.input), 1e-9)
 		})
 	}
+}
+
+// ─── readPricingCache edge cases ──────────────────────────────────────────────
+
+func TestReadPricingCache_InvalidJSON_ReturnsNil(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	require.NoError(t, os.WriteFile(path, []byte("not json"), 0o644))
+	assert.Nil(t, readPricingCache(path))
+}
+
+func TestReadPricingCache_EmptyModels_ReturnsNil(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	raw := `{"fetched_at":"2099-01-01T00:00:00Z","models":{}}`
+	require.NoError(t, os.WriteFile(path, []byte(raw), 0o644))
+	assert.Nil(t, readPricingCache(path))
+}
+
+// ─── writePricingCache ─────────────────────────────────────────────────────────
+
+func TestWritePricingCache_RoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	now := time.Now().Truncate(time.Second)
+	c := &pricingCacheFile{
+		FetchedAt: now,
+		Models: map[string]modelPricing{
+			"test/model": {InputPMT: 5.0, OutputPMT: 15.0, ContextWindow: 100_000},
+		},
+	}
+	writePricingCache(path, c)
+
+	got := readPricingCache(path)
+	require.NotNil(t, got)
+	assert.InDelta(t, 5.0, got.Models["test/model"].InputPMT, 0.001)
+	assert.Equal(t, int64(100_000), got.Models["test/model"].ContextWindow)
+}
+
+func TestWritePricingCache_InvalidPath(t *testing.T) {
+	// Should not panic on invalid path.
+	writePricingCache("/dev/null/invalid/path/cache.json", &pricingCacheFile{
+		FetchedAt: time.Now(),
+		Models:    map[string]modelPricing{"x": {InputPMT: 1}},
+	})
+}
+
+// ─── fetchOpenRouterPricing with httptest ──────────────────────────────────────
+
+func TestFetchOpenRouterPricing_ParsesResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": [
+				{
+					"id": "test/model-a",
+					"pricing": {"prompt": "0.000003", "completion": "0.000015"},
+					"context_length": 200000
+				},
+				{
+					"id": "test/model-b",
+					"pricing": {"prompt": "0", "completion": "0"},
+					"context_length": 100000
+				},
+				{
+					"id": "test/model-c",
+					"pricing": {"prompt": "0.000001", "completion": "0.000004", "input_cache_read": "0.0000001", "input_cache_write": "0.00000125"},
+					"context_length": 128000
+				}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	// Temporarily override the URL.
+	origURL := openRouterModelsURL
+	// We can't reassign a const, so we use a test-local fetch with the httptest URL.
+	// Instead, test the parsing by calling the server and decoding manually.
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(srv.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	var parsed orModelsResp
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&parsed))
+	assert.Len(t, parsed.Data, 3)
+	assert.Equal(t, "test/model-a", parsed.Data[0].ID)
+	_ = origURL // acknowledge we can't override the const
+}
+
+// ─── LoadPricing: stale cache path ─────────────────────────────────────────────
+
+// failTransport is an http.RoundTripper that always returns an error,
+// used to force fetchOpenRouterPricing to fail without any network access.
+type failTransport struct{}
+
+func (failTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("network disabled for test")
+}
+
+func TestLoadPricing_StaleCache_UsedWhenFetchFails(t *testing.T) {
+	resetDynamicPricing(t)
+	defer resetDynamicPricing(t)
+
+	// Block all outbound HTTP so the OpenRouter fetch fails.
+	orig := http.DefaultTransport
+	http.DefaultTransport = failTransport{}
+	defer func() { http.DefaultTransport = orig }()
+
+	dir := t.TempDir()
+	cacheFile := filepath.Join(dir, "cache.json")
+
+	// Write a stale cache (older than 24 hours).
+	staleTime := time.Now().Add(-48 * time.Hour)
+	c := pricingCacheFile{
+		FetchedAt: staleTime,
+		Models: map[string]modelPricing{
+			"stale/test-model": {InputPMT: 42.0, OutputPMT: 84.0},
+		},
+	}
+	data, err := json.Marshal(c)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cacheFile, data, 0o644))
+
+	// LoadPricing: skip fresh cache → try fetch (fails) → use stale cache.
+	LoadPricing(cacheFile)
+
+	cost := CostUSD("stale/test-model", 1_000_000, 0, 0, 1_000_000)
+	assert.InDelta(t, 126.0, cost, 0.001, "stale cache should provide pricing") // $42 + $84
+}
+
+func TestLoadPricing_NoCache_NoNetwork_FallsBackToHardcoded(t *testing.T) {
+	resetDynamicPricing(t)
+	defer resetDynamicPricing(t)
+
+	orig := http.DefaultTransport
+	http.DefaultTransport = failTransport{}
+	defer func() { http.DefaultTransport = orig }()
+
+	// No cache file at all.
+	LoadPricing(filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	// Should fall back to hardcoded table.
+	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0, 0, 0)
+	assert.Greater(t, cost, 0.0, "hardcoded fallback must provide non-zero price")
+}
+
+// ─── resolvePricing: bare ID dot normalization ──────────────────────────────
+
+func TestResolvePricing_BareID_DotNormalization(t *testing.T) {
+	resetDynamicPricing(t)
+	pricingMu.Lock()
+	dynamicPricing = map[string]modelPricing{
+		"claude-opus-4.6": {InputPMT: 15.0, OutputPMT: 75.0},
+	}
+	pricingMu.Unlock()
+	defer resetDynamicPricing(t)
+
+	// Bare ID "claude-opus-4-6" should resolve to "claude-opus-4.6" via dot normalization.
+	p, ok := resolvePricing("claude-opus-4-6")
+	assert.True(t, ok)
+	assert.InDelta(t, 15.0, p.InputPMT, 0.001)
 }

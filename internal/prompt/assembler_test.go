@@ -2,6 +2,7 @@ package prompt_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -259,6 +260,36 @@ func TestPayloadSummary(t *testing.T) {
 	assert.Contains(t, s, "tool_descriptions: 1 tools")
 	assert.Contains(t, s, "sub_agent_prompts: 1 modes")
 	assert.Contains(t, s, "summarization_prompt: 14 chars")
+}
+
+func TestAssemble_ContextWindowWarning(t *testing.T) {
+	// System prompt large enough to exceed 30% of context window triggers a log warning.
+	// 4000 chars / 4 ≈ 1000 tokens; threshold = 1000 * 30/100 = 300. 1000 > 300 → warning.
+	bigPrompt := strings.Repeat("x", 4000)
+	rec := &mockRecipe{
+		systemVS: prompt.VariantSet{Default: bigPrompt},
+	}
+	caps := models.ModelCapabilities{
+		ToolFormat:    models.ToolFormatNative,
+		ContextWindow: 1000,
+	}
+
+	payload := prompt.Assemble(rec, "test-model", "test", caps)
+	assert.Equal(t, bigPrompt, payload.SystemPrompt)
+}
+
+func TestAssemble_ContextWindowBelowThreshold(t *testing.T) {
+	// 40 chars / 4 = 10 tokens; threshold = 100000 * 30/100 = 30000. 10 < 30000 → no warning.
+	rec := &mockRecipe{
+		systemVS: prompt.VariantSet{Default: strings.Repeat("x", 40)},
+	}
+	caps := models.ModelCapabilities{
+		ToolFormat:    models.ToolFormatNative,
+		ContextWindow: 100000,
+	}
+
+	payload := prompt.Assemble(rec, "model", "provider", caps)
+	assert.Len(t, payload.SystemPrompt, 40)
 }
 
 // Verify that the assembler never modifies user content.

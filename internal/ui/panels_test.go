@@ -243,6 +243,95 @@ func TestRenderInlinePanels_StacksVertically(t *testing.T) {
 	}
 }
 
+// ─── fmtTokens ──────────────────────────────────────────────────────────────
+
+func TestFmtTokens(t *testing.T) {
+	tests := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1.0k"},
+		{1234, "1.2k"},
+		{12400, "12.4k"},
+		{999999, "1000.0k"},
+		{1000000, "1.0M"},
+		{1234567, "1.2M"},
+	}
+	for _, tt := range tests {
+		got := fmtTokens(tt.n)
+		if got != tt.want {
+			t.Errorf("fmtTokens(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}
+
+// ─── truncateLine ───────────────────────────────────────────────────────────
+
+func TestTruncateLine(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		max  int
+		want string
+	}{
+		{"empty", "", 10, ""},
+		{"short", "hello", 10, "hello"},
+		{"newline_strips", "hello\nworld", 70, "hello"},
+		{"newline_at_start", "\nrest", 70, ""},
+		{"exceeds_rune_limit", "abcdefghij", 5, "abcde…"},
+		{"newline_then_rune_limit", "ab\ncdef", 1, "a…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateLine(tt.s, tt.max)
+			if got != tt.want {
+				t.Errorf("truncateLine(%q, %d) = %q, want %q", tt.s, tt.max, got, tt.want)
+			}
+		})
+	}
+}
+
+// ─── renderInlineEvent ──────────────────────────────────────────────────────
+
+func TestRenderInlineEvent_EventTypes(t *testing.T) {
+	types := []struct {
+		typ  string
+		data string
+	}{
+		{"reading", "main.go"},
+		{"writing", "out.go"},
+		{"bash", "go test"},
+		{"error", "something failed"},
+		{"text", "some output"},
+		{"unknown", "fallback data"},
+	}
+	for _, tt := range types {
+		t.Run(tt.typ, func(t *testing.T) {
+			e := models.AgentEvent{Type: tt.typ, Data: tt.data}
+			result := renderInlineEvent(e)
+			if !strings.Contains(result, tt.data) {
+				t.Errorf("renderInlineEvent(%s) should contain %q, got %q", tt.typ, tt.data, result)
+			}
+		})
+	}
+}
+
+func TestRenderInlineEvent_LongDataTruncated(t *testing.T) {
+	longData := strings.Repeat("x", 100)
+	e := models.AgentEvent{Type: "reading", Data: longData}
+	result := renderInlineEvent(e)
+	if strings.Contains(result, longData) {
+		t.Error("long data should be truncated in renderInlineEvent")
+	}
+	if !strings.Contains(result, "…") {
+		t.Error("truncated data should contain ellipsis")
+	}
+}
+
+// ─── renderInlinePanels (empty) ─────────────────────────────────────────────
+
 func TestRenderInlinePanels_Empty(t *testing.T) {
 	out := renderInlinePanels(nil, 80)
 	if out != "" {

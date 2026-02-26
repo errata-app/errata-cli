@@ -109,11 +109,8 @@ func Run(ctx context.Context, opts Options) (*RunReport, error) {
 
 		// Check for context cancellation (SIGINT/SIGTERM).
 		if ctx.Err() != nil {
-			adapterIDs := make([]string, len(opts.Adapters))
-			for j, a := range opts.Adapters {
-				adapterIDs[j] = a.ID()
-			}
-			if cp := checkpoint.Build(taskPrompt, adapterIDs, responses, opts.Verbose); cp != nil {
+			ids := adapterIDs(opts.Adapters)
+			if cp := checkpoint.Build(taskPrompt, ids, responses, opts.Verbose); cp != nil {
 				if err := checkpoint.Save(checkpoint.DefaultPath, *cp); err != nil {
 					fmt.Fprintf(w, "warning: could not save checkpoint: %v\n", err)
 				} else {
@@ -174,11 +171,7 @@ func Run(ctx context.Context, opts Options) (*RunReport, error) {
 		}
 
 		// Update conversation histories.
-		adapterIDs := make([]string, len(opts.Adapters))
-		for j, a := range opts.Adapters {
-			adapterIDs[j] = a.ID()
-		}
-		histories = runner.AppendHistory(histories, adapterIDs, responses, taskPrompt)
+		histories = runner.AppendHistory(histories, adapterIDs(opts.Adapters), responses, taskPrompt)
 
 		for _, resp := range responses {
 			totalCost += resp.CostUSD
@@ -417,6 +410,15 @@ func printModelResult(w io.Writer, resp models.ModelResponse, cr []criteria.Resu
 				resp.ModelID, status, resp.LatencyMS, resp.CostUSD)
 		}
 	}
+}
+
+// adapterIDs returns the IDs of all adapters.
+func adapterIDs(adapters []models.ModelAdapter) []string {
+	ids := make([]string, len(adapters))
+	for i, a := range adapters {
+		ids[i] = a.ID()
+	}
+	return ids
 }
 
 func toolNameList(defs []tools.ToolDef) []string {

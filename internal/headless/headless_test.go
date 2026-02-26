@@ -306,6 +306,59 @@ func TestRunReport_RoundTrip(t *testing.T) {
 	assert.Equal(t, 1, loaded.Summary.TotalTasks)
 }
 
+// ─── recipeName ──────────────────────────────────────────────────────────────
+
+func TestRecipeName_UsesName(t *testing.T) {
+	rec := &recipe.Recipe{Name: "Explicit"}
+	assert.Equal(t, "Explicit", headless.RecipeName(rec))
+}
+
+func TestRecipeName_FallsBackToMetadataName(t *testing.T) {
+	rec := &recipe.Recipe{Metadata: recipe.MetadataConfig{Name: "MetaName"}}
+	assert.Equal(t, "MetaName", headless.RecipeName(rec))
+}
+
+func TestRecipeName_FallsBackToDefault(t *testing.T) {
+	rec := &recipe.Recipe{}
+	assert.Equal(t, "default", headless.RecipeName(rec))
+}
+
+// ─── truncate ───────────────────────────────────────────────────────────────
+
+func TestTruncate_Short(t *testing.T) {
+	assert.Equal(t, "hi", headless.Truncate("hi", 10))
+}
+
+func TestTruncate_ExactLength(t *testing.T) {
+	assert.Equal(t, "hello", headless.Truncate("hello", 5))
+}
+
+func TestTruncate_Long(t *testing.T) {
+	assert.Equal(t, "hello ...", headless.Truncate("hello world", 9))
+}
+
+// ─── Save / Load error paths ────────────────────────────────────────────────
+
+func TestSave_MkdirAllError(t *testing.T) {
+	_, err := headless.Save("/dev/null/sub/out", &headless.RunReport{})
+	assert.Error(t, err)
+}
+
+func TestLoad_NonexistentFile(t *testing.T) {
+	_, err := headless.Load("/no/such/file.json")
+	assert.Error(t, err)
+}
+
+func TestLoad_CorruptJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.json")
+	require.NoError(t, os.WriteFile(path, []byte("{bad json!"), 0o644))
+	_, err := headless.Load(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unmarshal")
+}
+
+// ─── JSON report ─────────────────────────────────────────────────────────────
+
 func TestRunReport_JSONOutput(t *testing.T) {
 	t.Chdir(t.TempDir())
 	outDir := filepath.Join(t.TempDir(), "out")

@@ -2,6 +2,7 @@ package subagent_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -124,6 +125,113 @@ func TestNewDispatcher_FallbackToSubagentModel(t *testing.T) {
 	text, _, errMsg := dispatcher(ctx, map[string]string{"task": "do work"})
 	assert.Equal(t, "", errMsg)
 	assert.Equal(t, "from preferred", text)
+}
+
+// ─── TestNewDispatcher_EmptyTask ───────────────────────────────────────────────
+
+func TestNewDispatcher_EmptyTask(t *testing.T) {
+	adapter := &stubAdapter{id: "m", response: models.ModelResponse{Text: "ok"}}
+	cfg := config.Config{SubagentMaxDepth: 1}
+	dispatcher := subagent.NewDispatcher([]models.ModelAdapter{adapter}, cfg, nil,
+		func(string, models.AgentEvent) {})
+
+	ctx := tools.WithSubagentDepth(context.Background(), 0)
+	_, _, errMsg := dispatcher(ctx, map[string]string{"task": ""})
+	assert.Contains(t, errMsg, "task argument is required")
+}
+
+// ─── TestNewDispatcher_NoAdapters ─────────────────────────────────────────────
+
+func TestNewDispatcher_NoAdapters(t *testing.T) {
+	cfg := config.Config{SubagentMaxDepth: 1}
+	dispatcher := subagent.NewDispatcher(nil, cfg, nil,
+		func(string, models.AgentEvent) {})
+
+	ctx := tools.WithSubagentDepth(context.Background(), 0)
+	_, _, errMsg := dispatcher(ctx, map[string]string{"task": "do work"})
+	assert.Contains(t, errMsg, "no adapter available")
+}
+
+// ─── TestNewDispatcher_ErrorResponse ──────────────────────────────────────────
+
+func TestNewDispatcher_ErrorResponse(t *testing.T) {
+	adapter := &stubAdapter{
+		id:       "err-model",
+		response: models.ModelResponse{Error: "model failed"},
+	}
+	cfg := config.Config{SubagentMaxDepth: 1}
+
+	var events []models.AgentEvent
+	dispatcher := subagent.NewDispatcher([]models.ModelAdapter{adapter}, cfg, nil,
+		func(_ string, e models.AgentEvent) { events = append(events, e) })
+
+	ctx := tools.WithSubagentDepth(context.Background(), 0)
+	text, writes, errMsg := dispatcher(ctx, map[string]string{"task": "do work"})
+	assert.Equal(t, "", text)
+	assert.Nil(t, writes)
+	assert.Contains(t, errMsg, "model failed")
+}
+
+// ─── TestNewDispatcher_CostInSummary ──────────────────────────────────────────
+
+func TestNewDispatcher_CostInSummary(t *testing.T) {
+	adapter := &stubAdapter{
+		id: "cost-model",
+		response: models.ModelResponse{
+			Text:         "result",
+			InputTokens:  1000,
+			OutputTokens: 500,
+			CostUSD:      0.0042,
+		},
+	}
+	cfg := config.Config{SubagentMaxDepth: 1}
+
+	var events []models.AgentEvent
+	dispatcher := subagent.NewDispatcher([]models.ModelAdapter{adapter}, cfg, nil,
+		func(_ string, e models.AgentEvent) { events = append(events, e) })
+
+	ctx := tools.WithSubagentDepth(context.Background(), 0)
+	text, _, errMsg := dispatcher(ctx, map[string]string{"task": "do work"})
+	assert.Equal(t, "", errMsg)
+	assert.Equal(t, "result", text)
+
+	// Find the summary event.
+	var found bool
+	for _, e := range events {
+		if e.Type == "text" && strings.Contains(e.Data, "$0.0042") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "summary event should contain cost; events: %v", events)
+}
+
+// ─── TestNewDispatcher_ZeroCostOmitted ────────────────────────────────────────
+
+func TestNewDispatcher_ZeroCostOmitted(t *testing.T) {
+	adapter := &stubAdapter{
+		id: "free-model",
+		response: models.ModelResponse{
+			Text:         "result",
+			InputTokens:  100,
+			OutputTokens: 50,
+			CostUSD:      0,
+		},
+	}
+	cfg := config.Config{SubagentMaxDepth: 1}
+
+	var events []models.AgentEvent
+	dispatcher := subagent.NewDispatcher([]models.ModelAdapter{adapter}, cfg, nil,
+		func(_ string, e models.AgentEvent) { events = append(events, e) })
+
+	ctx := tools.WithSubagentDepth(context.Background(), 0)
+	dispatcher(ctx, map[string]string{"task": "do work"})
+
+	for _, e := range events {
+		if e.Type == "text" {
+			assert.NotContains(t, e.Data, "$", "zero cost should not show $ in summary")
+		}
+	}
 }
 
 // ─── TestNewDispatcher_SpawnAgentRemovedAtMaxDepth ────────────────────────────

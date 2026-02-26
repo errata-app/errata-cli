@@ -1041,6 +1041,206 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.False(t, *llama.MidConvoSystem)
 }
 
+// ─── VariantSet helper coverage ──────────────────────────────────────────────
+
+func TestRecipe_SubAgentModeVS(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sub-Agent Modes
+### explore
+Read-only exploration.
+
+## Sub-Agent Mode Variants
+### explore
+#### concise
+Explore briefly.
+
+## Sub-Agent Mode Overrides
+### gpt-4o
+#### explore
+concise
+`))
+	require.NoError(t, err)
+
+	vs := r.SubAgentModeVS("explore")
+	assert.Equal(t, "Read-only exploration.", vs.Default)
+
+	content, src := vs.Resolve("gpt-4o", "openai", "")
+	assert.Equal(t, "Explore briefly.", content)
+	assert.Contains(t, src, "variant:concise")
+
+	content, _ = vs.Resolve("unknown", "", "")
+	assert.Equal(t, "Read-only exploration.", content)
+}
+
+func TestRecipe_SubAgentModeVS_NoOverrides(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sub-Agent Modes
+### explore
+Read-only.
+`))
+	require.NoError(t, err)
+	vs := r.SubAgentModeVS("explore")
+	assert.Equal(t, "Read-only.", vs.Default)
+	assert.Nil(t, vs.Overrides)
+}
+
+func TestRecipe_SummarizationVS(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Context Summarization Prompt
+Summarize the conversation.
+
+## Context Summarization Prompt Variants
+### concise
+Brief summary.
+`))
+	require.NoError(t, err)
+	vs := r.SummarizationVS()
+	assert.Equal(t, "Summarize the conversation.", vs.Default)
+	require.Contains(t, vs.Variants, "concise")
+	assert.Equal(t, "Brief summary.", vs.Variants["concise"])
+}
+
+func TestRecipe_AllToolDescriptionNames(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Tool Descriptions
+### bash
+Use bash.
+
+## Tool Description Variants
+### read_file
+#### concise
+Read files.
+
+## Tool Description Overrides
+### gpt-4o
+#### search_code
+GPT search.
+`))
+	require.NoError(t, err)
+	names := r.AllToolDescriptionNames()
+	assert.Contains(t, names, "bash")
+	assert.Contains(t, names, "read_file")
+	assert.Contains(t, names, "search_code")
+	assert.Len(t, names, 3)
+}
+
+func TestRecipe_AllToolDescriptionNames_Empty(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Models\n- m\n"))
+	require.NoError(t, err)
+	assert.Empty(t, r.AllToolDescriptionNames())
+}
+
+func TestRecipe_AllSubAgentModeNames(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sub-Agent Modes
+### explore
+Explore.
+
+## Sub-Agent Mode Variants
+### plan
+#### concise
+Plan briefly.
+
+## Sub-Agent Mode Overrides
+### gpt-4o
+#### debug
+GPT debug.
+`))
+	require.NoError(t, err)
+	names := r.AllSubAgentModeNames()
+	assert.Contains(t, names, "explore")
+	assert.Contains(t, names, "plan")
+	assert.Contains(t, names, "debug")
+	assert.Len(t, names, 3)
+}
+
+func TestRecipe_AllSubAgentModeNames_Empty(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Models\n- m\n"))
+	require.NoError(t, err)
+	assert.Empty(t, r.AllSubAgentModeNames())
+}
+
+func TestRecipe_TierForModel(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Model Profiles
+### gpt-4o
+tier: concise
+`))
+	require.NoError(t, err)
+	assert.Equal(t, "concise", r.TierForModel("gpt-4o"))
+	assert.Equal(t, "", r.TierForModel("unknown-model"))
+}
+
+func TestRecipe_TierForModel_NilProfiles(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Models\n- m\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "", r.TierForModel("anything"))
+}
+
+// ─── Parse edge cases ───────────────────────────────────────────────────────
+
+func TestParse_MCPServers_NoColon(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## MCP Servers\n- no_colon_here\n"))
+	require.NoError(t, err)
+	assert.Empty(t, r.MCPServers)
+}
+
+func TestParse_MCPServers_EmptyNameOrCommand(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## MCP Servers\n- :\n- name:\n- :cmd\n"))
+	require.NoError(t, err)
+	assert.Empty(t, r.MCPServers, "empty name or command should be skipped")
+}
+
+func TestParse_ModelParams_InvalidValues(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Model Parameters
+temperature: not_a_number
+max_tokens: abc
+seed: xyz
+`))
+	require.NoError(t, err)
+	assert.Nil(t, r.ModelParams.Temperature)
+	assert.Nil(t, r.ModelParams.MaxTokens)
+	assert.Nil(t, r.ModelParams.Seed)
+}
+
+func TestParse_ModelParams_MaxTokensZero(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Model Parameters\nmax_tokens: 0\n"))
+	require.NoError(t, err)
+	assert.Nil(t, r.ModelParams.MaxTokens, "max_tokens: 0 should be ignored (must be > 0)")
+}
+
+func TestParse_Sandbox_UnknownValues(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Sandbox
+filesystem: invalid_value
+network: unknown
+`))
+	require.NoError(t, err)
+	assert.Equal(t, "", r.Sandbox.Filesystem)
+	assert.Equal(t, "", r.Sandbox.Network)
+}
+
+func TestParse_Constraints_IntegerTimeout(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Constraints\ntimeout: 120\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 120*time.Second, r.Constraints.Timeout, "integer timeout should be treated as seconds")
+}
+
+func TestParse_Constraints_InvalidTimeout(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Constraints\ntimeout: abc\n"))
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(0), r.Constraints.Timeout)
+}
+
+func TestParse_Constraints_InvalidMaxSteps(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Constraints\nmax_steps: not_a_number\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 0, r.Constraints.MaxSteps)
+}
+
+// ─── Empty new sections ─────────────────────────────────────────────────────
+
 func TestParse_EmptyNewSections(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, `
 ## System Prompt Variants

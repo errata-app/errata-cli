@@ -80,18 +80,32 @@ OpenRouter and LiteLLM models must be listed explicitly in `ERRATA_ACTIVE_MODELS
 ### TUI (terminal REPL)
 
 ```bash
-./errata
+./errata                     # auto-discovers recipe.md in cwd
+./errata -r path/to/recipe.md
 ```
 
 ### Web UI
 
 ```bash
-./errata serve           # starts on :8080
+./errata serve               # starts on :8080
 ./errata serve --port 3000
 ```
 
 Open `http://localhost:8080` in your browser. The web UI is functionally identical to the
 TUI and shares the same WebSocket-based backend.
+
+### Headless mode (recipe runner)
+
+```bash
+./errata run                     # run recipe tasks (requires recipe.md with ## Tasks)
+./errata run --json              # print JSON report to stdout
+./errata run --output-dir out/   # save report to custom directory
+./errata run -r path/to/my.md    # use a specific recipe file
+```
+
+Runs all tasks defined in a recipe file against all configured models without user
+interaction. Each task is sent to every model concurrently; results are compared using
+optional success criteria and saved as a JSON report. See [Recipes](#recipes) below.
 
 ### Preference summary
 
@@ -407,6 +421,75 @@ ERRATA_MAX_HISTORY_TURNS=20   # default; reduce for smaller context windows
 
 ---
 
+## Recipes
+
+A recipe is a Markdown file (`recipe.md`) that configures Errata for a specific project or
+workflow. Errata auto-discovers `recipe.md` in the current directory, or you can specify one
+with `--recipe path/to/file.md` (or `-r`).
+
+Recipes are used by all three surfaces (TUI, web, headless) and can configure models, system
+prompts, tools, context management, and more. The headless `errata run` command additionally
+requires a `## Tasks` section.
+
+### Minimal example
+
+```markdown
+# My Project
+
+## Models
+- claude-sonnet-4-6
+- gpt-4o
+
+## System Prompt
+You are working on a Go project. Run `go test ./...` after changes.
+
+## Tasks
+- Add table-driven tests for utils.go
+- Fix all lint warnings from `golangci-lint run`
+
+## Success Criteria
+- no_errors
+- has_writes
+```
+
+### Available sections
+
+| Section | Purpose |
+|---------|---------|
+| `## Models` | List of model IDs to use (overrides env config) |
+| `## System Prompt` | Custom system prompt appended to built-in guidance |
+| `## System Prompt Variants` | Named prompt variants (e.g. `### concise`) |
+| `## System Prompt Overrides` | Per-model prompt overrides (e.g. `### gpt-4o`) |
+| `## Tools` | Allowlist of enabled tools; supports glob patterns for bash (e.g. `bash(go test *)`) |
+| `## Tool Descriptions` | Custom descriptions injected into tool definitions |
+| `## Sub-Agent Modes` | Named sub-agent personas (e.g. `### explore`, `### plan`) |
+| `## Model Parameters` | Provider parameters (e.g. `seed: 42`) |
+| `## Constraints` | `timeout` and `max_steps` per model |
+| `## Context` | `max_history_turns`, `strategy`, `compact_threshold`, `task_mode` |
+| `## Context Summarization Prompt` | Custom prompt for `/compact` and auto-compact |
+| `## System Reminders` | Trigger-based messages injected mid-conversation |
+| `## Hooks` | Shell commands triggered by tool events (e.g. run tests after edits) |
+| `## Output Processing` | Per-tool output truncation rules |
+| `## Model Profiles` | Per-model capability overrides (context budget, tool format, tier) |
+| `## Sub-Agent` | Sub-agent model, max depth, and tool inheritance |
+| `## Sandbox` | Filesystem and network restrictions |
+| `## MCP Servers` | Additional MCP tool servers |
+| `## Metadata` | Name, description, tags, author, project_root, extends |
+| `## Tasks` | Task prompts for `errata run` (headless mode only) |
+| `## Success Criteria` | Automated pass/fail checks (`no_errors`, `has_writes`) |
+
+A full example with every section is available in `recipe.example.md`.
+
+### Task modes (headless)
+
+The `task_mode` field in `## Context` controls how tasks are executed:
+
+- **`independent`** (default): Each task runs in isolation. All models are compared per task.
+- **`sequential`**: Tasks run in order. The best model's writes are applied to disk before
+  the next task starts, so later tasks build on earlier results.
+
+---
+
 ## Preference log
 
 Every selection is appended to `data/preferences.jsonl` (never overwritten):
@@ -452,54 +535,86 @@ make install         # go install to $GOPATH/bin
 ```
 errata/
 ├── cmd/errata/
-│   └── main.go              # cobra entrypoint (errata, errata stats, errata serve)
+│   └── main.go                  # cobra entrypoint (errata, errata run, errata serve, errata stats)
 ├── internal/
-│   ├── config/
-│   │   └── config.go        # Config struct, Load(), ResolvedActiveModels()
-│   ├── models/
-│   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
 │   ├── adapters/
-│   │   ├── registry.go      # NewAdapter(), ListAdapters() — routing by prefix/slash
-│   │   ├── common.go        # DispatchTool, BuildErrorResponse, BuildInterruptedResponse, BuildSuccessResponse
-│   │   ├── anthropic.go     # AnthropicAdapter.RunAgent()
-│   │   ├── openai.go        # OpenAIAdapter.RunAgent()
-│   │   ├── gemini.go        # GeminiAdapter.RunAgent()
-│   │   ├── openrouter.go    # OpenRouterAdapter — any model via "provider/model" IDs
-│   │   └── litellm.go       # LiteLLMAdapter — local/self-hosted proxy
-│   ├── mcp/
-│   │   ├── client.go        # JSON-RPC 2.0 stdio client (MCP protocol)
-│   │   └── manager.go       # subprocess lifecycle, tool discovery, dispatcher registry
-│   ├── pricing/
-│   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens()
-│   ├── runner/
-│   │   └── runner.go        # RunAll(), AppendHistory(), TrimHistory(), CompactHistories(), HasInterrupted()
-│   ├── tools/
-│   │   └── tools.go         # ToolDef, Definitions, Execute* functions, MCP context helpers
-│   ├── diff/
-│   │   └── diff.go          # Compute() → FileDiff (Myers algorithm via sergi/go-diff)
-│   ├── history/
-│   │   └── history.go       # Load(), Save(), Clear() — conversation history persistence
-│   ├── logging/
-│   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
-│   ├── preferences/
-│   │   └── preferences.go   # Record(), LoadAll(), Summarize()
+│   │   ├── registry.go          # NewAdapter(), ListAdapters() — routing by prefix/slash
+│   │   ├── common.go            # DispatchTool, EmitSnapshot, Build*Response — shared helpers
+│   │   ├── list.go              # ListAvailableModels() — per-provider model catalogue fetch
+│   │   ├── anthropic.go         # AnthropicAdapter.RunAgent()
+│   │   ├── openai.go            # OpenAIAdapter.RunAgent()
+│   │   ├── gemini.go            # GeminiAdapter.RunAgent()
+│   │   ├── openrouter.go        # OpenRouterAdapter — any model via "provider/model" IDs
+│   │   └── litellm.go           # LiteLLMAdapter — local/self-hosted proxy
+│   ├── capabilities/
+│   │   └── defaults.go          # per-model capability defaults (context budget, tool format)
 │   ├── checkpoint/
-│   │   └── checkpoint.go    # Save/Load/Clear/Build/IncrementalSaver — interrupted run state for /resume
+│   │   └── checkpoint.go        # Save/Load/Clear/Build/IncrementalSaver — /resume state
 │   ├── commands/
-│   │   └── commands.go      # canonical slash command registry (TUI + web)
+│   │   └── commands.go          # canonical slash command registry (TUI + web)
+│   ├── config/
+│   │   └── config.go            # Config struct, Load(), ResolvedActiveModels()
+│   ├── criteria/
+│   │   └── criteria.go          # success criteria evaluation (no_errors, has_writes)
+│   ├── diff/
+│   │   └── diff.go              # Compute() → FileDiff (Myers algorithm)
+│   ├── headless/
+│   │   ├── headless.go          # Run() — headless task runner for `errata run`
+│   │   └── report.go            # RunReport, Save/Load JSON reports
+│   ├── history/
+│   │   └── history.go           # Load(), Save(), Clear() — conversation history
+│   ├── hooks/
+│   │   └── hooks.go             # recipe-defined hooks (post_tool_use, session_start)
+│   ├── logging/
+│   │   └── logger.go            # Logger, Wrap()/WrapAll() — per-run JSONL logging
+│   ├── mcp/
+│   │   ├── client.go            # JSON-RPC 2.0 stdio client (MCP protocol)
+│   │   └── manager.go           # subprocess lifecycle, tool discovery, dispatcher
+│   ├── models/
+│   │   └── types.go             # ModelAdapter interface, AgentEvent, ModelResponse
+│   ├── output/
+│   │   └── output.go            # BuildReport, human-readable report formatting
+│   ├── preferences/
+│   │   └── preferences.go       # Record(), LoadAll(), Summarize(), SummarizeDetailed()
+│   ├── pricing/
+│   │   └── pricing.go           # LoadPricing(), CostUSD(), ContextWindowTokens()
+│   ├── prompt/
+│   │   ├── assembler.go         # AssembleSystemPrompt() — prompt construction with variants
+│   │   └── variant.go           # VariantSet resolution for per-model prompts
 │   ├── prompthistory/
-│   │   └── prompthistory.go # prompt history persistence (Up-arrow / Ctrl-R)
+│   │   └── prompthistory.go     # prompt history persistence (Up-arrow / Ctrl-R)
+│   ├── recipe/
+│   │   └── recipe.go            # Recipe struct, Discover(), Parse(), Default(), ApplyTo()
+│   ├── reminders/
+│   │   └── reminders.go         # trigger-based system reminders mid-conversation
+│   ├── runner/
+│   │   └── runner.go            # RunAll(), TrimHistory(), CompactHistories(), HasInterrupted()
+│   ├── sandbox/
+│   │   └── sandbox.go           # filesystem/network restrictions (platform-specific)
+│   ├── subagent/
+│   │   └── subagent.go          # sub-agent orchestration (spawn, dispatch, depth control)
+│   ├── tooloutput/
+│   │   └── process.go           # tool output processing (truncation rules)
+│   ├── tools/
+│   │   └── tools.go             # ToolDef, Definitions, Execute* functions, MCP helpers
 │   ├── ui/
-│   │   ├── app.go           # bubbletea program, mode state machine
-│   │   ├── panels.go        # agent panel rendering (lipgloss)
-│   │   └── diff.go          # diff + selection menu rendering
+│   │   ├── app.go               # bubbletea program, mode state machine
+│   │   ├── cmd_handlers.go      # slash command dispatch
+│   │   ├── complete.go          # tab completion for /commands
+│   │   ├── config_panel.go      # recipe configuration panel (interactive editing)
+│   │   ├── diff.go              # diff + selection menu rendering
+│   │   ├── input.go             # textarea input handling, prompt history
+│   │   ├── mention.go           # @file mention expansion
+│   │   ├── panels.go            # live agent panel rendering (lipgloss)
+│   │   └── selection.go         # model selection UI
 │   └── web/
-│       ├── server.go        # Server struct, route registration, embedded static assets
-│       ├── handlers.go      # WebSocket handler, REST handlers
+│       ├── server.go            # Server struct, route registration, embedded static assets
+│       ├── handlers.go          # WebSocket handler, REST handlers
 │       └── static/
 │           ├── index.html
 │           ├── style.css
 │           └── app.js
+├── recipe.example.md                # full-featured recipe example (every section)
 ├── go.mod
 ├── go.sum
 └── Makefile
