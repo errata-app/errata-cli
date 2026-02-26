@@ -128,6 +128,12 @@ func ProviderQualifiedID(provider, modelID string) string {
 		return "openai/" + modelID
 	case "Gemini":
 		return "google/" + modelID
+	case "Bedrock":
+		return "bedrock/" + modelID
+	case "AzureOpenAI":
+		return "azure/" + modelID
+	case "VertexAI":
+		return "google/" + modelID // same models as Gemini
 	default: // OpenRouter ("provider/model"), LiteLLM ("litellm/X")
 		return modelID
 	}

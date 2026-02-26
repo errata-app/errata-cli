@@ -135,6 +135,31 @@ func TestParseToolFormat(t *testing.T) {
 	}
 }
 
+func TestDefaultCapabilities_BedrockProviderDefaults(t *testing.T) {
+	caps := capabilities.DefaultCapabilities("bedrock", "anthropic.claude-sonnet-4-20250514-v1:0")
+	assert.Equal(t, "bedrock", caps.Provider)
+	assert.Equal(t, 200_000, caps.ContextWindow)
+	assert.Equal(t, models.ToolFormatNative, caps.ToolFormat)
+	assert.True(t, caps.SystemRole)
+}
+
+func TestDefaultCapabilities_AzureProviderDefaults(t *testing.T) {
+	caps := capabilities.DefaultCapabilities("azure", "gpt-4o")
+	assert.Equal(t, "azure", caps.Provider)
+	assert.Equal(t, 128_000, caps.ContextWindow)
+	assert.Equal(t, models.ToolFormatFunctionCall, caps.ToolFormat)
+	assert.True(t, caps.SystemRole)
+	assert.True(t, caps.MidConvoSystem)
+}
+
+func TestDefaultCapabilities_VertexProviderDefaults(t *testing.T) {
+	caps := capabilities.DefaultCapabilities("vertex", "gemini-2.0-flash")
+	assert.Equal(t, "vertex", caps.Provider)
+	assert.Equal(t, 1_000_000, caps.ContextWindow)
+	assert.Equal(t, models.ToolFormatFunctionCall, caps.ToolFormat)
+	assert.True(t, caps.SystemRole)
+}
+
 // Verify all models in the modelDefaults table are reachable.
 func TestDefaultCapabilities_AllKnownModels(t *testing.T) {
 	knownModels := []struct {

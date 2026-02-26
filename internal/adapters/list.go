@@ -8,6 +8,12 @@ import (
 	"strings"
 	"sync"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/bedrock"
+	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
+
+	"google.golang.org/genai"
+
 	"github.com/suarezc/errata/internal/config"
 )
 
@@ -67,6 +73,24 @@ func ListAvailableModels(ctx context.Context, cfg config.Config) []ProviderModel
 		base, key := cfg.LiteLLMBaseURL, cfg.LiteLLMAPIKey
 		jobs = append(jobs, job{"LiteLLM", func() ([]string, int, error) {
 			return listLiteLLMModels(ctx, base, key)
+		}})
+	}
+	if cfg.BedrockRegion != "" {
+		region := cfg.BedrockRegion
+		jobs = append(jobs, job{"Bedrock", func() ([]string, int, error) {
+			return listBedrockModels(ctx, region)
+		}})
+	}
+	if cfg.AzureOpenAIAPIKey != "" && cfg.AzureOpenAIEndpoint != "" {
+		jobs = append(jobs, job{"Azure OpenAI", func() ([]string, int, error) {
+			// Azure deployments are user-managed; no public listing API.
+			return nil, 0, nil
+		}})
+	}
+	if cfg.VertexAIProject != "" && cfg.VertexAILocation != "" {
+		project, location := cfg.VertexAIProject, cfg.VertexAILocation
+		jobs = append(jobs, job{"Vertex AI", func() ([]string, int, error) {
+			return listVertexAIModels(ctx, project, location)
 		}})
 	}
 
@@ -221,4 +245,85 @@ func listLiteLLMModels(ctx context.Context, baseURL, apiKey string) ([]string, i
 	}
 	sort.Strings(ids)
 	return ids, len(ids), nil
+}
+
+func listBedrockModels(ctx context.Context, region string) ([]string, int, error) {
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil {
+		return nil, 0, err
+	}
+	client := bedrock.NewFromConfig(awsCfg)
+
+	result, err := client.ListFoundationModels(ctx, &bedrock.ListFoundationModelsInput{})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total := len(result.ModelSummaries)
+	var ids []string
+	for _, m := range result.ModelSummaries {
+		// Only include models that support the Converse inference type.
+		supportsConverse := false
+		for _, it := range m.InferenceTypesSupported {
+			if it == bedrocktypes.InferenceTypeOnDemand {
+				supportsConverse = true
+				break
+			}
+		}
+		if supportsConverse && m.ModelId != nil {
+			ids = append(ids, "bedrock/"+*m.ModelId)
+		}
+	}
+	sort.Strings(ids)
+	return ids, total, nil
+}
+
+func listVertexAIModels(ctx context.Context, project, location string) ([]string, int, error) {
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		Project:  project,
+		Location: location,
+		Backend:  genai.BackendVertexAI,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	page, err := client.Models.List(ctx, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var all []string
+	for {
+		for _, model := range page.Items {
+			if model == nil {
+				continue
+			}
+			// Filter to models that support generateContent.
+			supportsGenerate := false
+			for _, m := range model.SupportedActions {
+				if m == "generateContent" {
+					supportsGenerate = true
+					break
+				}
+			}
+			if supportsGenerate {
+				name := model.Name
+				// Strip "models/" or "publishers/google/models/" prefix.
+				if i := strings.LastIndex(name, "/"); i >= 0 {
+					name = name[i+1:]
+				}
+				all = append(all, "vertex/"+name)
+			}
+		}
+		if page.NextPageToken == "" {
+			break
+		}
+		page, err = page.Next(ctx)
+		if err != nil {
+			break // return what we have
+		}
+	}
+	sort.Strings(all)
+	return all, len(all), nil
 }
