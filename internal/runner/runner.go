@@ -78,11 +78,7 @@ func RunAll(
 	}
 
 	for i, a := range adapters {
-		i, a := i, a
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			tctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 			defer cancel()
 
@@ -130,7 +126,7 @@ func RunAll(
 			if saver != nil {
 				saver.MarkCompleted(a.ID(), checkpoint.FromModelResponse(resp))
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

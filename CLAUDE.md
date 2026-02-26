@@ -767,12 +767,13 @@ introspect the active tool set dynamically.
 
 ---
 
-## Testing
+## Testing & Linting
 
 ```bash
 go test ./...                  # all packages
 go test -v ./internal/runner   # single package, verbose
 go test -run TestExecuteRead   # single test
+golangci-lint run ./...        # run all configured linters
 ```
 
 Test files: `*_test.go` alongside source in the same directory.
@@ -784,10 +785,21 @@ Table-driven tests preferred for config, preferences, and diff packages.
 - Any bug fix must include a regression test that would have caught the original bug.
 - Any struct that is serialized to disk (JSON, JSONL) must have a round-trip test
   (write → read → assert values) to catch unexported-field and missing-json-tag bugs.
-- Run `go test ./...` before considering a task complete.
+- Run `go test ./...` and `golangci-lint run ./...` before considering a task complete.
 - For diff/transformation output, use flexible assertions (check for key substrings or
   structural properties) rather than exact string matching — output formats may vary
   depending on the Myers diff algorithm's choice of common subsequence.
+
+**Linting rules (`.golangci.yml`):**
+- 16 linters enabled: standard defaults (errcheck, govet, ineffassign, staticcheck, unused)
+  plus bodyclose, errorlint, forcetypeassert, gocritic, gosec, musttag, nilerr, nilnil,
+  modernize, prealloc, testifylint.
+- `func (a App)` value-receiver methods in `internal/ui/` require `//nolint:gocritic` because
+  bubbletea's `tea.Model` interface mandates value receivers.
+- Use `require.NoError`/`require.Error` (not `assert`) for error checks that guard subsequent
+  assertions. Use `assert.Empty` instead of `assert.Equal(t, "", ...)`.
+- Directory permissions should be `0o750`, file permissions `0o600` (gosec G301/G306).
+- Prefer `strings.SplitSeq` over `strings.Split` in range loops (modernize).
 
 ---
 

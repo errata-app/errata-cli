@@ -1,0 +1,89 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    # --- Bugs & safety ---
+    - bodyclose         # unclosed HTTP response bodies
+    - errorlint         # broken error wrapping (errors.As/Is)
+    - forcetypeassert   # unchecked type assertions (runtime panics)
+    - gocritic          # appendAssign, badCall, etc.
+    - gosec             # security: SSRF, perms, overflow
+    - musttag           # missing json/yaml struct tags on marshaled types
+    - nilerr            # returning nil when err != nil
+    - nilnil            # simultaneous return nil, nil
+
+    # --- Code quality ---
+    - modernize         # idiomatic Go: min/max, strings.Cut, range-over-int
+    - prealloc          # slice preallocation when capacity is known
+    - testifylint       # testify best practices (assert.Len, require.NoError)
+
+  settings:
+    errcheck:
+      exclude-functions:
+        # fmt print to writers: error is nearly always nil (stdout/stderr/strings.Builder)
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # deferred close in non-critical paths
+        - (*os.File).Close
+
+    gosec:
+      excludes:
+        # Subprocess with variable args — inherent to a tool that runs commands
+        - G204
+        # File inclusion via variable — inherent to a tool that reads user-specified files
+        - G304
+        # URL from taint — web_fetch takes user-provided URLs by design
+        - G704
+        # Hardcoded credentials — false positives on test API key variable names
+        - G101
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        # Style-only checks that add noise without catching bugs
+        - ifElseChain
+        - commentedOutCode
+      settings:
+        hugeParam:
+          # Default 80 bytes is too aggressive for a CLI app; 512 catches truly
+          # expensive copies (e.g. large SDK response structs) without flagging
+          # every Config or ModelResponse pass-by-value.
+          sizeThreshold: 512
+        rangeValCopy:
+          sizeThreshold: 512
+
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+
+    testifylint:
+      enable-all: true
+
+  exclusions:
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      # Test files: relax errcheck (os.Setenv, os.Chmod, Close in tests)
+      - path: '_test\.go'
+        linters:
+          - errcheck
+      # Test files: relax gosec (test fixtures use broad perms, unhandled errs)
+      - path: '_test\.go'
+        linters:
+          - gosec
+      # Test files: prealloc is noise in tests
+      - path: '_test\.go'
+        linters:
+          - prealloc
+      # Bubbletea Update() returns tea.Model interface — can't avoid this
+      - path: 'internal/ui/'
+        text: 'type assertion must be checked'
+        linters:
+          - forcetypeassert
+
+    warn-unused: true

@@ -177,8 +177,8 @@ func resolvePricing(qualifiedID string) (modelPricing, bool) {
 
 	// 2. Strip provider prefix, try bare ID.
 	bare := qualifiedID
-	if i := strings.Index(qualifiedID, "/"); i >= 0 {
-		bare = qualifiedID[i+1:]
+	if _, after, found := strings.Cut(qualifiedID, "/"); found {
+		bare = after
 		if p, ok := lookupPricing(bare); ok {
 			return p, true
 		}
@@ -381,12 +381,12 @@ func readPricingCache(path string) *pricingCacheFile {
 }
 
 func writePricingCache(path string, c *pricingCacheFile) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(path, data, 0o644)
+	_ = os.WriteFile(path, data, 0o600)
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/suarezc/errata/internal/commands"
 )
 
-func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	// Config overlay captures all keystrokes.
 	if a.configOverlayActive {
 		return a.handleConfigKey(msg)
@@ -102,7 +102,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // historyBack moves one step backward (older) through prompt history.
-func (a App) historyBack() (tea.Model, tea.Cmd) {
+func (a App) historyBack() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if len(a.promptHistory) == 0 {
 		return a, nil
 	}
@@ -121,7 +121,7 @@ func (a App) historyBack() (tea.Model, tea.Cmd) {
 
 // historyForward moves one step forward (newer) through prompt history,
 // restoring the saved input buffer when the end is reached.
-func (a App) historyForward() (tea.Model, tea.Cmd) {
+func (a App) historyForward() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if a.historyIdx == -1 {
 		return a, nil
 	}
@@ -140,7 +140,7 @@ func (a App) historyForward() (tea.Model, tea.Cmd) {
 
 // searchResults returns prompts matching searchQuery, newest-first.
 // An empty query returns the full history.
-func (a App) searchResults() []string {
+func (a App) searchResults() []string { //nolint:gocritic // called from bubbletea value-receiver methods
 	if a.searchQuery == "" {
 		return a.promptHistory
 	}
@@ -155,7 +155,7 @@ func (a App) searchResults() []string {
 }
 
 // currentSearchResult returns the entry at searchResultIdx, or "" if none.
-func (a App) currentSearchResult() string {
+func (a App) currentSearchResult() string { //nolint:gocritic // called from bubbletea value-receiver methods
 	r := a.searchResults()
 	if len(r) == 0 || a.searchResultIdx >= len(r) {
 		return ""
@@ -165,7 +165,7 @@ func (a App) currentSearchResult() string {
 
 // toggleExpandLastRun finds the most recent completed run and toggles its panels
 // between expanded and collapsed views.
-func (a App) toggleExpandLastRun() (tea.Model, tea.Cmd) {
+func (a App) toggleExpandLastRun() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	for i := len(a.feed) - 1; i >= 0; i-- {
 		item := &a.feed[i]
 		if item.kind != "run" || len(item.panels) == 0 {
@@ -191,7 +191,7 @@ func (a App) toggleExpandLastRun() (tea.Model, tea.Cmd) {
 }
 
 // handleSearchKey processes keypresses while Ctrl-R search is active.
-func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
 		a.searchActive = false

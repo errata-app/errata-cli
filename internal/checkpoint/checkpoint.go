@@ -132,7 +132,7 @@ func Build(prompt string, adapterIDs []string, responses []models.ModelResponse,
 
 // Save atomically writes a checkpoint to path.
 func Save(path string, cp Checkpoint) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	data, err := json.Marshal(cp)
@@ -140,7 +140,7 @@ func Save(path string, cp Checkpoint) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -151,7 +151,7 @@ func Save(path string, cp Checkpoint) error {
 func Load(path string) (*Checkpoint, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // intentional: no checkpoint file is not an error
 	}
 	if err != nil {
 		return nil, err

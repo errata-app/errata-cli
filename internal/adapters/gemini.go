@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"log"
+	"math"
 	"time"
 
 	"google.golang.org/genai"
@@ -80,7 +81,7 @@ func (a *GeminiAdapter) RunAgent(
 		SystemInstruction: genai.NewContentFromText(systemMsg, ""),
 	}
 	if seed, ok := tools.SeedFromContext(ctx); ok {
-		s := int32(seed)
+		s := int32(min(max(seed, math.MinInt32), math.MaxInt32)) //nolint:gosec // G115: overflow prevented by min/max clamping above
 		config.Seed = &s
 	}
 	contents := make([]*genai.Content, 0, len(history)+1)
@@ -148,8 +149,9 @@ func (a *GeminiAdapter) RunAgent(
 }
 
 func buildGeminiTools(ctx context.Context, descOverrides map[string]string) []*genai.Tool {
-	var decls []*genai.FunctionDeclaration
-	for _, def := range tools.ActiveToolsFromContext(ctx) {
+	active := tools.ActiveToolsFromContext(ctx)
+	decls := make([]*genai.FunctionDeclaration, 0, len(active))
+	for _, def := range active {
 		props := map[string]*genai.Schema{}
 		for name, p := range def.Properties {
 			schemaType := genai.TypeString

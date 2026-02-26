@@ -103,7 +103,8 @@ func (a *AnthropicAdapter) RunAgent(
 		messages = append(messages, resp.ToParam())
 
 		var toolResults []anthropic.ContentBlockParamUnion
-		for _, block := range resp.Content {
+		for i := range resp.Content {
+			block := &resp.Content[i]
 			switch block.Type {
 			case "text":
 				text := block.AsText().Text
@@ -137,8 +138,9 @@ func (a *AnthropicAdapter) RunAgent(
 }
 
 func buildAnthropicTools(ctx context.Context, descOverrides map[string]string) []anthropic.ToolUnionParam {
-	var out []anthropic.ToolUnionParam
-	for _, def := range tools.ActiveToolsFromContext(ctx) {
+	active := tools.ActiveToolsFromContext(ctx)
+	out := make([]anthropic.ToolUnionParam, 0, len(active))
+	for _, def := range active {
 		props := map[string]any{}
 		for name, p := range def.Properties {
 			props[name] = map[string]any{

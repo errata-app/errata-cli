@@ -184,7 +184,7 @@ func evalTrigger(t Trigger, ec EvalContext) bool {
 		return compareInt64(ec.LastResponseTokens, t.Operator, threshold)
 
 	case "last_tool_call_failed":
-		want := strings.ToLower(t.Value) == "true"
+		want := strings.EqualFold(t.Value, "true")
 		return ec.LastToolFailed == want
 
 	case "tool_used":

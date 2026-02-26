@@ -30,7 +30,7 @@ func TestParse_Empty(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, ""))
 	require.NoError(t, err)
 	assert.Nil(t, r.Models)
-	assert.Equal(t, "", r.SystemPrompt)
+	assert.Empty(t, r.SystemPrompt)
 	assert.Nil(t, r.Tools)
 	assert.Empty(t, r.Tasks)
 }
@@ -156,7 +156,7 @@ compact_threshold: 0.75
 	require.NoError(t, err)
 	assert.Equal(t, 10, r.Context.MaxHistoryTurns)
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.Equal(t, 0.75, r.Context.CompactThreshold)
+	assert.InDelta(t, 0.75, r.Context.CompactThreshold, 0.001)
 }
 
 func TestParse_ContextManual(t *testing.T) {
@@ -392,7 +392,7 @@ func TestApplyTo_CompactThreshold(t *testing.T) {
 	r, _ := recipe.Parse(writeRecipe(t, "## Context\ncompact_threshold: 0.60\n"))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
-	assert.Equal(t, 0.60, cfg.CompactThreshold)
+	assert.InDelta(t, 0.60, cfg.CompactThreshold, 0.001)
 }
 
 func TestParse_ModelParamsSeed(t *testing.T) {
@@ -485,13 +485,13 @@ func TestParse_ContextTaskMode(t *testing.T) {
 func TestParse_ContextTaskModeAbsent(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, "## Context\nstrategy: auto_compact\n"))
 	require.NoError(t, err)
-	assert.Equal(t, "", r.Context.TaskMode)
+	assert.Empty(t, r.Context.TaskMode)
 }
 
 func TestParse_ContextTaskModeInvalid(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, "## Context\ntask_mode: invalid\n"))
 	require.NoError(t, err)
-	assert.Equal(t, "", r.Context.TaskMode, "unknown task_mode should be ignored")
+	assert.Empty(t, r.Context.TaskMode, "unknown task_mode should be ignored")
 }
 
 func TestDefault_IsNonNil(t *testing.T) {
@@ -723,7 +723,7 @@ timeout: 5s
 	h1 := r.Hooks[1]
 	assert.Equal(t, "response_logger", h1.Name)
 	assert.Equal(t, "post_response", h1.Event)
-	assert.Equal(t, "", h1.Matcher)
+	assert.Empty(t, h1.Matcher)
 	assert.False(t, h1.InjectOutput)
 }
 
@@ -1168,13 +1168,13 @@ tier: concise
 `))
 	require.NoError(t, err)
 	assert.Equal(t, "concise", r.TierForModel("gpt-4o"))
-	assert.Equal(t, "", r.TierForModel("unknown-model"))
+	assert.Empty(t, r.TierForModel("unknown-model"))
 }
 
 func TestRecipe_TierForModel_NilProfiles(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, "## Models\n- m\n"))
 	require.NoError(t, err)
-	assert.Equal(t, "", r.TierForModel("anything"))
+	assert.Empty(t, r.TierForModel("anything"))
 }
 
 // ─── Parse edge cases ───────────────────────────────────────────────────────
@@ -1217,8 +1217,8 @@ filesystem: invalid_value
 network: unknown
 `))
 	require.NoError(t, err)
-	assert.Equal(t, "", r.Sandbox.Filesystem)
-	assert.Equal(t, "", r.Sandbox.Network)
+	assert.Empty(t, r.Sandbox.Filesystem)
+	assert.Empty(t, r.Sandbox.Network)
 }
 
 func TestParse_Constraints_IntegerTimeout(t *testing.T) {
@@ -1318,13 +1318,13 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 	assert.Len(t, parsed.MCPServers, 1)
 	assert.Equal(t, "exa", parsed.MCPServers[0].Name)
 	assert.Equal(t, *orig.ModelParams.Seed, *parsed.ModelParams.Seed)
-	assert.Equal(t, *orig.ModelParams.Temperature, *parsed.ModelParams.Temperature)
+	assert.InDelta(t, *orig.ModelParams.Temperature, *parsed.ModelParams.Temperature, 1e-9)
 	assert.Equal(t, *orig.ModelParams.MaxTokens, *parsed.ModelParams.MaxTokens)
 	assert.Equal(t, orig.Constraints.Timeout, parsed.Constraints.Timeout)
 	assert.Equal(t, orig.Constraints.MaxSteps, parsed.Constraints.MaxSteps)
 	assert.Equal(t, orig.Context.Strategy, parsed.Context.Strategy)
 	assert.Equal(t, orig.Context.MaxHistoryTurns, parsed.Context.MaxHistoryTurns)
-	assert.Equal(t, orig.Context.CompactThreshold, parsed.Context.CompactThreshold)
+	assert.InDelta(t, orig.Context.CompactThreshold, parsed.Context.CompactThreshold, 1e-9)
 	assert.Equal(t, orig.SubAgent.Model, parsed.SubAgent.Model)
 	assert.Equal(t, orig.SubAgent.MaxDepth, parsed.SubAgent.MaxDepth)
 	assert.Equal(t, orig.SubAgent.Tools, parsed.SubAgent.Tools)

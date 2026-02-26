@@ -281,21 +281,35 @@ func TestHistoryBack_FirstPressSelectsMostRecent(t *testing.T) {
 func TestHistoryBack_SubsequentPressMovesFurther(t *testing.T) {
 	a := appWithHistory(t, []string{"newest", "older", "oldest"})
 	res1, _ := a.historyBack()
-	res2, _ := res1.(App).historyBack()
-	app := res2.(App)
-	if app.historyIdx != 1 {
-		t.Errorf("expected historyIdx=1, got %d", app.historyIdx)
+	app1, ok := res1.(App)
+	if !ok {
+		t.Fatal("expected App type from historyBack")
 	}
-	if app.input.Value() != "older" {
-		t.Errorf("expected input='older', got %q", app.input.Value())
+	res2, _ := app1.historyBack()
+	app2, ok := res2.(App)
+	if !ok {
+		t.Fatal("expected App type from historyBack")
+	}
+	if app2.historyIdx != 1 {
+		t.Errorf("expected historyIdx=1, got %d", app2.historyIdx)
+	}
+	if app2.input.Value() != "older" {
+		t.Errorf("expected input='older', got %q", app2.input.Value())
 	}
 }
 
 func TestHistoryBack_ClampAtOldest(t *testing.T) {
 	a := appWithHistory(t, []string{"only"})
 	res1, _ := a.historyBack()
-	res2, _ := res1.(App).historyBack() // already at oldest — should not move
-	app := res2.(App)
+	app1, ok := res1.(App)
+	if !ok {
+		t.Fatal("expected App type from historyBack")
+	}
+	res2, _ := app1.historyBack() // already at oldest — should not move
+	app, ok := res2.(App)
+	if !ok {
+		t.Fatal("expected App type from historyBack")
+	}
 	if app.historyIdx != 0 {
 		t.Errorf("expected historyIdx clamped at 0, got %d", app.historyIdx)
 	}

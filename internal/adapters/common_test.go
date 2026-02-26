@@ -56,7 +56,7 @@ func TestDispatchTool_UnknownToolReturnsFalse(t *testing.T) {
 	var proposed []tools.FileWrite
 	result, ok := DispatchTool(context.Background(), "unknown_tool", map[string]string{}, func(models.AgentEvent) {}, &proposed)
 	assert.False(t, ok)
-	assert.Equal(t, "", result)
+	assert.Empty(t, result)
 	assert.Empty(t, proposed)
 }
 
@@ -271,7 +271,7 @@ func TestBuildErrorResponse_Fields(t *testing.T) {
 
 func TestBuildErrorResponse_ZeroTokensZeroCost(t *testing.T) {
 	resp := BuildErrorResponse("m", "m", time.Now(), 0, 0, fmt.Errorf("e"))
-	assert.Equal(t, 0.0, resp.CostUSD)
+	assert.Zero(t, resp.CostUSD)
 }
 
 // ─── BuildSuccessResponse ─────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ func TestBuildSuccessResponse_Fields(t *testing.T) {
 
 func TestBuildSuccessResponse_EmptyParts(t *testing.T) {
 	resp := BuildSuccessResponse("m", "m", nil, time.Now(), 0, 0, 0, 0, nil)
-	assert.Equal(t, "", resp.Text)
+	assert.Empty(t, resp.Text)
 	assert.Empty(t, resp.ProposedWrites)
 }
 
@@ -391,7 +391,7 @@ func TestBuildInterruptedResponse_NilWrites(t *testing.T) {
 	resp := BuildInterruptedResponse("m", "m", nil, time.Now(), 0, 0, nil, fmt.Errorf("cancelled"))
 	assert.True(t, resp.Interrupted)
 	assert.Empty(t, resp.ProposedWrites)
-	assert.Equal(t, "", resp.Text)
+	assert.Empty(t, resp.Text)
 }
 
 // ─── EmitSnapshot ─────────────────────────────────────────────────────────────

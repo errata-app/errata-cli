@@ -40,7 +40,7 @@ func RecordBad(path, prompt, modelID, sessionID string, responses []models.Model
 
 // recordEntry is the shared implementation for Record and RecordBad.
 func recordEntry(path, prompt, selected, rating, sessionID string, responses []models.ModelResponse) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 
@@ -82,7 +82,7 @@ func recordEntry(path, prompt, selected, rating, sessionID string, responses []m
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open: %w", err)
 	}

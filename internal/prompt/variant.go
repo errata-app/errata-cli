@@ -87,7 +87,7 @@ func (vs VariantSet) resolveOverrideValue(value, source string) (string, string)
 // isIdentifier returns true if s looks like a variant name (lowercase alphanumeric + _ + -).
 func isIdentifier(s string) bool {
 	for _, c := range s {
-		if !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') && c != '_' && c != '-' {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' && c != '-' {
 			return false
 		}
 	}

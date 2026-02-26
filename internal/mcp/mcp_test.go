@@ -49,7 +49,8 @@ func fakeRead(r *bufio.Reader) (map[string]any, error) {
 		return nil, err
 	}
 	var out map[string]any
-	return out, json.Unmarshal(body, &out)
+	err := json.Unmarshal(body, &out)
+	return out, err
 }
 
 // runFakeServer runs a minimal MCP server that handles a sequence of exchanges.

@@ -299,7 +299,7 @@ func (r *Report) Filename() string {
 // Save writes the report as pretty-printed JSON to dir/{filename}.
 // Parent directories are created as needed. Returns the full path.
 func Save(dir string, report *Report) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
 	path := filepath.Join(dir, report.Filename())
@@ -308,7 +308,7 @@ func Save(dir string, report *Report) (string, error) {
 		return "", fmt.Errorf("marshal: %w", err)
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return "", fmt.Errorf("write: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

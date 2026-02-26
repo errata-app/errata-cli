@@ -353,7 +353,7 @@ func TestLoad_CorruptJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.json")
 	require.NoError(t, os.WriteFile(path, []byte("{bad json!"), 0o644))
 	_, err := headless.Load(path)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unmarshal")
 }
 

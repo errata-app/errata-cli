@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -211,11 +212,8 @@ func listGeminiModels(ctx context.Context, apiKey string) ([]string, int, error)
 	total := len(body.Models)
 	var ids []string
 	for _, m := range body.Models {
-		for _, method := range m.SupportedGenerationMethods {
-			if method == "generateContent" {
-				ids = append(ids, strings.TrimPrefix(m.Name, "models/"))
-				break
-			}
+		if slices.Contains(m.SupportedGenerationMethods, "generateContent") {
+			ids = append(ids, strings.TrimPrefix(m.Name, "models/"))
 		}
 	}
 	sort.Strings(ids)

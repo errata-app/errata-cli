@@ -74,10 +74,10 @@ type Logger struct {
 // NewLogger opens (or creates) a JSONL file at path for append-only writes.
 // The caller must call Close() when done.
 func NewLogger(path string) (*Logger, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (l *Logger) Write(e Entry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	_, _ = l.file.Write(b)
-	_, _ = l.file.Write([]byte("\n"))
+	_, _ = l.file.WriteString("\n")
 }
 
 // ─── Adapter wrapper ─────────────────────────────────────────────────────────
@@ -160,8 +160,8 @@ func (a *loggingAdapter) RunAgent(
 
 	resp, err := a.inner.RunAgent(ctx, history, prompt, wrappedOnEvent)
 
-	var proposedFiles []string
-	var writes []WriteRecord
+	proposedFiles := make([]string, 0, len(resp.ProposedWrites))
+	writes := make([]WriteRecord, 0, len(resp.ProposedWrites))
 	for _, fw := range resp.ProposedWrites {
 		proposedFiles = append(proposedFiles, fw.Path)
 		writes = append(writes, WriteRecord{Path: fw.Path, Content: fw.Content})

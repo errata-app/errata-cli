@@ -254,7 +254,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 func (a *App) SetProgram(p *tea.Program) { a.prog = p }
 
 // feedVPHeight returns the number of lines the feed viewport should occupy.
-func (a App) feedVPHeight() int {
+func (a *App) feedVPHeight() int {
 	const headerLines = 2 // header text + blank line
 	const sepLine = 1     // blank line between viewport and footer
 	var footerLines int
@@ -268,22 +268,16 @@ func (a App) feedVPHeight() int {
 		footerLines = 1 // "  running…"
 	case modeSelecting:
 		// "Select a response to apply:\n" + N entries + "  s  Skip\n" + "\nchoice> sel"
-		footerLines = len(a.responses) + 4
-		if footerLines < 4 {
-			footerLines = 4
-		}
+		footerLines = max(len(a.responses)+4, 4)
 	case modeRating:
 		footerLines = 2 // rating prompt line + blank
 	}
-	h := a.height - headerLines - sepLine - footerLines
-	if h < 3 {
-		h = 3
-	}
+	h := max(a.height-headerLines-sepLine-footerLines, 3)
 	return h
 }
 
 // renderFeedContent builds the viewport content string from all feed items.
-func (a App) renderFeedContent() string {
+func (a *App) renderFeedContent() string {
 	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
@@ -292,7 +286,7 @@ func (a App) renderFeedContent() string {
 	for _, item := range a.feed {
 		switch item.kind {
 		case "message":
-			for _, line := range strings.Split(item.text, "\n") {
+			for line := range strings.SplitSeq(item.text, "\n") {
 				sb.WriteString(msgStyle.Render("  " + line))
 				sb.WriteByte('\n')
 			}
@@ -321,28 +315,30 @@ func (a App) renderFeedContent() string {
 }
 
 // withFeedRebuilt resizes and refreshes the feed viewport. Returns updated App.
-func (a App) withFeedRebuilt(gotoBottom bool) App {
+func (a *App) withFeedRebuilt(gotoBottom bool) App {
 	a.feedVP.Width = a.width
 	a.feedVP.Height = a.feedVPHeight()
 	a.feedVP.SetContent(a.renderFeedContent())
 	if gotoBottom {
 		a.feedVP.GotoBottom()
 	}
-	return a
+	return *a
 }
 
 // withMessage appends a system message to the feed and rebuilds the viewport.
-func (a App) withMessage(text string) App {
+func (a *App) withMessage(text string) App {
 	a.feed = append(a.feed, feedItem{kind: "message", text: text})
 	return a.withFeedRebuilt(true)
 }
 
+//nolint:gocritic // bubbletea requires value receiver for tea.Model interface
 func (a App) Init() tea.Cmd {
 	return textarea.Blink
 }
 
 // ---- update ----
 
+//nolint:gocritic // bubbletea requires value receiver for tea.Model interface
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -526,7 +522,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ---- view ----
 
-func (a App) View() string {
+func (a App) View() string { //nolint:gocritic // bubbletea requires value receiver for tea.Model interface
 	var sb strings.Builder
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
@@ -587,7 +583,7 @@ func (a App) View() string {
 			sb.WriteByte('\n')
 		}
 		if a.activeAdapters != nil {
-			var subIDs []string
+			subIDs := make([]string, 0, len(a.activeAdapters))
 			for _, ad := range a.activeAdapters {
 				subIDs = append(subIDs, ad.ID())
 			}

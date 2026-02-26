@@ -325,12 +325,10 @@ func summarizeContextSummarization(rec *recipe.Recipe) string {
 
 func buildModelsList(rec *recipe.Recipe, adapters []models.ModelAdapter, activeAdapters []models.ModelAdapter) []listItem {
 	activeSet := make(map[string]bool)
-	if activeAdapters != nil {
-		for _, a := range activeAdapters {
-			activeSet[a.ID()] = true
-		}
+	for _, a := range activeAdapters {
+		activeSet[a.ID()] = true
 	}
-	var items []listItem
+	items := make([]listItem, 0, len(adapters))
 	for _, a := range adapters {
 		active := activeAdapters == nil || activeSet[a.ID()]
 		items = append(items, listItem{Label: a.ID(), Active: active})
@@ -339,7 +337,7 @@ func buildModelsList(rec *recipe.Recipe, adapters []models.ModelAdapter, activeA
 }
 
 func buildToolsList(disabled map[string]bool) []listItem {
-	var items []listItem
+	items := make([]listItem, 0, len(tools.Definitions))
 	for _, d := range tools.Definitions {
 		items = append(items, listItem{Label: d.Name, Active: !disabled[d.Name]})
 	}
@@ -347,7 +345,7 @@ func buildToolsList(disabled map[string]bool) []listItem {
 }
 
 func buildRemindersList(rec *recipe.Recipe) []listItem {
-	var items []listItem
+	items := make([]listItem, 0, len(rec.SystemReminders))
 	for _, r := range rec.SystemReminders {
 		label := r.Name
 		if r.Trigger != "" {
@@ -359,7 +357,7 @@ func buildRemindersList(rec *recipe.Recipe) []listItem {
 }
 
 func buildHooksList(rec *recipe.Recipe) []listItem {
-	var items []listItem
+	items := make([]listItem, 0, len(rec.Hooks))
 	for _, h := range rec.Hooks {
 		label := h.Name + " [" + h.Event + "]"
 		if h.Matcher != "" {
@@ -850,7 +848,7 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 				} else if runes := []rune(preview); len(runes) > 200 {
 					preview = string(runes[:200]) + "..."
 				}
-				for _, line := range strings.Split(preview, "\n") {
+				for line := range strings.SplitSeq(preview, "\n") {
 					sb.WriteString(dimStyle.Render("  " + line))
 					sb.WriteByte('\n')
 				}
@@ -889,7 +887,7 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 
 // ── key handling ────────────────────────────────────────────────────────────
 
-func (a App) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if a.configExpandedIdx >= 0 {
 		sec := a.configSections[a.configExpandedIdx]
 		switch sec.Kind {
@@ -905,7 +903,7 @@ func (a App) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a.handleConfigNavKey(msg)
 }
 
-func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	switch msg.Type {
 	case tea.KeyEsc:
 		a.configOverlayActive = false
@@ -976,7 +974,7 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handleConfigListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleConfigListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	switch msg.Type {
 	case tea.KeyEsc:
 		a.configExpandedIdx = -1
@@ -1034,7 +1032,7 @@ func (a App) handleConfigListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	// Check if we're currently editing a field.
 	editing := false
 	if a.configScalarCursor < len(a.configScalarFields) {
@@ -1102,7 +1100,7 @@ func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if !a.configTextEditing {
 		// Not actively editing — Enter starts, Escape goes back.
 		if msg.Type == tea.KeyEsc {

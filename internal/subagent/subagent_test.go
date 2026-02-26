@@ -54,7 +54,7 @@ func TestNewDispatcher_BelowDepthLimit_Succeeds(t *testing.T) {
 
 	ctx := tools.WithSubagentDepth(context.Background(), 1) // depth 1 < maxDepth 2
 	text, _, errMsg := dispatcher(ctx, map[string]string{"task": "do work"})
-	assert.Equal(t, "", errMsg)
+	assert.Empty(t, errMsg)
 	assert.Equal(t, "result", text)
 }
 
@@ -78,7 +78,7 @@ func TestNewDispatcher_WritesMerged(t *testing.T) {
 
 	ctx := tools.WithSubagentDepth(context.Background(), 0)
 	text, gotWrites, errMsg := dispatcher(ctx, map[string]string{"task": "write foo"})
-	assert.Equal(t, "", errMsg)
+	assert.Empty(t, errMsg)
 	assert.Equal(t, "wrote files", text)
 	require.Len(t, gotWrites, 1)
 	assert.Equal(t, "foo.go", gotWrites[0].Path)
@@ -101,7 +101,7 @@ func TestNewDispatcher_ModelIDOverride(t *testing.T) {
 		"task":     "do work",
 		"model_id": "second-model",
 	})
-	assert.Equal(t, "", errMsg)
+	assert.Empty(t, errMsg)
 	assert.Equal(t, "from second", text)
 }
 
@@ -123,7 +123,7 @@ func TestNewDispatcher_FallbackToSubagentModel(t *testing.T) {
 	ctx := tools.WithSubagentDepth(context.Background(), 0)
 	// No model_id arg — should fall back to cfg.SubagentModel.
 	text, _, errMsg := dispatcher(ctx, map[string]string{"task": "do work"})
-	assert.Equal(t, "", errMsg)
+	assert.Empty(t, errMsg)
 	assert.Equal(t, "from preferred", text)
 }
 
@@ -167,7 +167,7 @@ func TestNewDispatcher_ErrorResponse(t *testing.T) {
 
 	ctx := tools.WithSubagentDepth(context.Background(), 0)
 	text, writes, errMsg := dispatcher(ctx, map[string]string{"task": "do work"})
-	assert.Equal(t, "", text)
+	assert.Empty(t, text)
 	assert.Nil(t, writes)
 	assert.Contains(t, errMsg, "model failed")
 }
@@ -192,7 +192,7 @@ func TestNewDispatcher_CostInSummary(t *testing.T) {
 
 	ctx := tools.WithSubagentDepth(context.Background(), 0)
 	text, _, errMsg := dispatcher(ctx, map[string]string{"task": "do work"})
-	assert.Equal(t, "", errMsg)
+	assert.Empty(t, errMsg)
 	assert.Equal(t, "result", text)
 
 	// Find the summary event.
@@ -238,20 +238,6 @@ func TestNewDispatcher_ZeroCostOmitted(t *testing.T) {
 
 func TestNewDispatcher_SpawnAgentRemovedAtMaxDepth(t *testing.T) {
 	var capturedDefs []tools.ToolDef
-	adapter := &stubAdapter{id: "m", response: models.ModelResponse{Text: "ok"}}
-
-	// Override RunAgent to capture the active tool set from context.
-	type capturingAdapter struct {
-		*stubAdapter
-	}
-	cap := &struct {
-		models.ModelAdapter
-		captured []tools.ToolDef
-	}{
-		ModelAdapter: adapter,
-	}
-	_ = cap
-
 	// Use a dispatcher that checks whether spawn_agent is present in the sub-context.
 	var innerDefs []tools.ToolDef
 	checkAdapter := &checkingAdapter{
@@ -272,7 +258,7 @@ func TestNewDispatcher_SpawnAgentRemovedAtMaxDepth(t *testing.T) {
 	ctx := tools.WithSubagentDepth(context.Background(), 0)
 	ctx = tools.WithActiveTools(ctx, parentDefs)
 	_, _, errMsg := dispatcher(ctx, map[string]string{"task": "check tools"})
-	assert.Equal(t, "", errMsg)
+	assert.Empty(t, errMsg)
 
 	// spawn_agent must have been stripped from the sub-agent's tool set.
 	for _, d := range innerDefs {

@@ -130,8 +130,9 @@ func (a *OpenAIAdapter) RunAgent(
 }
 
 func buildOpenAITools(ctx context.Context, descOverrides map[string]string) []openai.ChatCompletionToolParam {
-	var out []openai.ChatCompletionToolParam
-	for _, def := range tools.ActiveToolsFromContext(ctx) {
+	active := tools.ActiveToolsFromContext(ctx)
+	out := make([]openai.ChatCompletionToolParam, 0, len(active))
+	for _, def := range active {
 		props := map[string]any{}
 		for name, p := range def.Properties {
 			props[name] = map[string]any{

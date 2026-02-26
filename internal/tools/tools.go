@@ -68,8 +68,8 @@ const bashOutputLimit = 10_000
 // It lives here (not in models) to break the import cycle:
 // tools → (stdlib only), models → tools.
 type FileWrite struct {
-	Path    string
-	Content string
+	Path    string `json:"path"`
+	Content string `json:"content"`
 }
 
 // ToolParam is a provider-agnostic tool property description.
@@ -536,10 +536,7 @@ func ExecuteRead(path string, offset, limit int) string {
 		return fmt.Sprintf("[error: offset %d exceeds file length (%d lines)]", offset, total)
 	}
 
-	end := start + limit
-	if end > total {
-		end = total
-	}
+	end := min(start+limit, total)
 
 	result := strings.Join(lines[start:end], "\n")
 
@@ -595,10 +592,10 @@ func ApplyWrites(writes []FileWrite) error {
 		if errMsg != "" {
 			return fmt.Errorf("%s", errMsg)
 		}
-		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 			return fmt.Errorf("mkdir for %q: %w", fw.Path, err)
 		}
-		if err := os.WriteFile(abs, []byte(fw.Content), 0o644); err != nil {
+		if err := os.WriteFile(abs, []byte(fw.Content), 0o644); err != nil { //nolint:gosec // G306: user code files should be world-readable
 			return fmt.Errorf("write %q: %w", fw.Path, err)
 		}
 	}
@@ -701,7 +698,7 @@ func ExecuteSearchFiles(pattern, basePath string) string {
 	var matches []string
 	err = filepath.Walk(absBase, func(fullPath string, fi os.FileInfo, walkErr error) error {
 		if walkErr != nil {
-			return nil // skip unreadable entries
+			return nil //nolint:nilerr // intentional: skip unreadable entries, continue walking
 		}
 		rel, _ := filepath.Rel(absBase, fullPath)
 		rel = filepath.ToSlash(rel)
@@ -829,7 +826,8 @@ func ExecuteWebFetch(rawURL string) string {
 	result, _, _ := webFetchGroup.Do(rawURL, func() (any, error) {
 		return doWebFetch(rawURL), nil
 	})
-	return result.(string)
+	s, _ := result.(string)
+	return s
 }
 
 // doWebFetch performs the actual HTTP fetch. Called via singleflight so
@@ -912,14 +910,14 @@ func htmlToText(htmlContent string) string {
 }
 
 // LoadDisabledTools reads the disabled-tool set from path.
-// Returns nil, nil if path is empty or the file does not exist (all tools enabled).
+// Returns an empty map and nil error if path is empty or the file does not exist (all tools enabled).
 func LoadDisabledTools(path string) (map[string]bool, error) {
 	if path == "" {
-		return nil, nil
+		return map[string]bool{}, nil
 	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return map[string]bool{}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -931,7 +929,7 @@ func LoadDisabledTools(path string) (map[string]bool, error) {
 		return nil, err
 	}
 	if len(payload.Disabled) == 0 {
-		return nil, nil
+		return map[string]bool{}, nil
 	}
 	m := make(map[string]bool, len(payload.Disabled))
 	for _, name := range payload.Disabled {
@@ -962,7 +960,7 @@ func SaveDisabledTools(path string, disabled map[string]bool) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // webSearchTimeout is the HTTP request timeout for web_search queries.
@@ -1058,7 +1056,7 @@ func ExecuteWebSearch(query string) string {
 // formatWebSearchResult renders a DuckDuckGo API response as readable plain text.
 func formatWebSearchResult(query string, ddg ddgResponse) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[DuckDuckGo: %q]\n", query))
+	fmt.Fprintf(&sb, "[DuckDuckGo: %q]\n", query)
 
 	empty := true
 

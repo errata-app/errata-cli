@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -64,6 +65,6 @@ func TestStubAdapter_RunAgent(t *testing.T) {
 		},
 	}
 	resp, err := a.RunAgent(context.Background(), nil, "prompt", func(models.AgentEvent) {})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "done", resp.Text)
 }

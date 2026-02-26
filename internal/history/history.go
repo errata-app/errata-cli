@@ -16,7 +16,7 @@ import (
 func Load(path string) (map[string][]models.ConversationTurn, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // intentional: missing file is not an error
 	}
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func Save(path string, h map[string][]models.ConversationTurn) error {
 	if len(h) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	data, err := json.Marshal(h)
@@ -43,7 +43,7 @@ func Save(path string, h map[string][]models.ConversationTurn) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

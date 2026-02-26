@@ -13,6 +13,7 @@ package hooks
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os/exec"
 	"path"
 	"strings"
@@ -137,7 +138,8 @@ func runOne(ctx context.Context, h Hook, env Env) HookResult {
 		result.TimedOut = true
 		result.ExitCode = -1
 	} else if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
 		} else {
 			result.ExitCode = -1

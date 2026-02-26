@@ -114,7 +114,7 @@ func setupAdapters(cfg config.Config) (
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not open log file %q: %v\n", cfg.DebugLogPath, err)
 		} else {
-			cleanup = func() { logger.Close() }
+			cleanup = func() { _ = logger.Close() }
 			ads = logging.WrapAll(ads, sessionID, logger)
 			fmt.Fprintf(os.Stderr, "logging runs to %s\n", cfg.DebugLogPath)
 		}
@@ -171,7 +171,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	go func() {
 		<-sigCh
 		fmt.Fprintln(os.Stderr, "\nshutting down…")
-		srv.Shutdown(context.Background())
+		_ = srv.Shutdown(context.Background())
 	}()
 
 	return srv.Start(addr)

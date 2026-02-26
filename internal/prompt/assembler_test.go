@@ -152,11 +152,11 @@ func TestAssemble_EmptyRecipe(t *testing.T) {
 	caps := models.ModelCapabilities{}
 
 	payload := prompt.Assemble(rec, "model", "provider", caps)
-	assert.Equal(t, "", payload.SystemPrompt)
+	assert.Empty(t, payload.SystemPrompt)
 	assert.Equal(t, "default", payload.SystemPromptSource)
 	assert.Nil(t, payload.ToolDescriptions)
 	assert.Nil(t, payload.SubAgentPrompts)
-	assert.Equal(t, "", payload.SummarizationPrompt)
+	assert.Empty(t, payload.SummarizationPrompt)
 }
 
 func TestAssemble_MultiModel_DifferentPayloads(t *testing.T) {

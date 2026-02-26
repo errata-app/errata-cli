@@ -63,7 +63,7 @@ func TestRecordAndLoadAll_LongPromptTruncated(t *testing.T) {
 
 	entries := preferences.LoadAll(path)
 	require.Len(t, entries, 1)
-	assert.Equal(t, 120, len(entries[0].PromptPreview))
+	assert.Len(t, entries[0].PromptPreview, 120)
 }
 
 func TestRecord_PromptHash(t *testing.T) {
@@ -72,7 +72,7 @@ func TestRecord_PromptHash(t *testing.T) {
 
 	entries := preferences.LoadAll(path)
 	require.Len(t, entries, 1)
-	assert.True(t, len(entries[0].PromptHash) > 0)
+	assert.NotEmpty(t, entries[0].PromptHash)
 	assert.Contains(t, entries[0].PromptHash, "sha256:")
 }
 
@@ -189,7 +189,7 @@ func TestSummarizeDetailed_ZeroCostForLegacyEntries(t *testing.T) {
 		{ModelID: "a", LatencyMS: 100}, // CostUSD == 0 → not stored
 	}))
 	stats := preferences.SummarizeDetailed(path)
-	assert.Equal(t, 0.0, stats["a"].AvgCostUSD)
+	assert.Zero(t, stats["a"].AvgCostUSD)
 }
 
 func TestSummarizeDetailed_NoZeroDivide(t *testing.T) {
@@ -214,7 +214,7 @@ func TestRecordBad_StoresRatingField(t *testing.T) {
 	entries := preferences.LoadAll(path)
 	require.Len(t, entries, 1)
 	assert.Equal(t, "bad", entries[0].Rating)
-	assert.Equal(t, "", entries[0].Selected)
+	assert.Empty(t, entries[0].Selected)
 	assert.Equal(t, []string{"a"}, entries[0].Models)
 }
 
@@ -327,7 +327,7 @@ func TestRecordBad_LongPromptTruncated(t *testing.T) {
 
 	entries := preferences.LoadAll(path)
 	require.Len(t, entries, 1)
-	assert.Equal(t, 120, len(entries[0].PromptPreview))
+	assert.Len(t, entries[0].PromptPreview, 120)
 }
 
 // ─── Record/RecordBad: exactly 120 chars not truncated ──────────────────────

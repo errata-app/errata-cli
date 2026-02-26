@@ -111,7 +111,7 @@ func TestAddEvent_CountsToolUses(t *testing.T) {
 
 func TestAddEvent_EventCapping(t *testing.T) {
 	p := newPanelState("test-model", 0)
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		p.addEvent(models.AgentEvent{Type: "reading", Data: "file"})
 	}
 	if len(p.events) != maxPanelEvents {
