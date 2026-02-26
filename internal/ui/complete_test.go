@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/suarezc/errata/internal/models"
 )
 
@@ -258,5 +260,75 @@ func TestTryMentionComplete_NotAtWord(t *testing.T) {
 	_, ok := a.tryMentionComplete("hello world")
 	if ok {
 		t.Error("expected no completion for non-@ word")
+	}
+}
+
+// ─── hintWriter tests ───────────────────────────────────────────────────────
+
+func TestHintWriter_CapsAtMaxHintLines(t *testing.T) {
+	var sb strings.Builder
+	plain := lipgloss.NewStyle()
+	hw := newHintWriter(&sb, plain)
+
+	// Add more items than maxHintLines.
+	total := maxHintLines + 5
+	for i := 0; i < total; i++ {
+		hw.add("item")
+	}
+	hw.flush()
+
+	out := sb.String()
+	lines := strings.Split(strings.TrimPrefix(out, "\n"), "\n")
+
+	// Should have maxHintLines content lines + 1 "... and N more" line.
+	wantLines := maxHintLines + 1
+	if len(lines) != wantLines {
+		t.Errorf("got %d lines, want %d (max %d + 1 overflow)\noutput:\n%s",
+			len(lines), wantLines, maxHintLines, out)
+	}
+	if !strings.Contains(out, "... and 5 more") {
+		t.Errorf("expected '... and 5 more' notice, got:\n%s", out)
+	}
+}
+
+func TestHintWriter_NoOverflowNoticeWhenUnderCap(t *testing.T) {
+	var sb strings.Builder
+	plain := lipgloss.NewStyle()
+	hw := newHintWriter(&sb, plain)
+
+	hw.add("a")
+	hw.add("b")
+	hw.flush()
+
+	out := sb.String()
+	if strings.Contains(out, "... and") {
+		t.Errorf("should not show overflow notice when under cap, got:\n%s", out)
+	}
+}
+
+func TestHintWriter_ExactlyAtCap(t *testing.T) {
+	var sb strings.Builder
+	plain := lipgloss.NewStyle()
+	hw := newHintWriter(&sb, plain)
+
+	for i := 0; i < maxHintLines; i++ {
+		hw.add("item")
+	}
+	hw.flush()
+
+	out := sb.String()
+	if strings.Contains(out, "... and") {
+		t.Errorf("should not show overflow notice when exactly at cap, got:\n%s", out)
+	}
+}
+
+func TestHintWriter_ZeroItems(t *testing.T) {
+	var sb strings.Builder
+	plain := lipgloss.NewStyle()
+	hw := newHintWriter(&sb, plain)
+	hw.flush()
+
+	if sb.Len() != 0 {
+		t.Errorf("expected empty output for zero items, got %q", sb.String())
 	}
 }

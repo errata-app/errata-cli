@@ -632,44 +632,47 @@ func (a App) View() string {
 				case strings.HasPrefix(lower, "/config "):
 					partial := lastWord(val[len("/config "):])
 					lp := strings.ToLower(partial)
+					hw := newHintWriter(&sb, descStyle)
 					for _, name := range interactiveSections {
 						if strings.HasPrefix(name, lp) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render("  " + name))
+							hw.add(nameStyle.Render("  " + name))
 						}
 					}
+					hw.flush()
 
 				case strings.HasPrefix(lower, "/set "):
 					partial := lastWord(val[len("/set "):])
 					lp := strings.ToLower(partial)
+					hw := newHintWriter(&sb, descStyle)
 					for _, path := range configPathCandidates() {
 						if strings.HasPrefix(path, lp) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render("  " + path))
+							hw.add(nameStyle.Render("  " + path))
 						}
 					}
+					hw.flush()
 
 				default:
 					prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
+					hw := newHintWriter(&sb, descStyle)
 					for _, c := range commands.All {
 						if strings.HasPrefix(c.Name, prefix) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)))
-							sb.WriteString(descStyle.Render("  " + c.Desc))
+							hw.add(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)) + descStyle.Render("  "+c.Desc))
 						}
 					}
+					hw.flush()
 				}
 			} else {
 				// @mention hints: if the last word starts with @, show matching models.
 				lw := lastWord(val)
 				if strings.HasPrefix(lw, "@") && len(lw) >= 2 {
 					partial := strings.ToLower(lw[1:])
+					hw := newHintWriter(&sb, descStyle)
 					for _, id := range a.modelIDCandidates() {
 						if strings.HasPrefix(strings.ToLower(id), partial) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render("  @" + id))
+							hw.add(nameStyle.Render("  @" + id))
 						}
 					}
+					hw.flush()
 				}
 			}
 		}
