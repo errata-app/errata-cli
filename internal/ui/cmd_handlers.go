@@ -14,6 +14,7 @@ import (
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
+	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
@@ -31,6 +32,9 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) { //nolint:gocriti
 	trimmed := strings.TrimSpace(prompt)
 	lower := strings.ToLower(trimmed)
 
+	if lower == "/keys" || strings.HasPrefix(lower, "/keys ") {
+		return a.handleKeysCommand(strings.TrimSpace(trimmed[len("/keys"):]))
+	}
 	if lower == "/model" || strings.HasPrefix(lower, "/model ") {
 		return a.handleModelCommand(strings.TrimSpace(trimmed[len("/model"):]))
 	}
@@ -252,6 +256,10 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		toRun = mentionTargets
 	} else if a.activeAdapters != nil {
 		toRun = a.activeAdapters
+	}
+
+	if len(toRun) == 0 {
+		return a.withMessage("No models configured. Use /keys to add an API key."), nil
 	}
 
 	// Record in prompt history (deduplicate consecutive identical entries).
@@ -846,6 +854,127 @@ func (a App) handleSubsetCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 
 func (a App) handleAllCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	return a.handleModelCommand("")
+}
+
+func (a App) handleKeysCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if args == "" {
+		return a.handleKeysDisplay()
+	}
+	return a.handleKeysSet(args)
+}
+
+func (a App) handleKeysDisplay() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	providers := config.ProviderEnvInfo()
+	var sb strings.Builder
+	sb.WriteString("Provider API key status:\n")
+	for _, p := range providers {
+		configured := config.ProviderConfigured(p.Name)
+		status := "not configured"
+		if configured {
+			status = "configured"
+		}
+		fmt.Fprintf(&sb, "\n  %-12s  %s", p.Name, status)
+		for _, v := range p.EnvVars {
+			val := os.Getenv(v)
+			if val != "" {
+				fmt.Fprintf(&sb, "\n    %-30s %s", v, config.MaskKey(val))
+			} else {
+				fmt.Fprintf(&sb, "\n    %-30s (not set)", v)
+			}
+		}
+	}
+	sb.WriteString("\n\nUsage: /keys <provider> <key>")
+	sb.WriteString("\n  e.g. /keys anthropic sk-ant-...")
+	sb.WriteString("\n  For multi-var providers (azure, vertex), use env var name directly:")
+	sb.WriteString("\n  e.g. /keys AZURE_OPENAI_ENDPOINT https://myresource.openai.azure.com")
+	return a.withMessage(sb.String()), nil
+}
+
+func (a App) handleKeysSet(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	parts := strings.SplitN(args, " ", 2)
+	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+		return a.withMessage("Usage: /keys <provider> <key>\n  e.g. /keys anthropic sk-ant-..."), nil
+	}
+
+	name := strings.TrimSpace(parts[0])
+	value := strings.TrimSpace(parts[1])
+	// Strip surrounding quotes from value.
+	if len(value) >= 2 {
+		if (value[0] == '"' && value[len(value)-1] == '"') ||
+			(value[0] == '\'' && value[len(value)-1] == '\'') {
+			value = value[1 : len(value)-1]
+		}
+	}
+
+	// Resolve name → env var. Check if it's a raw env var name first.
+	envVar := ""
+	for _, p := range config.ProviderEnvInfo() {
+		for _, v := range p.EnvVars {
+			if strings.EqualFold(name, v) {
+				envVar = v
+				break
+			}
+		}
+		if envVar != "" {
+			break
+		}
+	}
+	// If not a raw env var, treat as provider shorthand → primary key.
+	if envVar == "" {
+		for _, p := range config.ProviderEnvInfo() {
+			if strings.EqualFold(name, p.Name) {
+				envVar = p.EnvVars[0]
+				break
+			}
+		}
+	}
+	if envVar == "" {
+		var names []string
+		for _, p := range config.ProviderEnvInfo() {
+			names = append(names, p.Name)
+		}
+		return a.withMessage(fmt.Sprintf("Unknown provider %q. Available: %s", name, strings.Join(names, ", "))), nil
+	}
+
+	if err := config.SetEnvKey(".env", envVar, value); err != nil {
+		return a.withMessage(fmt.Sprintf("Error saving key: %v", err)), nil
+	}
+
+	// Reload config and rebuild adapters.
+	a.cfg = config.Load()
+	newAds, warnings := adapters.ListAdapters(a.cfg)
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	a.adapters = newAds
+	// Reconcile activeAdapters: keep only those still present.
+	if a.activeAdapters != nil {
+		newIDs := make(map[string]bool, len(newAds))
+		for _, ad := range newAds {
+			newIDs[ad.ID()] = true
+		}
+		var kept []models.ModelAdapter
+		for _, ad := range a.activeAdapters {
+			if newIDs[ad.ID()] {
+				kept = append(kept, ad)
+			}
+		}
+		if len(kept) == 0 {
+			a.activeAdapters = nil
+		} else {
+			a.activeAdapters = kept
+		}
+	}
+
+	var adIDs []string
+	for _, ad := range a.adapters {
+		adIDs = append(adIDs, ad.ID())
+	}
+	summary := fmt.Sprintf("Saved %s to .env.\nActive models: %s", envVar, strings.Join(adIDs, ", "))
+	if len(adIDs) == 0 {
+		summary = fmt.Sprintf("Saved %s to .env.\nNo models active yet — more keys may be needed.", envVar)
+	}
+	return a.withMessage(summary), nil
 }
 
 func helpText() string {

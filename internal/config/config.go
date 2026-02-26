@@ -2,7 +2,10 @@
 package config
 
 import (
+	"bufio"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -210,4 +213,101 @@ func (c Config) ResolvedActiveModels() []string {
 		models = append(models, "vertex/"+c.DefaultVertexModel)
 	}
 	return models
+}
+
+// ── Provider env helpers ─────────────────────────────────────────────────────
+
+// ProviderEnv describes a provider's required environment variables.
+type ProviderEnv struct {
+	Name         string   // shorthand for /keys (e.g. "anthropic")
+	EnvVars      []string // env vars (first is the primary key)
+	DefaultModel string
+}
+
+// ProviderEnvInfo returns the static list of supported providers and their env vars.
+func ProviderEnvInfo() []ProviderEnv {
+	return []ProviderEnv{
+		{"anthropic", []string{"ANTHROPIC_API_KEY"}, "claude-sonnet-4-6"},
+		{"openai", []string{"OPENAI_API_KEY"}, "gpt-4o"},
+		{"google", []string{"GOOGLE_API_KEY"}, "gemini-2.0-flash"},
+		{"openrouter", []string{"OPENROUTER_API_KEY"}, ""},
+		{"bedrock", []string{"AWS_REGION"}, ""},
+		{"azure", []string{"AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"}, "gpt-4o"},
+		{"vertex", []string{"VERTEX_AI_PROJECT", "VERTEX_AI_LOCATION"}, "gemini-2.0-flash"},
+		{"litellm", []string{"LITELLM_BASE_URL"}, ""},
+	}
+}
+
+// ProviderConfigured returns true if all required env vars for the named
+// provider have non-empty values in the current process environment.
+func ProviderConfigured(providerName string) bool {
+	for _, p := range ProviderEnvInfo() {
+		if strings.EqualFold(p.Name, providerName) {
+			for _, v := range p.EnvVars {
+				if os.Getenv(v) == "" {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// SetEnvKey performs a line-level upsert of key=value in the given .env file.
+// If the file does not exist it is created. Comments and blank lines are preserved.
+// The change is also applied to the current process via os.Setenv.
+func SetEnvKey(path, key, value string) error {
+	// Ensure parent directory exists.
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("creating directory: %w", err)
+		}
+	}
+
+	var lines []string
+	found := false
+
+	if data, err := os.ReadFile(path); err == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		for scanner.Scan() {
+			line := scanner.Text()
+			// Match KEY= at start of line (ignoring leading whitespace).
+			trimmed := strings.TrimSpace(line)
+			if !strings.HasPrefix(trimmed, "#") && strings.HasPrefix(trimmed, key+"=") {
+				lines = append(lines, key+"="+value)
+				found = true
+				continue
+			}
+			lines = append(lines, line)
+		}
+	}
+
+	if !found {
+		lines = append(lines, key+"="+value)
+	}
+
+	content := strings.Join(lines, "\n") + "\n"
+
+	// Atomic write via temp file + rename.
+	cleanPath := filepath.Clean(path)
+	tmp := cleanPath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil { //nolint:gosec // path comes from caller, not user input
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := os.Rename(tmp, cleanPath); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+
+	return os.Setenv(key, value)
+}
+
+// MaskKey returns a masked version of an API key for display.
+// Keys >= 12 chars show first 5 and last 4 chars; shorter keys become "****".
+func MaskKey(key string) string {
+	if len(key) < 12 {
+		return "****"
+	}
+	return key[:5] + "..." + key[len(key)-4:]
 }

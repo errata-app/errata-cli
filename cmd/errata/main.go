@@ -139,9 +139,6 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	applyProjectRoot(rec)
 	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg)
 	defer cleanup()
-	if len(ads) == 0 {
-		return fmt.Errorf("no models available — set at least one API key in .env")
-	}
 	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec)
 }
 
