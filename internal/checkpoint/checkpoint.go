@@ -48,12 +48,32 @@ type WriteSnapshot struct {
 	Content string `json:"content"`
 }
 
+// toWriteSnapshots converts FileWrite slices to WriteSnapshot slices.
+func toWriteSnapshots(writes []tools.FileWrite) []WriteSnapshot {
+	if len(writes) == 0 {
+		return nil
+	}
+	out := make([]WriteSnapshot, len(writes))
+	for i, w := range writes {
+		out[i] = WriteSnapshot{Path: w.Path, Content: w.Content}
+	}
+	return out
+}
+
+// fromWriteSnapshots converts WriteSnapshot slices back to FileWrite slices.
+func fromWriteSnapshots(snaps []WriteSnapshot) []tools.FileWrite {
+	if len(snaps) == 0 {
+		return nil
+	}
+	out := make([]tools.FileWrite, len(snaps))
+	for i, s := range snaps {
+		out[i] = tools.FileWrite{Path: s.Path, Content: s.Content}
+	}
+	return out
+}
+
 // FromModelResponse creates a snapshot from a ModelResponse.
 func FromModelResponse(r models.ModelResponse) ResponseSnapshot {
-	var writes []WriteSnapshot
-	for _, w := range r.ProposedWrites {
-		writes = append(writes, WriteSnapshot{Path: w.Path, Content: w.Content})
-	}
 	return ResponseSnapshot{
 		ModelID:             r.ModelID,
 		Text:                r.Text,
@@ -63,7 +83,7 @@ func FromModelResponse(r models.ModelResponse) ResponseSnapshot {
 		CacheReadTokens:     r.CacheReadTokens,
 		CacheCreationTokens: r.CacheCreationTokens,
 		CostUSD:             r.CostUSD,
-		ProposedWrites:      writes,
+		ProposedWrites:      toWriteSnapshots(r.ProposedWrites),
 		Error:               r.Error,
 		Interrupted:         r.Interrupted,
 		Completed:           !r.Interrupted && r.Error == "",
@@ -72,10 +92,6 @@ func FromModelResponse(r models.ModelResponse) ResponseSnapshot {
 
 // ToModelResponse converts a snapshot back to a ModelResponse.
 func (s ResponseSnapshot) ToModelResponse() models.ModelResponse {
-	var writes []tools.FileWrite
-	for _, w := range s.ProposedWrites {
-		writes = append(writes, tools.FileWrite{Path: w.Path, Content: w.Content})
-	}
 	return models.ModelResponse{
 		ModelID:             s.ModelID,
 		Text:                s.Text,
@@ -85,7 +101,7 @@ func (s ResponseSnapshot) ToModelResponse() models.ModelResponse {
 		CacheReadTokens:     s.CacheReadTokens,
 		CacheCreationTokens: s.CacheCreationTokens,
 		CostUSD:             s.CostUSD,
-		ProposedWrites:      writes,
+		ProposedWrites:      fromWriteSnapshots(s.ProposedWrites),
 		Error:               s.Error,
 		Interrupted:         s.Interrupted,
 	}
@@ -226,10 +242,6 @@ func (s *IncrementalSaver) flush() {
 // SnapshotFromPartial converts a PartialSnapshot (emitted by adapters via
 // AgentEvent) into a ResponseSnapshot suitable for incremental checkpointing.
 func SnapshotFromPartial(modelID string, ps models.PartialSnapshot) ResponseSnapshot {
-	var writes []WriteSnapshot
-	for _, w := range ps.Writes {
-		writes = append(writes, WriteSnapshot{Path: w.Path, Content: w.Content})
-	}
 	return ResponseSnapshot{
 		ModelID:        modelID,
 		Text:           ps.Text,
@@ -237,7 +249,7 @@ func SnapshotFromPartial(modelID string, ps models.PartialSnapshot) ResponseSnap
 		OutputTokens:   ps.OutputTokens,
 		CostUSD:        ps.CostUSD,
 		LatencyMS:      ps.LatencyMS,
-		ProposedWrites: writes,
+		ProposedWrites: toWriteSnapshots(ps.Writes),
 		Interrupted:    true, // still in progress
 	}
 }

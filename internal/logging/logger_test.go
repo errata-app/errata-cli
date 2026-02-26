@@ -205,6 +205,42 @@ func TestLoggingAdapter_ID(t *testing.T) {
 	assert.Equal(t, "my-model", wrapped.ID())
 }
 
+// TestNewLogger_OpenFileError verifies that NewLogger returns an error when the
+// path is a directory (can't be opened as a file).
+func TestNewLogger_OpenFileError(t *testing.T) {
+	dir := t.TempDir()
+	// Try to open a directory as a JSONL file → OpenFile should fail.
+	_, err := logging.NewLogger(dir)
+	assert.Error(t, err)
+}
+
+// TestNewLogger_MkdirAllError verifies that NewLogger returns an error when
+// the parent directory cannot be created.
+func TestNewLogger_MkdirAllError(t *testing.T) {
+	// /dev/null is a file, not a directory — MkdirAll will fail trying to create a child.
+	_, err := logging.NewLogger("/dev/null/sub/test.jsonl")
+	assert.Error(t, err)
+}
+
+// TestLoggingAdapter_Capabilities verifies that the Capabilities method
+// delegates to the inner adapter.
+func TestLoggingAdapter_Capabilities(t *testing.T) {
+	l, err := logging.NewLogger(filepath.Join(t.TempDir(), "test.jsonl"))
+	require.NoError(t, err)
+	defer l.Close()
+
+	inner := &stubAdapter{id: "m"}
+	wrapped := logging.Wrap(inner, "s", l)
+	caps := wrapped.Capabilities(context.Background())
+	assert.Equal(t, models.ModelCapabilities{}, caps)
+}
+
+// TestRandomHex_Length verifies that RandomHex returns the expected length string.
+func TestRandomHex_Length(t *testing.T) {
+	h := logging.RandomHex(8)
+	assert.Len(t, h, 16, "8 bytes → 16 hex chars")
+}
+
 // TestWrap_AppendsTwoEntries verifies that successive runs append new JSONL
 // lines and do not truncate or overwrite previous entries.
 func TestWrap_AppendsTwoEntries(t *testing.T) {

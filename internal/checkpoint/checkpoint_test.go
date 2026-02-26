@@ -352,6 +352,76 @@ func TestIncrementalSaver_PreservesAdapterOrder(t *testing.T) {
 	}
 }
 
+// ─── Save error paths ───────────────────────────────────────────────────────
+
+func TestSave_WriteFileError(t *testing.T) {
+	dir := t.TempDir()
+	os.Chmod(dir, 0o444)
+	defer os.Chmod(dir, 0o755)
+
+	cp := Checkpoint{Prompt: "test"}
+	err := Save(filepath.Join(dir, "checkpoint.json"), cp)
+	if err == nil {
+		t.Error("expected error writing to read-only directory")
+	}
+}
+
+func TestSave_MkdirAllError(t *testing.T) {
+	// /dev/null is a file, not a directory — MkdirAll fails.
+	cp := Checkpoint{Prompt: "test"}
+	err := Save("/dev/null/sub/checkpoint.json", cp)
+	if err == nil {
+		t.Error("expected error for impossible directory creation")
+	}
+}
+
+// ─── Load: ReadFile error that is not IsNotExist ────────────────────────────
+
+func TestLoad_ReadFileError(t *testing.T) {
+	// Passing a directory path to ReadFile returns a non-IsNotExist error.
+	dir := t.TempDir()
+	cp, err := Load(dir)
+	if err == nil {
+		t.Error("expected error reading a directory as a file")
+	}
+	if cp != nil {
+		t.Error("expected nil checkpoint on read error")
+	}
+}
+
+// ─── SnapshotFromPartial with nil writes ────────────────────────────────────
+
+func TestSnapshotFromPartial_NilWrites(t *testing.T) {
+	ps := models.PartialSnapshot{
+		Text:        "hello",
+		InputTokens: 100,
+		Writes:      nil,
+	}
+	snap := SnapshotFromPartial("test-model", ps)
+	if snap.ModelID != "test-model" {
+		t.Errorf("ModelID = %q, want %q", snap.ModelID, "test-model")
+	}
+	if len(snap.ProposedWrites) != 0 {
+		t.Errorf("expected empty ProposedWrites, got %d", len(snap.ProposedWrites))
+	}
+}
+
+// ─── FromModelResponse with no proposed writes ──────────────────────────────
+
+func TestFromModelResponse_NoWrites(t *testing.T) {
+	r := models.ModelResponse{
+		ModelID: "test",
+		Text:    "hello",
+	}
+	snap := FromModelResponse(r)
+	if len(snap.ProposedWrites) != 0 {
+		t.Errorf("expected empty ProposedWrites, got %d", len(snap.ProposedWrites))
+	}
+	if !snap.Completed {
+		t.Error("expected Completed=true for non-interrupted, no-error response")
+	}
+}
+
 func TestSnapshotFromPartial(t *testing.T) {
 	ps := models.PartialSnapshot{
 		Text:         "hello",

@@ -2,7 +2,9 @@ package preferences_test
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -292,6 +294,52 @@ func TestSummarizeDetailed_MixedWinsLossesAndBad(t *testing.T) {
 	assert.Equal(t, 0, stats["b"].Wins)
 	assert.Equal(t, 1, stats["b"].Losses)
 	assert.Equal(t, 0, stats["b"].ThumbsDown)
+}
+
+// ─── LoadAll edge cases ─────────────────────────────────────────────────────
+
+func TestLoadAll_CorruptJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	content := `{"ts":"2026-01-01","prompt_hash":"sha256:abc","prompt_preview":"ok","models":["a"],"selected":"a","latencies_ms":{"a":100},"session_id":"s"}
+{bad json here}
+{"ts":"2026-01-02","prompt_hash":"sha256:def","prompt_preview":"ok2","models":["b"],"selected":"b","latencies_ms":{"b":200},"session_id":"s2"}
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	entries := preferences.LoadAll(path)
+	assert.Len(t, entries, 2, "corrupt line should be skipped, valid lines retained")
+}
+
+func TestLoadAll_AllCorrupt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	require.NoError(t, os.WriteFile(path, []byte("{bad}\n{also bad}\n"), 0o644))
+	entries := preferences.LoadAll(path)
+	assert.Empty(t, entries)
+}
+
+// ─── RecordBad prompt truncation ────────────────────────────────────────────
+
+func TestRecordBad_LongPromptTruncated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	long := strings.Repeat("y", 200)
+	responses := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}
+	require.NoError(t, preferences.RecordBad(path, long, "a", "s", responses))
+
+	entries := preferences.LoadAll(path)
+	require.Len(t, entries, 1)
+	assert.Equal(t, 120, len(entries[0].PromptPreview))
+}
+
+// ─── Record/RecordBad: exactly 120 chars not truncated ──────────────────────
+
+func TestRecord_Exactly120CharsNotTruncated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	exact := strings.Repeat("z", 120)
+	require.NoError(t, preferences.Record(path, exact, "m", "s", nil))
+
+	entries := preferences.LoadAll(path)
+	require.Len(t, entries, 1)
+	assert.Equal(t, exact, entries[0].PromptPreview)
 }
 
 func TestRecord_StoresCostUSD(t *testing.T) {

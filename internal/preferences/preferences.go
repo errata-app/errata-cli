@@ -29,60 +29,17 @@ type Entry struct {
 
 // Record appends one preference entry to the JSONL log at path.
 func Record(path, prompt, selectedModel, sessionID string, responses []models.ModelResponse) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("mkdir: %w", err)
-	}
-
-	preview := prompt
-	if len(preview) > 120 {
-		preview = preview[:120]
-	}
-
-	hash := sha256.Sum256([]byte(prompt))
-
-	modelIDs := make([]string, len(responses))
-	latencies := make(map[string]int64, len(responses))
-	costs := make(map[string]float64, len(responses))
-	for i, r := range responses {
-		modelIDs[i] = r.ModelID
-		latencies[r.ModelID] = r.LatencyMS
-		if r.CostUSD > 0 {
-			costs[r.ModelID] = r.CostUSD
-		}
-	}
-	if len(costs) == 0 {
-		costs = nil
-	}
-
-	entry := Entry{
-		TS:            time.Now().UTC().Format(time.RFC3339),
-		PromptHash:    fmt.Sprintf("sha256:%x", hash),
-		PromptPreview: preview,
-		Models:        modelIDs,
-		Selected:      selectedModel,
-		LatenciesMS:   latencies,
-		CostsUSD:      costs,
-		SessionID:     sessionID,
-	}
-
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open: %w", err)
-	}
-	defer f.Close()
-
-	_, err = fmt.Fprintln(f, string(data))
-	return err
+	return recordEntry(path, prompt, selectedModel, "", sessionID, responses)
 }
 
 // RecordBad appends a thumbs-down entry for a single-model response.
 // Selected is left empty; Rating is set to "bad".
 func RecordBad(path, prompt, modelID, sessionID string, responses []models.ModelResponse) error {
+	return recordEntry(path, prompt, "", "bad", sessionID, responses)
+}
+
+// recordEntry is the shared implementation for Record and RecordBad.
+func recordEntry(path, prompt, selected, rating, sessionID string, responses []models.ModelResponse) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
@@ -113,8 +70,8 @@ func RecordBad(path, prompt, modelID, sessionID string, responses []models.Model
 		PromptHash:    fmt.Sprintf("sha256:%x", hash),
 		PromptPreview: preview,
 		Models:        modelIDs,
-		Selected:      "",
-		Rating:        "bad",
+		Selected:      selected,
+		Rating:        rating,
 		LatenciesMS:   latencies,
 		CostsUSD:      costs,
 		SessionID:     sessionID,

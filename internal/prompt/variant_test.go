@@ -148,6 +148,29 @@ func TestIsEmpty(t *testing.T) {
 	assert.False(t, (prompt.VariantSet{Overrides: map[string]string{"a": "b"}}).IsEmpty())
 }
 
+func TestResolve_OverrideWithUppercase_NotTreatedAsVariantRef(t *testing.T) {
+	// Override value "LOUD" has uppercase chars → isIdentifier returns false → no warning.
+	vs := prompt.VariantSet{
+		Default:   "default",
+		Variants:  map[string]string{"concise": "short"},
+		Overrides: map[string]string{"gpt-4o": "LOUD"},
+	}
+	content, source := vs.Resolve("gpt-4o", "openai", "")
+	assert.Equal(t, "LOUD", content)
+	assert.Equal(t, "override:gpt-4o", source)
+}
+
+func TestResolve_OverrideWithSpecialChars_NotTreatedAsVariantRef(t *testing.T) {
+	vs := prompt.VariantSet{
+		Default:   "default",
+		Variants:  map[string]string{"concise": "short"},
+		Overrides: map[string]string{"gpt-4o": "test!value"},
+	}
+	content, source := vs.Resolve("gpt-4o", "openai", "")
+	assert.Equal(t, "test!value", content)
+	assert.Equal(t, "override:gpt-4o", source)
+}
+
 // Table-driven test matching the specification table from the prompt.
 func TestResolve_SpecificationTable(t *testing.T) {
 	vs := prompt.VariantSet{
