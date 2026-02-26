@@ -163,6 +163,8 @@ type App struct {
 	configScalarFields  []scalarField
 	configScalarCursor  int
 	configEditBuf       string
+	configTextArea      textarea.Model // textarea for text section editing
+	configTextEditing   bool           // true when textarea is active in a text section
 	sessionRecipe       *recipe.Recipe // working copy; nil until first /config or /set
 	recipeModified      bool
 }
@@ -192,6 +194,13 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		fmt.Fprintf(os.Stderr, "warning: could not load tool state: %v\n", err)
 	}
 
+	cta := textarea.New()
+	cta.Placeholder = "Enter text…"
+	cta.SetHeight(8)
+	cta.SetWidth(80)
+	cta.CharLimit = 0
+	cta.ShowLineNumbers = false
+
 	app := &App{
 		adapters:              adapters,
 		prefPath:              prefPath,
@@ -202,6 +211,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		historyIdx:            -1,
 		sessionID:             sessionID,
 		input:                 ta,
+		configTextArea:        cta,
 		feedVP:                viewport.New(80, 20),
 		panelIdx:              make(map[string]int),
 		conversationHistories: h,
@@ -421,7 +431,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if resp.Error != "" {
 				p.errMsg = resp.Error
 				if runner.IsContextOverflowError(resp.Error) {
-					p.errMsg = "context limit reached — use /clear or /compact to reset"
+					p.errMsg = "context limit reached — use /wipe or /compact to reset"
 				}
 			}
 		}
@@ -567,6 +577,7 @@ func (a App) View() string {
 				a.configListItems, a.configListCursor,
 				a.configScalarFields, a.configScalarCursor,
 				a.configEditBuf,
+				a.configTextEditing, a.configTextArea.View(),
 			))
 			break
 		}
@@ -632,44 +643,67 @@ func (a App) View() string {
 				case strings.HasPrefix(lower, "/config "):
 					partial := lastWord(val[len("/config "):])
 					lp := strings.ToLower(partial)
+					hw := newHintWriter(&sb, descStyle)
 					for _, name := range interactiveSections {
 						if strings.HasPrefix(name, lp) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render("  " + name))
+							hw.add(nameStyle.Render("  " + name))
 						}
 					}
+					hw.flush()
 
 				case strings.HasPrefix(lower, "/set "):
 					partial := lastWord(val[len("/set "):])
 					lp := strings.ToLower(partial)
+					hw := newHintWriter(&sb, descStyle)
 					for _, path := range configPathCandidates() {
 						if strings.HasPrefix(path, lp) {
+							hw.add(nameStyle.Render("  " + path))
+						}
+					}
+					hw.flush()
+
+				case strings.HasPrefix(lower, "/export "):
+					partial := lastWord(val[len("/export "):])
+					lp := strings.ToLower(partial)
+					for _, sub := range []string{"recipe", "output"} {
+						if strings.HasPrefix(sub, lp) {
 							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render("  " + path))
+							sb.WriteString(nameStyle.Render("  " + sub))
+						}
+					}
+
+				case strings.HasPrefix(lower, "/import "):
+					partial := lastWord(val[len("/import "):])
+					lp := strings.ToLower(partial)
+					for _, sub := range []string{"recipe"} {
+						if strings.HasPrefix(sub, lp) {
+							sb.WriteByte('\n')
+							sb.WriteString(nameStyle.Render("  " + sub))
 						}
 					}
 
 				default:
 					prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
+					hw := newHintWriter(&sb, descStyle)
 					for _, c := range commands.All {
 						if strings.HasPrefix(c.Name, prefix) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)))
-							sb.WriteString(descStyle.Render("  " + c.Desc))
+							hw.add(nameStyle.Render(fmt.Sprintf("  %-12s", c.Name)) + descStyle.Render("  "+c.Desc))
 						}
 					}
+					hw.flush()
 				}
 			} else {
 				// @mention hints: if the last word starts with @, show matching models.
 				lw := lastWord(val)
 				if strings.HasPrefix(lw, "@") && len(lw) >= 2 {
 					partial := strings.ToLower(lw[1:])
+					hw := newHintWriter(&sb, descStyle)
 					for _, id := range a.modelIDCandidates() {
 						if strings.HasPrefix(strings.ToLower(id), partial) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render("  @" + id))
+							hw.add(nameStyle.Render("  @" + id))
 						}
 					}
+					hw.flush()
 				}
 			}
 		}

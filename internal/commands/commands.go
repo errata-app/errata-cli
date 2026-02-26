@@ -15,7 +15,8 @@ type Command struct {
 // TUIOnly commands are omitted from the /api/commands REST response.
 var All = []Command{
 	{"/help",      "Show available commands",                           false},
-	{"/clear",     "Clear display history and conversation memory",     false},
+	{"/clear",     "Clear display (preserves conversation context)",     false},
+	{"/wipe",      "Wipe display and conversation memory",              false},
 	{"/compact",   "Summarise conversation history to free up context", false},
 	{"/verbose",   "Toggle verbose mode",                               false},
 	{"/models",    "List active and all available models by provider",  false},
@@ -28,6 +29,8 @@ var All = []Command{
 	{"/set",       "Set config: /set <path> <value>; bare path shows current",    false},
 	{"/resume",    "Resume interrupted run — re-runs only interrupted models", false},
 	{"/remind",    "Fire a named reminder; bare /remind lists available",        false},
+	{"/export",    "Export: /export recipe [path]; /export output [path]", true},
+	{"/import",    "Import: /import recipe <path>",                      true},
 	{"/stats",     "Show preference wins and session cost",             false},
 	{"/totalcost", "Show total inference cost for this session",        false},
 	{"/exit",      "Exit",                                              true},

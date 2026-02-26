@@ -1258,3 +1258,92 @@ func TestParse_EmptyNewSections(t *testing.T) {
 	assert.Empty(t, r.SystemReminders)
 	assert.Empty(t, r.Hooks)
 }
+
+// ─── MarshalMarkdown tests ───────────────────────────────────────────────────
+
+func TestMarshalMarkdown_RoundTrip(t *testing.T) {
+	seed := int64(42)
+	temp := 0.7
+	maxTok := 4096
+	orig := &recipe.Recipe{
+		Name:         "Test Recipe",
+		Models:       []string{"claude-sonnet-4-6", "gpt-4o"},
+		SystemPrompt: "You are a helpful assistant.",
+		Tools: &recipe.ToolsConfig{
+			Allowlist:    []string{"read_file", "bash"},
+			BashPrefixes: []string{"go test", "go build"},
+		},
+		MCPServers: []recipe.MCPServerEntry{
+			{Name: "exa", Command: "npx @exa-ai/exa-mcp-server"},
+		},
+		ModelParams: recipe.ModelParamsConfig{
+			Temperature: &temp,
+			MaxTokens:   &maxTok,
+			Seed:        &seed,
+		},
+		Constraints: recipe.ConstraintsConfig{
+			Timeout:  10 * time.Minute,
+			MaxSteps: 50,
+		},
+		Context: recipe.ContextConfig{
+			Strategy:         "auto_compact",
+			MaxHistoryTurns:  30,
+			CompactThreshold: 0.75,
+		},
+		SubAgent: recipe.SubAgentConfig{
+			Model:    "gpt-4o",
+			MaxDepth: 2,
+			Tools:    "inherit",
+		},
+		Sandbox: recipe.SandboxConfig{
+			Filesystem: "project_only",
+			Network:    "full",
+		},
+	}
+
+	md := orig.MarshalMarkdown()
+
+	// Write and re-parse.
+	path := writeRecipe(t, md)
+	parsed, err := recipe.Parse(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Test Recipe", parsed.Name)
+	assert.Equal(t, orig.Models, parsed.Models)
+	assert.Equal(t, orig.SystemPrompt, parsed.SystemPrompt)
+	require.NotNil(t, parsed.Tools)
+	assert.Contains(t, parsed.Tools.Allowlist, "read_file")
+	assert.Contains(t, parsed.Tools.Allowlist, "bash")
+	assert.Equal(t, orig.Tools.BashPrefixes, parsed.Tools.BashPrefixes)
+	assert.Len(t, parsed.MCPServers, 1)
+	assert.Equal(t, "exa", parsed.MCPServers[0].Name)
+	assert.Equal(t, *orig.ModelParams.Seed, *parsed.ModelParams.Seed)
+	assert.Equal(t, *orig.ModelParams.Temperature, *parsed.ModelParams.Temperature)
+	assert.Equal(t, *orig.ModelParams.MaxTokens, *parsed.ModelParams.MaxTokens)
+	assert.Equal(t, orig.Constraints.Timeout, parsed.Constraints.Timeout)
+	assert.Equal(t, orig.Constraints.MaxSteps, parsed.Constraints.MaxSteps)
+	assert.Equal(t, orig.Context.Strategy, parsed.Context.Strategy)
+	assert.Equal(t, orig.Context.MaxHistoryTurns, parsed.Context.MaxHistoryTurns)
+	assert.Equal(t, orig.Context.CompactThreshold, parsed.Context.CompactThreshold)
+	assert.Equal(t, orig.SubAgent.Model, parsed.SubAgent.Model)
+	assert.Equal(t, orig.SubAgent.MaxDepth, parsed.SubAgent.MaxDepth)
+	assert.Equal(t, orig.SubAgent.Tools, parsed.SubAgent.Tools)
+	assert.Equal(t, orig.Sandbox.Filesystem, parsed.Sandbox.Filesystem)
+	assert.Equal(t, orig.Sandbox.Network, parsed.Sandbox.Network)
+}
+
+func TestMarshalMarkdown_DefaultRecipe(t *testing.T) {
+	r := recipe.Default()
+	md := r.MarshalMarkdown()
+	assert.Contains(t, md, "# Errata Default")
+	assert.Contains(t, md, "## Context")
+}
+
+func TestMarshalMarkdown_EmptyRecipe(t *testing.T) {
+	r := &recipe.Recipe{}
+	md := r.MarshalMarkdown()
+	assert.Contains(t, md, "# Errata Recipe") // default name
+	// Should not contain section headers for empty fields.
+	assert.NotContains(t, md, "## Models")
+	assert.NotContains(t, md, "## Constraints")
+}

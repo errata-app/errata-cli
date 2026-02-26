@@ -17,6 +17,7 @@ import (
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
+	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
@@ -53,6 +54,12 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 	if lower == "/remind" || strings.HasPrefix(lower, "/remind ") {
 		return a.handleRemindCommand(strings.TrimSpace(trimmed[len("/remind"):]))
 	}
+	if lower == "/export" || strings.HasPrefix(lower, "/export ") {
+		return a.handleExportCommand(strings.TrimSpace(trimmed[len("/export"):]))
+	}
+	if lower == "/import" || strings.HasPrefix(lower, "/import ") {
+		return a.handleImportCommand(strings.TrimSpace(trimmed[len("/import"):]))
+	}
 	switch lower {
 	case "/exit", "/quit":
 		return a, tea.Quit
@@ -62,6 +69,8 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) {
 		return a.handleModelsListCmd()
 	case "/clear":
 		return a.handleClearCmd()
+	case "/wipe":
+		return a.handleWipeCmd()
 	case "/compact":
 		return a.handleCompactCmd()
 	case "/resume":
@@ -137,6 +146,14 @@ func (a App) handleModelsListCmd() (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) {
+	a.feed = nil
+	a.feedVP.Width = a.width
+	a.feedVP.Height = a.feedVPHeight()
+	a.feedVP.SetContent("")
+	return a, nil
+}
+
+func (a App) handleWipeCmd() (tea.Model, tea.Cmd) {
 	a.feed = nil
 	a.conversationHistories = nil
 	if err := history.Clear(a.histPath); err != nil {
@@ -733,7 +750,16 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) {
 					a.configScalarCursor = 0
 					a.configEditBuf = ""
 				case "text":
-					a.configEditBuf = a.sessionRecipe.SystemPrompt
+					var content string
+					switch sec.Name {
+					case "system-prompt":
+						content = a.sessionRecipe.SystemPrompt
+					case "context-summarization":
+						content = a.sessionRecipe.SummarizationPrompt
+					}
+					a.configTextArea.SetValue(content)
+					a.configTextArea.Focus()
+					a.configTextEditing = true
 				}
 				break
 			}
@@ -895,4 +921,99 @@ func formatAvailableModels(results []adapters.ProviderModels, activeSet map[stri
 		}
 	}
 	return sb.String()
+}
+
+// ── export/import handlers ──────────────────────────────────────────────────
+
+func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) {
+	parts := strings.SplitN(args, " ", 2)
+	sub := strings.ToLower(parts[0])
+
+	switch sub {
+	case "recipe":
+		return a.handleExportRecipe(parts)
+	case "output":
+		return a.handleExportOutput(parts)
+	default:
+		return a.withMessage("Usage: /export recipe [path] | /export output [path]"), nil
+	}
+}
+
+func (a App) handleExportRecipe(parts []string) (tea.Model, tea.Cmd) {
+	rec := a.sessionRecipe
+	if rec == nil {
+		rec = a.recipe
+	}
+	if rec == nil {
+		return a.withMessage("No recipe to export."), nil
+	}
+
+	path := "recipe_export.md"
+	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+		path = strings.TrimSpace(parts[1])
+	}
+
+	md := rec.MarshalMarkdown()
+	if err := os.WriteFile(path, []byte(md), 0o644); err != nil {
+		return a.withMessage(fmt.Sprintf("Export failed: %v", err)), nil
+	}
+	return a.withMessage(fmt.Sprintf("Recipe exported to %s", path)), nil
+}
+
+func (a App) handleExportOutput(parts []string) (tea.Model, tea.Cmd) {
+	if a.lastReport == nil {
+		return a.withMessage("No run output to export. Run a prompt first."), nil
+	}
+
+	dir := output.DefaultDir
+	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+		dir = strings.TrimSpace(parts[1])
+	}
+
+	path, err := output.Save(dir, a.lastReport)
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Export failed: %v", err)), nil
+	}
+	return a.withMessage(fmt.Sprintf("Output exported to %s", path)), nil
+}
+
+func (a App) handleImportCommand(args string) (tea.Model, tea.Cmd) {
+	parts := strings.SplitN(args, " ", 2)
+	sub := strings.ToLower(parts[0])
+
+	switch sub {
+	case "recipe":
+		if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+			return a.withMessage("Usage: /import recipe <path>"), nil
+		}
+		return a.handleImportRecipe(strings.TrimSpace(parts[1]))
+	default:
+		return a.withMessage("Usage: /import recipe <path>"), nil
+	}
+}
+
+func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) {
+	rec, err := recipe.Parse(path)
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Import failed: %v", err)), nil
+	}
+
+	a.sessionRecipe = cloneRecipe(rec)
+	a.recipeModified = true
+	a.applySessionRecipe()
+
+	name := rec.Name
+	if name == "" {
+		name = path
+	}
+	return a.withMessage(fmt.Sprintf("Imported recipe %q (%d models, %d tools)",
+		name,
+		len(rec.Models),
+		func() int {
+			if rec.Tools == nil {
+				return 0
+			}
+			return len(rec.Tools.Allowlist)
+		}(),
+	)), nil
 }

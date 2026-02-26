@@ -1,11 +1,49 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/suarezc/errata/internal/tools"
 )
+
+// maxHintLines is the maximum number of completion hint lines shown below the
+// textarea. Capping prevents layout reflow (viewport bouncing) when many items
+// match an empty or short prefix.
+const maxHintLines = 8
+
+// hintWriter tracks how many hint lines have been written and enforces the cap.
+type hintWriter struct {
+	sb    *strings.Builder
+	count int
+	total int // total matches (including those past the cap)
+	style lipgloss.Style // style for the "... and N more" line
+}
+
+func newHintWriter(sb *strings.Builder, moreStyle lipgloss.Style) *hintWriter {
+	return &hintWriter{sb: sb, style: moreStyle}
+}
+
+// add writes one hint line if under the cap. Returns false when the cap is hit.
+func (hw *hintWriter) add(line string) bool {
+	hw.total++
+	if hw.count >= maxHintLines {
+		return false
+	}
+	hw.sb.WriteByte('\n')
+	hw.sb.WriteString(line)
+	hw.count++
+	return true
+}
+
+// flush writes the "... and N more" notice if any items were omitted.
+func (hw *hintWriter) flush() {
+	if hw.total > hw.count {
+		hw.sb.WriteByte('\n')
+		hw.sb.WriteString(hw.style.Render(fmt.Sprintf("  ... and %d more", hw.total-hw.count)))
+	}
+}
 
 // longestCommonPrefix returns the longest string that is a prefix of every
 // candidate. Returns "" if candidates is empty.
@@ -139,31 +177,32 @@ func (a App) tryMentionComplete(val string) (string, bool) {
 	return prefix + "@" + replacement, true
 }
 
-// renderModelHints writes matching model ID suggestions to sb.
+// renderModelHints writes matching model ID suggestions to sb (capped).
 func (a App) renderModelHints(sb *strings.Builder, partial string, nameStyle lipgloss.Style) {
 	lp := strings.ToLower(partial)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	hw := newHintWriter(sb, dimStyle)
 	for _, id := range a.modelIDCandidates() {
 		if strings.HasPrefix(strings.ToLower(id), lp) {
-			sb.WriteByte('\n')
-			sb.WriteString(nameStyle.Render("  " + id))
+			hw.add(nameStyle.Render("  " + id))
 		}
 	}
+	hw.flush()
 }
 
-// renderToolHints writes matching tool name suggestions to sb.
+// renderToolHints writes matching tool name suggestions to sb (capped).
 func (a App) renderToolHints(sb *strings.Builder, partial string, nameStyle, descStyle lipgloss.Style) {
 	lp := strings.ToLower(partial)
+	hw := newHintWriter(sb, descStyle)
 	for _, d := range tools.Definitions {
 		if strings.HasPrefix(strings.ToLower(d.Name), lp) {
-			sb.WriteByte('\n')
-			sb.WriteString(nameStyle.Render("  " + d.Name))
+			hw.add(nameStyle.Render("  " + d.Name))
 		}
 	}
 	for _, d := range a.mcpDefs {
 		if strings.HasPrefix(strings.ToLower(d.Name), lp) {
-			sb.WriteByte('\n')
-			sb.WriteString(nameStyle.Render("  " + d.Name))
-			sb.WriteString(descStyle.Render("  (mcp)"))
+			hw.add(nameStyle.Render("  "+d.Name) + descStyle.Render("  (mcp)"))
 		}
 	}
+	hw.flush()
 }

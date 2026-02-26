@@ -564,3 +564,21 @@ func TestHandleWS_ClearHistory_SendsHistoryCleared(t *testing.T) {
 		t.Errorf("type = %q, want history_cleared", msg.Type)
 	}
 }
+
+// ─── wsHandleClearDisplay ────────────────────────────────────────────────────
+
+func TestHandleWS_ClearDisplay_SendsDisplayCleared(t *testing.T) {
+	s := newTestServer(t, nil, config.Config{})
+	ctx, conn := wsConnect(t, s)
+
+	if err := wsjson.Write(ctx, conn, wsClientMsg{Type: "clear_display"}); err != nil {
+		t.Fatalf("write clear_display: %v", err)
+	}
+	var msg wsServerMsg
+	if err := wsjson.Read(ctx, conn, &msg); err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if msg.Type != "display_cleared" {
+		t.Errorf("type = %q, want display_cleared", msg.Type)
+	}
+}

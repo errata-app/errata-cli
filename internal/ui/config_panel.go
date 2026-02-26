@@ -17,9 +17,11 @@ import (
 
 // configSection represents one section in the config overlay.
 type configSection struct {
-	Name    string // kebab-case: "models", "system-prompt", etc.
-	Summary string // one-line summary of current value
-	Kind    string // "list" | "scalar" | "text"
+	Name       string // kebab-case: "models", "system-prompt", etc.
+	Summary    string // one-line summary of current value
+	Kind       string // "list" | "scalar" | "text"
+	Desc       string // brief one-line description (shown in nav view)
+	DetailDesc string // detailed description (shown in expanded view)
 }
 
 // listItem is one toggleable row in a list-type section editor.
@@ -44,13 +46,76 @@ var interactiveSections = []string{
 	"reminders", "hooks", "output-processing", "context-summarization",
 }
 
+// ── section descriptions ─────────────────────────────────────────────────────
+
+// sectionDesc holds the brief and detailed descriptions for a config section.
+type sectionDesc struct {
+	Brief  string
+	Detail string
+}
+
+var sectionDescriptions = map[string]sectionDesc{
+	"models": {
+		Brief:  "Which AI models to compare",
+		Detail: "Toggle which models participate in A/B comparisons. All configured models are shown; unchecked models are excluded from subsequent runs.",
+	},
+	"system-prompt": {
+		Brief:  "Custom instructions prepended to every prompt",
+		Detail: "A system prompt appended after the built-in tool guidance. Use for project-specific context, coding conventions, or domain knowledge that should influence all models.",
+	},
+	"tools": {
+		Brief:  "Available tools for the agentic loop",
+		Detail: "Enable or disable built-in and MCP tools. Disabled tools are hidden from models and cannot be called. Changes take effect on the next run.",
+	},
+	"mcp-servers": {
+		Brief:  "External MCP tool server processes",
+		Detail: "MCP servers expose additional tools via the Model Context Protocol. Servers are configured at startup via ERRATA_MCP_SERVERS and shown here for reference.",
+	},
+	"parameters": {
+		Brief:  "Model sampling parameters (seed, temperature, max_tokens)",
+		Detail: "Control model sampling behavior. Seed enables reproducible outputs. Temperature adjusts randomness (0 = deterministic, higher = more creative). Max tokens caps response length.",
+	},
+	"constraints": {
+		Brief:  "Timeout and step limits for agent runs",
+		Detail: "Set wall-clock timeout and maximum tool-call steps per model. Timeout cancels the run after the specified duration. Max steps limits how many tool calls a model can make.",
+	},
+	"context": {
+		Brief:  "Conversation history and compaction settings",
+		Detail: "Strategy controls when history is compacted: auto_compact triggers at the threshold, manual requires /compact, off disables compaction. Max history turns limits how many turns are kept.",
+	},
+	"sub-agent": {
+		Brief:  "Sub-agent spawning configuration",
+		Detail: "Configure the spawn_agent tool. Model sets which model sub-agents use (empty = same as parent). Max depth limits recursion. Tools controls which tools sub-agents can access.",
+	},
+	"sandbox": {
+		Brief:  "Filesystem and network access restrictions",
+		Detail: "Filesystem: unrestricted (full access), project_only (cwd subtree), read_only (no writes). Network: full (all access) or none (block outbound).",
+	},
+	"reminders": {
+		Brief:  "Conditional mid-conversation injections",
+		Detail: "System reminders are injected into the conversation when their trigger condition is met. Use /remind to fire a reminder manually. Configured in the recipe file.",
+	},
+	"hooks": {
+		Brief:  "Lifecycle event hooks (shell commands)",
+		Detail: "Hooks run shell commands in response to lifecycle events (e.g. before_run, after_run). Each hook has an event type, optional matcher pattern, and a command to execute.",
+	},
+	"output-processing": {
+		Brief:  "Rules for truncating tool output",
+		Detail: "Output processing rules control how tool output is truncated before being sent back to the model. Set max_lines and truncation strategy (head, tail, middle) per tool.",
+	},
+	"context-summarization": {
+		Brief:  "Prompt used when compacting conversation history",
+		Detail: "The summarization prompt is sent to the model when compacting conversation history via /compact or auto-compact. Customize to control what information is preserved in summaries.",
+	},
+}
+
 // ── section builders ────────────────────────────────────────────────────────
 
 func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, disabled map[string]bool) []configSection {
 	if rec == nil {
 		rec = recipe.Default()
 	}
-	return []configSection{
+	sections := []configSection{
 		{Name: "models", Summary: summarizeModels(rec, adapters), Kind: "list"},
 		{Name: "system-prompt", Summary: summarizeSystemPrompt(rec), Kind: "text"},
 		{Name: "tools", Summary: summarizeTools(rec, disabled), Kind: "list"},
@@ -65,6 +130,13 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 		{Name: "output-processing", Summary: summarizeOutputProcessing(rec), Kind: "scalar"},
 		{Name: "context-summarization", Summary: summarizeContextSummarization(rec), Kind: "text"},
 	}
+	for i := range sections {
+		if desc, ok := sectionDescriptions[sections[i].Name]; ok {
+			sections[i].Desc = desc.Brief
+			sections[i].DetailDesc = desc.Detail
+		}
+	}
+	return sections
 }
 
 func summarizeModels(rec *recipe.Recipe, adapters []models.ModelAdapter) string {
@@ -137,7 +209,7 @@ func summarizeParameters(rec *recipe.Recipe) string {
 		parts = append(parts, fmt.Sprintf("max_tokens: %d", *rec.ModelParams.MaxTokens))
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: seed=none, temperature/max_tokens=provider)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -151,7 +223,7 @@ func summarizeConstraints(rec *recipe.Recipe) string {
 		parts = append(parts, fmt.Sprintf("max_steps: %d", rec.Constraints.MaxSteps))
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: timeout=5m, max_steps=unlimited)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -168,7 +240,7 @@ func summarizeContext(rec *recipe.Recipe) string {
 		parts = append(parts, fmt.Sprintf("threshold: %.2f", rec.Context.CompactThreshold))
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: auto_compact, 20 turns, threshold=0.80)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -185,7 +257,7 @@ func summarizeSubAgent(rec *recipe.Recipe) string {
 		parts = append(parts, "tools: "+rec.SubAgent.Tools)
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: model=parent, depth=1, tools=all)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -199,7 +271,7 @@ func summarizeSandbox(rec *recipe.Recipe) string {
 		parts = append(parts, "network: "+rec.Sandbox.Network)
 	}
 	if len(parts) == 0 {
-		return "(defaults)"
+		return "(defaults: filesystem=unrestricted, network=full)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -239,7 +311,7 @@ func summarizeOutputProcessing(rec *recipe.Recipe) string {
 
 func summarizeContextSummarization(rec *recipe.Recipe) string {
 	if rec.SummarizationPrompt == "" {
-		return "(default)"
+		return "(default: built-in prompt)"
 	}
 	preview := rec.SummarizationPrompt
 	if runes := []rune(preview); len(runes) > 50 {
@@ -587,6 +659,25 @@ func setConfigValue(rec *recipe.Recipe, path, value string) error {
 	return entry.Set(rec, value)
 }
 
+// configPathDefaults maps config dot-paths to their default value descriptions.
+// Used to show "default: <value>" instead of bare "(not set)" in the overlay.
+var configPathDefaults = map[string]string{
+	"constraints.timeout":         "5m",
+	"constraints.max_steps":       "unlimited",
+	"context.strategy":            "auto_compact",
+	"context.max_history_turns":   "20",
+	"context.compact_threshold":   "0.80",
+	"sub_agent.model":             "same as parent",
+	"sub_agent.max_depth":         "1",
+	"sub_agent.tools":             "all",
+	"sandbox.filesystem":          "unrestricted",
+	"sandbox.network":             "full",
+	"parameters.seed":             "none",
+	"parameters.temperature":      "provider default",
+	"parameters.max_tokens":       "provider default",
+	"context_summarization.prompt": "built-in prompt",
+}
+
 // configPathCandidates returns all valid config dot-paths for tab-completion.
 func configPathCandidates() []string {
 	out := make([]string, 0, len(configPaths))
@@ -675,7 +766,7 @@ func (a *App) applySessionRecipe() {
 
 // ── rendering ───────────────────────────────────────────────────────────────
 
-func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width int, listItems []listItem, listCursor int, scalarFields []scalarField, scalarCursor int, editBuf string) string {
+func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width int, listItems []listItem, listCursor int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string) string {
 	var sb strings.Builder
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
@@ -695,6 +786,11 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 		// Expanded section view.
 		sec := sections[expandedIdx]
 		sb.WriteString(titleStyle.Render(fmt.Sprintf("  Configuration > %s", sec.Name)))
+		sb.WriteByte('\n')
+		if sec.DetailDesc != "" {
+			sb.WriteString(dimStyle.Render("  " + sec.DetailDesc))
+			sb.WriteByte('\n')
+		}
 		sb.WriteByte('\n')
 
 		switch sec.Kind {
@@ -727,7 +823,11 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 				} else {
 					val := f.Value
 					if val == "" {
-						val = "(not set)"
+						if dflt, ok := configPathDefaults[f.Path]; ok {
+							val = "(default: " + dflt + ")"
+						} else {
+							val = "(not set)"
+						}
 					}
 					sb.WriteString(dimStyle.Render(fmt.Sprintf("  %s", cursor)))
 					sb.WriteString(nameStyle.Render(f.Key + ":"))
@@ -739,9 +839,23 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 			sb.WriteString(dimStyle.Render("  Enter = edit field  Escape = back"))
 
 		case "text":
-			sb.WriteString(dimStyle.Render(fmt.Sprintf("  %s", editBuf)))
-			sb.WriteByte('\n')
-			sb.WriteString(dimStyle.Render("  (editing not yet implemented — use /set)"))
+			if textEditing {
+				sb.WriteString(textAreaView)
+				sb.WriteByte('\n')
+				sb.WriteString(dimStyle.Render("  Ctrl+S = save  Escape = cancel"))
+			} else {
+				preview := editBuf
+				if preview == "" {
+					preview = "(empty)"
+				} else if runes := []rune(preview); len(runes) > 200 {
+					preview = string(runes[:200]) + "..."
+				}
+				for _, line := range strings.Split(preview, "\n") {
+					sb.WriteString(dimStyle.Render("  " + line))
+					sb.WriteByte('\n')
+				}
+				sb.WriteString(dimStyle.Render("  Enter = edit  Escape = back"))
+			}
 		}
 
 		sb.WriteByte('\n')
@@ -757,6 +871,10 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 		line := fmt.Sprintf("  %s%-16s %s", cursor, sec.Name, sec.Summary)
 		if i == selectedIdx {
 			sb.WriteString(selectedStyle.Render(line))
+			if sec.Desc != "" {
+				sb.WriteByte('\n')
+				sb.WriteString(dimStyle.Render("    " + sec.Desc))
+			}
 		} else {
 			sb.WriteString(dimStyle.Render(line))
 		}
@@ -779,11 +897,8 @@ func (a App) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a.handleConfigListKey(msg)
 		case "scalar":
 			return a.handleConfigScalarKey(msg)
-		}
-		// text: fall through to close on escape
-		if msg.Type == tea.KeyEsc {
-			a.configExpandedIdx = -1
-			return a, nil
+		case "text":
+			return a.handleConfigTextKey(msg)
 		}
 		return a, nil
 	}
@@ -833,12 +948,17 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.configScalarCursor = 0
 			a.configEditBuf = ""
 		case "text":
+			var content string
 			switch sec.Name {
 			case "system-prompt":
-				a.configEditBuf = a.sessionRecipe.SystemPrompt
+				content = a.sessionRecipe.SystemPrompt
 			case "context-summarization":
-				a.configEditBuf = a.sessionRecipe.SummarizationPrompt
+				content = a.sessionRecipe.SummarizationPrompt
 			}
+			a.configEditBuf = content
+			a.configTextArea.SetValue(content)
+			a.configTextArea.Focus()
+			a.configTextEditing = true
 		}
 		return a, nil
 	case tea.KeyRunes:
@@ -980,4 +1100,46 @@ func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	return a, nil
+}
+
+func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !a.configTextEditing {
+		// Not actively editing — Escape goes back.
+		if msg.Type == tea.KeyEsc {
+			a.configExpandedIdx = -1
+			a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+			return a, nil
+		}
+		return a, nil
+	}
+
+	// Ctrl+S or Ctrl+D saves the text.
+	if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyCtrlD {
+		sec := a.configSections[a.configExpandedIdx]
+		val := a.configTextArea.Value()
+		switch sec.Name {
+		case "system-prompt":
+			a.sessionRecipe.SystemPrompt = val
+		case "context-summarization":
+			a.sessionRecipe.SummarizationPrompt = val
+		}
+		a.recipeModified = true
+		a.configTextEditing = false
+		a.configTextArea.Blur()
+		a.applySessionRecipe()
+		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+		return a, nil
+	}
+
+	// Escape cancels editing.
+	if msg.Type == tea.KeyEsc {
+		a.configTextEditing = false
+		a.configTextArea.Blur()
+		return a, nil
+	}
+
+	// Delegate all other keys to the textarea.
+	var cmd tea.Cmd
+	a.configTextArea, cmd = a.configTextArea.Update(msg)
+	return a, cmd
 }

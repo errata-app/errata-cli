@@ -94,7 +94,9 @@ func TestSummarizeConstraints_WithValues(t *testing.T) {
 
 func TestSummarizeConstraints_Defaults(t *testing.T) {
 	rec := &recipe.Recipe{}
-	assert.Equal(t, "(defaults)", summarizeConstraints(rec))
+	s := summarizeConstraints(rec)
+	assert.Contains(t, s, "timeout=5m")
+	assert.Contains(t, s, "max_steps=unlimited")
 }
 
 func TestSummarizeSandbox_WithValues(t *testing.T) {
@@ -148,7 +150,9 @@ func TestSummarizeParameters_AllSet(t *testing.T) {
 
 func TestSummarizeParameters_Defaults(t *testing.T) {
 	rec := &recipe.Recipe{}
-	assert.Equal(t, "(defaults)", summarizeParameters(rec))
+	s := summarizeParameters(rec)
+	assert.Contains(t, s, "seed=none")
+	assert.Contains(t, s, "provider")
 }
 
 func TestSummarizeContext_AllSet(t *testing.T) {
@@ -167,7 +171,10 @@ func TestSummarizeContext_AllSet(t *testing.T) {
 
 func TestSummarizeContext_Defaults(t *testing.T) {
 	rec := &recipe.Recipe{}
-	assert.Equal(t, "(defaults)", summarizeContext(rec))
+	s := summarizeContext(rec)
+	assert.Contains(t, s, "auto_compact")
+	assert.Contains(t, s, "20 turns")
+	assert.Contains(t, s, "threshold=0.80")
 }
 
 func TestSummarizeSubAgent_WithFields(t *testing.T) {
@@ -186,7 +193,10 @@ func TestSummarizeSubAgent_WithFields(t *testing.T) {
 
 func TestSummarizeSubAgent_Defaults(t *testing.T) {
 	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
-	assert.Equal(t, "(defaults)", summarizeSubAgent(rec))
+	s := summarizeSubAgent(rec)
+	assert.Contains(t, s, "model=parent")
+	assert.Contains(t, s, "depth=1")
+	assert.Contains(t, s, "tools=all")
 }
 
 func TestSummarizeMCPServers_None(t *testing.T) {
@@ -377,7 +387,7 @@ func TestBuildScalarFields_UnknownSection(t *testing.T) {
 func TestRenderConfigOverlay_ContainsSectionNames(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "")
+	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "", false, "")
 	for _, name := range interactiveSections {
 		assert.Contains(t, out, name)
 	}
@@ -387,21 +397,21 @@ func TestRenderConfigOverlay_ContainsSectionNames(t *testing.T) {
 func TestRenderConfigOverlay_ModifiedBadge(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, true, 80, nil, 0, nil, 0, "")
+	out := renderConfigOverlay(sections, 0, -1, true, 80, nil, 0, nil, 0, "", false, "")
 	assert.Contains(t, out, "[modified]")
 }
 
 func TestRenderConfigOverlay_NoModifiedBadgeWhenClean(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "")
+	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "", false, "")
 	assert.NotContains(t, out, "[modified]")
 }
 
 func TestRenderConfigOverlay_ListExpanded(t *testing.T) {
 	sections := []configSection{{Name: "tools", Summary: "8 enabled", Kind: "list"}}
 	items := []listItem{{Label: "bash", Active: true}, {Label: "read_file", Active: false}}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, items, 0, nil, 0, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, items, 0, nil, 0, "", false, "")
 	assert.Contains(t, out, "bash")
 	assert.Contains(t, out, "read_file")
 	assert.Contains(t, out, "[x]")
@@ -414,7 +424,7 @@ func TestRenderConfigOverlay_ScalarExpanded(t *testing.T) {
 		{Key: "timeout", Path: "constraints.timeout", Value: "5m0s"},
 		{Key: "max_steps", Path: "constraints.max_steps", Value: "50"},
 	}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, nil, 0, fields, 0, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, nil, 0, fields, 0, "", false, "")
 	assert.Contains(t, out, "timeout")
 	assert.Contains(t, out, "max_steps")
 	assert.Contains(t, out, "5m0s")
@@ -574,4 +584,137 @@ func TestModifiedBadge_HiddenWhenClean(t *testing.T) {
 	a.recipeModified = false
 	view := a.View()
 	assert.NotContains(t, view, "[modified]")
+}
+
+// ── configPathDefaults tests ─────────────────────────────────────────────────
+
+func TestConfigPathDefaults_AllPathsHaveDefaults(t *testing.T) {
+	// Every config path should have a default description.
+	for path := range configPaths {
+		_, ok := configPathDefaults[path]
+		assert.True(t, ok, "missing default for config path %q", path)
+	}
+}
+
+func TestConfigPathDefaults_RenderInScalarView(t *testing.T) {
+	rec := &recipe.Recipe{}
+	fields := buildScalarFields("constraints", rec)
+	out := renderConfigOverlay(
+		[]configSection{{Name: "constraints", Kind: "scalar"}},
+		0, 0, false, 80,
+		nil, 0,
+		fields, 0, "", false, "",
+	)
+	// Unset fields should show their default values.
+	assert.Contains(t, out, "(default: 5m)")
+	assert.Contains(t, out, "(default: unlimited)")
+}
+
+func TestSummarizeSandbox_ShowsDefaults(t *testing.T) {
+	rec := &recipe.Recipe{}
+	s := summarizeSandbox(rec)
+	assert.Contains(t, s, "filesystem=unrestricted")
+	assert.Contains(t, s, "network=full")
+}
+
+func TestSummarizeContextSummarization_ShowsDefault(t *testing.T) {
+	rec := &recipe.Recipe{}
+	s := summarizeContextSummarization(rec)
+	assert.Contains(t, s, "built-in prompt")
+}
+
+// ── section descriptions tests ───────────────────────────────────────────────
+
+func TestSectionDescriptions_AllSectionsHaveDescriptions(t *testing.T) {
+	rec := recipe.Default()
+	sections := buildConfigSections(rec, nil, nil)
+	for _, sec := range sections {
+		assert.NotEmpty(t, sec.Desc, "section %q missing Desc", sec.Name)
+		assert.NotEmpty(t, sec.DetailDesc, "section %q missing DetailDesc", sec.Name)
+	}
+}
+
+func TestSectionDescriptions_NavViewShowsDescForSelected(t *testing.T) {
+	rec := recipe.Default()
+	sections := buildConfigSections(rec, nil, nil)
+	// Render with first section selected.
+	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "", false, "")
+	// The selected section (models) should show its brief description.
+	assert.Contains(t, out, sectionDescriptions["models"].Brief)
+}
+
+func TestSectionDescriptions_ExpandedViewShowsDetail(t *testing.T) {
+	rec := recipe.Default()
+	sections := buildConfigSections(rec, nil, nil)
+	fields := buildScalarFields("constraints", rec)
+	// Expand constraints (index 5).
+	out := renderConfigOverlay(sections, 5, 5, false, 80, nil, 0, fields, 0, "", false, "")
+	assert.Contains(t, out, sectionDescriptions["constraints"].Detail)
+}
+
+// ── text editing tests ───────────────────────────────────────────────────────
+
+func TestHandleConfigTextKey_CtrlSSavesSystemPrompt(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.sessionRecipe = cloneRecipe(a.recipe)
+	a.configOverlayActive = true
+	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	// Expand system-prompt (index 1).
+	a.configExpandedIdx = 1
+	a.configTextEditing = true
+	a.configTextArea.SetValue("New system prompt content")
+
+	result, _ := a.handleConfigTextKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	app := result.(App)
+	assert.Equal(t, "New system prompt content", app.sessionRecipe.SystemPrompt)
+	assert.True(t, app.recipeModified)
+	assert.False(t, app.configTextEditing)
+}
+
+func TestHandleConfigTextKey_EscapeCancelsEditing(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.sessionRecipe = cloneRecipe(a.recipe)
+	a.configOverlayActive = true
+	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	a.configExpandedIdx = 1
+	a.configTextEditing = true
+	a.configTextArea.SetValue("Unsaved content")
+
+	result, _ := a.handleConfigTextKey(tea.KeyMsg{Type: tea.KeyEsc})
+	app := result.(App)
+	assert.False(t, app.configTextEditing)
+	// Original prompt should be unchanged.
+	assert.Equal(t, a.sessionRecipe.SystemPrompt, app.sessionRecipe.SystemPrompt)
+}
+
+func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.sessionRecipe = cloneRecipe(a.recipe)
+	a.configOverlayActive = true
+	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	// context-summarization is index 12.
+	a.configExpandedIdx = 12
+	a.configTextEditing = true
+	a.configTextArea.SetValue("Custom summarization prompt")
+
+	result, _ := a.handleConfigTextKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	app := result.(App)
+	assert.Equal(t, "Custom summarization prompt", app.sessionRecipe.SummarizationPrompt)
+	assert.True(t, app.recipeModified)
+}
+
+func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {
+	sections := []configSection{{Name: "system-prompt", Kind: "text", DetailDesc: "test detail"}}
+	out := renderConfigOverlay(sections, 0, 0, false, 80, nil, 0, nil, 0, "",
+		true, "  [textarea content here]")
+	assert.Contains(t, out, "[textarea content here]")
+	assert.Contains(t, out, "Ctrl+S = save")
+}
+
+func TestRenderConfigOverlay_TextPreviewShown(t *testing.T) {
+	sections := []configSection{{Name: "system-prompt", Kind: "text", DetailDesc: "test detail"}}
+	out := renderConfigOverlay(sections, 0, 0, false, 80, nil, 0, nil, 0, "Hello world",
+		false, "")
+	assert.Contains(t, out, "Hello world")
+	assert.Contains(t, out, "Enter = edit")
 }
