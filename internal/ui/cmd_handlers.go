@@ -6,21 +6,17 @@ import (
 	"os"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
-	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/recipe"
-	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
@@ -32,32 +28,8 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) { //nolint:gocriti
 	trimmed := strings.TrimSpace(prompt)
 	lower := strings.ToLower(trimmed)
 
-	if lower == "/keys" || strings.HasPrefix(lower, "/keys ") {
-		return a.handleKeysCommand(strings.TrimSpace(trimmed[len("/keys"):]))
-	}
-	if lower == "/model" || strings.HasPrefix(lower, "/model ") {
-		return a.handleModelCommand(strings.TrimSpace(trimmed[len("/model"):]))
-	}
-	if lower == "/tools" || strings.HasPrefix(lower, "/tools ") {
-		return a.handleToolsCommand(strings.TrimSpace(trimmed[len("/tools"):]))
-	}
-	if lower == "/seed" || strings.HasPrefix(lower, "/seed ") {
-		return a.handleSeedCommand(strings.TrimSpace(trimmed[len("/seed"):]))
-	}
-	if lower == "/subset" || strings.HasPrefix(lower, "/subset ") {
-		return a.handleSubsetCommand(strings.TrimSpace(trimmed[len("/subset"):]))
-	}
-	if lower == "/all" {
-		return a.handleAllCommand()
-	}
 	if lower == "/config" || strings.HasPrefix(lower, "/config ") {
 		return a.handleConfigCommand(strings.TrimSpace(trimmed[len("/config"):]))
-	}
-	if lower == "/set" || strings.HasPrefix(lower, "/set ") {
-		return a.handleSetCommand(strings.TrimSpace(trimmed[len("/set"):]))
-	}
-	if lower == "/remind" || strings.HasPrefix(lower, "/remind ") {
-		return a.handleRemindCommand(strings.TrimSpace(trimmed[len("/remind"):]))
 	}
 	if lower == "/export" || strings.HasPrefix(lower, "/export ") {
 		return a.handleExportCommand(strings.TrimSpace(trimmed[len("/export"):]))
@@ -70,8 +42,6 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) { //nolint:gocriti
 		return a, tea.Quit
 	case "/verbose":
 		return a.handleVerboseCmd()
-	case "/models":
-		return a.handleModelsListCmd()
 	case "/clear":
 		return a.handleClearCmd()
 	case "/wipe":
@@ -82,8 +52,6 @@ func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) { //nolint:gocriti
 		return a.handleResumeCmd()
 	case "/stats":
 		return a.handleStatsCmd()
-	case "/totalcost":
-		return a.withMessage(fmt.Sprintf("Total session cost: $%.4f", a.totalCostUSD)), nil
 	case "/help":
 		return a.withMessage(helpText()), nil
 	}
@@ -126,28 +94,6 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 		state = "on"
 	}
 	return a.withMessage(fmt.Sprintf("Verbose mode %s.", state)), nil
-}
-
-func (a App) handleModelsListCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	active := a.activeAdapters
-	if active == nil {
-		active = a.adapters
-	}
-	ids := make([]string, 0, len(active))
-	for _, ad := range active {
-		ids = append(ids, ad.ID())
-	}
-	suffix := ""
-	if a.activeAdapters != nil {
-		suffix = " (filtered)"
-	}
-	cfg := a.cfg
-	updated := a.withMessage("Active" + suffix + ": " + strings.Join(ids, ", ") + "\nFetching available models…")
-	return updated, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		return listModelsResultMsg{results: adapters.ListAvailableModels(ctx, cfg)}
-	}
 }
 
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -259,7 +205,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	}
 
 	if len(toRun) == 0 {
-		return a.withMessage("No models configured. Use /keys to add an API key."), nil
+		return a.withMessage("No models configured. Set API keys in .env and restart."), nil
 	}
 
 	// Record in prompt history (deduplicate consecutive identical entries).
@@ -595,127 +541,6 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 	}
 }
 
-func (a App) handleToolsCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	lower := strings.ToLower(strings.TrimSpace(args))
-
-	// /tools reset — re-enable all tools
-	if lower == "reset" {
-		a.disabledTools = nil
-		if err := tools.SaveDisabledTools(a.toolStatePath, nil); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save tool state: %v\n", err)
-		}
-		return a.withMessage("All tools enabled."), nil
-	}
-
-	// /tools (bare) — list current state
-	if lower == "" {
-		var lines []string
-		for _, d := range tools.Definitions {
-			state := "on "
-			if a.disabledTools[d.Name] {
-				state = "off"
-			}
-			lines = append(lines, fmt.Sprintf("  [%s] %s", state, d.Name))
-		}
-		for _, d := range a.mcpDefs {
-			state := "on "
-			if a.disabledTools[d.Name] {
-				state = "off"
-			}
-			lines = append(lines, fmt.Sprintf("  [%s] %s  (mcp)", state, d.Name))
-		}
-		return a.withMessage("Tools:\n" + strings.Join(lines, "\n")), nil
-	}
-
-	// /tools on <name...> or /tools off <name...>
-	parts := strings.Fields(lower)
-	if len(parts) < 2 || (parts[0] != "on" && parts[0] != "off") {
-		return a.withMessage("Usage: /tools  |  /tools off <name...>  |  /tools on <name...>  |  /tools reset"), nil
-	}
-
-	action, names := parts[0], parts[1:]
-	// Validate all names against both built-in and MCP tools.
-	validNames := make(map[string]bool, len(tools.Definitions)+len(a.mcpDefs))
-	for _, d := range tools.Definitions {
-		validNames[d.Name] = true
-	}
-	for _, d := range a.mcpDefs {
-		validNames[d.Name] = true
-	}
-	for _, n := range names {
-		if !validNames[n] {
-			var all []string
-			for _, d := range tools.Definitions {
-				all = append(all, d.Name)
-			}
-			for _, d := range a.mcpDefs {
-				all = append(all, d.Name+" (mcp)")
-			}
-			return a.withMessage(fmt.Sprintf("Unknown tool %q. Available: %s", n, strings.Join(all, ", "))), nil
-		}
-	}
-
-	if a.disabledTools == nil {
-		a.disabledTools = make(map[string]bool)
-	}
-	for _, n := range names {
-		if action == "off" {
-			a.disabledTools[n] = true
-		} else {
-			delete(a.disabledTools, n)
-		}
-	}
-	if err := tools.SaveDisabledTools(a.toolStatePath, a.disabledTools); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save tool state: %v\n", err)
-	}
-	// Return the updated list.
-	return a.handleToolsCommand("")
-}
-
-func (a App) handleModelCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if args == "" {
-		a.activeAdapters = nil
-		ids := make([]string, 0, len(a.adapters))
-		for _, ad := range a.adapters {
-			ids = append(ids, ad.ID())
-		}
-		return a.withMessage("Active models: all — " + strings.Join(ids, ", ")), nil
-	}
-
-	requested := strings.Fields(args)
-	var selected []models.ModelAdapter
-	for _, id := range requested {
-		var found models.ModelAdapter
-		for _, ad := range a.adapters {
-			if ad.ID() == id {
-				found = ad
-				break
-			}
-		}
-		if found == nil {
-			newAdapter, err := adapters.NewAdapter(id, a.cfg)
-			if err != nil {
-				var available []string
-				for _, ad := range a.adapters {
-					available = append(available, ad.ID())
-				}
-				return a.withMessage(fmt.Sprintf(
-					"Unknown model %q. Available: %s", id, strings.Join(available, ", "),
-				)), nil
-			}
-			found = newAdapter
-		}
-		selected = append(selected, found)
-	}
-
-	a.activeAdapters = selected
-	var ids []string
-	for _, ad := range selected {
-		ids = append(ids, ad.ID())
-	}
-	return a.withMessage("Active models: " + strings.Join(ids, ", ")), nil
-}
-
 func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if a.sessionRecipe == nil {
 		a.sessionRecipe = cloneRecipe(a.recipe)
@@ -777,278 +602,11 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 	return a, nil
 }
 
-func (a App) handleSetCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if args == "" {
-		return a.withMessage("Usage: /set <path> [value]"), nil
-	}
-	if a.sessionRecipe == nil {
-		a.sessionRecipe = cloneRecipe(a.recipe)
-	}
-
-	parts := strings.SplitN(args, " ", 2)
-	path := parts[0]
-	if len(parts) == 1 {
-		// Query mode: show current value.
-		v := getConfigValue(a.sessionRecipe, path)
-		return a.withMessage(fmt.Sprintf("%s = %s", path, v)), nil
-	}
-
-	value := parts[1]
-	err := setConfigValue(a.sessionRecipe, path, value)
-	if err != nil {
-		return a.withMessage(fmt.Sprintf("Error: %v", err)), nil
-	}
-	a.recipeModified = true
-	a.applySessionRecipe()
-	return a.withMessage(fmt.Sprintf("Set %s = %s", path, value)), nil
-}
-
-func (a App) handleRemindCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if a.reminderState == nil {
-		return a.withMessage("No reminders configured in recipe."), nil
-	}
-	if args == "" {
-		// Bare /remind: list available reminders.
-		names := a.reminderState.ReminderNames()
-		if len(names) == 0 {
-			return a.withMessage("No reminders configured."), nil
-		}
-		return a.withMessage("Available reminders:\n  " + strings.Join(names, "\n  ")), nil
-	}
-	// Fire a specific reminder by name.
-	r, ok := a.reminderState.FireManual(args)
-	if !ok {
-		return a.withMessage(fmt.Sprintf("Reminder %q not found. Use /remind to list available.", args)), nil
-	}
-	return a.withMessage(fmt.Sprintf("[reminder: %s fired]\n%s", r.Name, r.Content)), nil
-}
-
-func (a App) handleSeedCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if args == "" {
-		a.seed = nil
-		return a.withMessage("Seed cleared."), nil
-	}
-	n, err := strconv.ParseInt(args, 10, 64)
-	if err != nil {
-		return a.withMessage(fmt.Sprintf("Invalid seed %q — must be an integer.", args)), nil
-	}
-	a.seed = &n
-	return a.withMessage(fmt.Sprintf("Seed set to %d.", n)), nil
-}
-
-func (a App) handleSubsetCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if args == "" {
-		// Bare /subset: show current targeting state.
-		if a.activeAdapters == nil {
-			return a.withMessage("Model targeting: all models active"), nil
-		}
-		var ids []string
-		for _, ad := range a.activeAdapters {
-			ids = append(ids, ad.ID())
-		}
-		return a.withMessage("Model targeting: " + strings.Join(ids, ", ")), nil
-	}
-	// With args: same validation and resolution as /model.
-	return a.handleModelCommand(args)
-}
-
-func (a App) handleAllCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	return a.handleModelCommand("")
-}
-
-func (a App) handleKeysCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if args == "" {
-		return a.handleKeysDisplay()
-	}
-	return a.handleKeysSet(args)
-}
-
-func (a App) handleKeysDisplay() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	providers := config.ProviderEnvInfo()
-	var sb strings.Builder
-	sb.WriteString("Provider API key status:\n")
-	for _, p := range providers {
-		configured := config.ProviderConfigured(p.Name)
-		status := "not configured"
-		if configured {
-			status = "configured"
-		}
-		fmt.Fprintf(&sb, "\n  %-12s  %s", p.Name, status)
-		for _, v := range p.EnvVars {
-			val := os.Getenv(v)
-			if val != "" {
-				fmt.Fprintf(&sb, "\n    %-30s %s", v, config.MaskKey(val))
-			} else {
-				fmt.Fprintf(&sb, "\n    %-30s (not set)", v)
-			}
-		}
-	}
-	sb.WriteString("\n\nUsage: /keys <provider> <key>")
-	sb.WriteString("\n  e.g. /keys anthropic sk-ant-...")
-	sb.WriteString("\n  For multi-var providers (azure, vertex), use env var name directly:")
-	sb.WriteString("\n  e.g. /keys AZURE_OPENAI_ENDPOINT https://myresource.openai.azure.com")
-	return a.withMessage(sb.String()), nil
-}
-
-func (a App) handleKeysSet(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	parts := strings.SplitN(args, " ", 2)
-	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-		return a.withMessage("Usage: /keys <provider> <key>\n  e.g. /keys anthropic sk-ant-..."), nil
-	}
-
-	name := strings.TrimSpace(parts[0])
-	value := strings.TrimSpace(parts[1])
-	// Strip surrounding quotes from value.
-	if len(value) >= 2 {
-		if (value[0] == '"' && value[len(value)-1] == '"') ||
-			(value[0] == '\'' && value[len(value)-1] == '\'') {
-			value = value[1 : len(value)-1]
-		}
-	}
-
-	// Resolve name → env var. Check if it's a raw env var name first.
-	envVar := ""
-	for _, p := range config.ProviderEnvInfo() {
-		for _, v := range p.EnvVars {
-			if strings.EqualFold(name, v) {
-				envVar = v
-				break
-			}
-		}
-		if envVar != "" {
-			break
-		}
-	}
-	// If not a raw env var, treat as provider shorthand → primary key.
-	if envVar == "" {
-		for _, p := range config.ProviderEnvInfo() {
-			if strings.EqualFold(name, p.Name) {
-				envVar = p.EnvVars[0]
-				break
-			}
-		}
-	}
-	if envVar == "" {
-		var names []string
-		for _, p := range config.ProviderEnvInfo() {
-			names = append(names, p.Name)
-		}
-		return a.withMessage(fmt.Sprintf("Unknown provider %q. Available: %s", name, strings.Join(names, ", "))), nil
-	}
-
-	if err := config.SetEnvKey(".env", envVar, value); err != nil {
-		return a.withMessage(fmt.Sprintf("Error saving key: %v", err)), nil
-	}
-
-	// Reload config and rebuild adapters.
-	a.cfg = config.Load()
-	newAds, warnings := adapters.ListAdapters(a.cfg)
-	for _, w := range warnings {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
-	}
-	a.adapters = newAds
-	// Reconcile activeAdapters: keep only those still present.
-	if a.activeAdapters != nil {
-		newIDs := make(map[string]bool, len(newAds))
-		for _, ad := range newAds {
-			newIDs[ad.ID()] = true
-		}
-		var kept []models.ModelAdapter
-		for _, ad := range a.activeAdapters {
-			if newIDs[ad.ID()] {
-				kept = append(kept, ad)
-			}
-		}
-		if len(kept) == 0 {
-			a.activeAdapters = nil
-		} else {
-			a.activeAdapters = kept
-		}
-	}
-
-	var adIDs []string
-	for _, ad := range a.adapters {
-		adIDs = append(adIDs, ad.ID())
-	}
-	summary := fmt.Sprintf("Saved %s to .env.\nActive models: %s", envVar, strings.Join(adIDs, ", "))
-	if len(adIDs) == 0 {
-		summary = fmt.Sprintf("Saved %s to .env.\nNo models active yet — more keys may be needed.", envVar)
-	}
-	return a.withMessage(summary), nil
-}
-
 func helpText() string {
 	var sb strings.Builder
 	sb.WriteString("Commands:")
 	for _, c := range commands.All {
-		name := c.Name
-		if c.Name == "/model" {
-			name = "/model [id...]"
-		}
-		fmt.Fprintf(&sb, "\n  %-20s%s", name, c.Desc)
-	}
-	return sb.String()
-}
-
-// fmtPrice formats a per-million-token USD price compactly.
-// Always shows at least 2 decimal places ($0.80, not $0.8) and extends
-// precision for sub-cent values ($0.075).
-func fmtPrice(v float64) string {
-	if v >= 1 {
-		return fmt.Sprintf("$%.2f", v)
-	}
-	// Sub-dollar: use 4 decimal places, then trim trailing zeros
-	// keeping at least 2 decimal places for consistency.
-	s := fmt.Sprintf("%.4f", v)
-	dot := strings.Index(s, ".")
-	for len(s) > dot+3 && s[len(s)-1] == '0' {
-		s = s[:len(s)-1]
-	}
-	return "$" + s
-}
-
-// formatAvailableModels formats a ListAvailableModels result for display.
-// If activeSet is non-nil, models in the set are marked with *.
-func formatAvailableModels(results []adapters.ProviderModels, activeSet map[string]bool) string {
-	if len(results) == 0 {
-		return "No provider API keys configured."
-	}
-	var sb strings.Builder
-	sb.WriteString("Available models:")
-	for _, r := range results {
-		sb.WriteString("\n\n")
-		if r.Err != nil {
-			fmt.Fprintf(&sb, "%s — error: %v", r.Provider, r.Err)
-			continue
-		}
-		n := len(r.Models)
-		var header string
-		if r.TotalCount > n {
-			header = fmt.Sprintf("%s (%d of %d, chat only)", r.Provider, n, r.TotalCount)
-		} else {
-			header = fmt.Sprintf("%s (%d)", r.Provider, n)
-		}
-		sb.WriteString(header + ":")
-		cap := adapters.ModelListCap
-		shown := r.Models
-		if n > cap {
-			shown = r.Models[:cap]
-		}
-		for _, id := range shown {
-			marker := ""
-			if activeSet != nil && activeSet[id] {
-				marker = " *"
-			}
-			qid := pricing.ProviderQualifiedID(r.Provider, id)
-			if in, out, ok := pricing.PricingFor(qid); ok {
-				fmt.Fprintf(&sb, "\n  %s%s  (%s in / %s out /1M)", id, marker, fmtPrice(in), fmtPrice(out))
-			} else {
-				fmt.Fprintf(&sb, "\n  %s%s", id, marker)
-			}
-		}
-		if n > cap {
-			fmt.Fprintf(&sb, "\n  … and %d more", n-cap)
-		}
+		fmt.Fprintf(&sb, "\n  %-20s%s", c.Name, c.Desc)
 	}
 	return sb.String()
 }

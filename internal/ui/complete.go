@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/suarezc/errata/internal/config"
-	"github.com/suarezc/errata/internal/tools"
 )
 
 // maxHintLines is the maximum number of completion hint lines shown below the
@@ -110,20 +108,8 @@ func (a App) modelIDCandidates() []string { //nolint:gocritic // called from bub
 	return ids
 }
 
-// toolNameCandidates returns the names of all built-in and MCP tools.
-func (a App) toolNameCandidates() []string { //nolint:gocritic // called from bubbletea value-receiver methods
-	names := make([]string, 0, len(tools.Definitions)+len(a.mcpDefs))
-	for _, d := range tools.Definitions {
-		names = append(names, d.Name)
-	}
-	for _, d := range a.mcpDefs {
-		names = append(names, d.Name)
-	}
-	return names
-}
-
 // tryArgComplete attempts tab-completion of the last word for commands that
-// support argument completion (/model, /tools on, /tools off).
+// support argument completion (/config).
 // Returns the full replacement input line and true if completion occurred.
 func (a App) tryArgComplete(val string) (string, bool) { //nolint:gocritic // called from bubbletea value-receiver methods
 	lower := strings.ToLower(val)
@@ -133,13 +119,7 @@ func (a App) tryArgComplete(val string) (string, bool) { //nolint:gocritic // ca
 		candidates []string
 	}
 	cmds := []argCmd{
-		{"/model ", a.modelIDCandidates()},
-		{"/subset ", a.modelIDCandidates()},
-		{"/tools on ", a.toolNameCandidates()},
-		{"/tools off ", a.toolNameCandidates()},
 		{"/config ", interactiveSections},
-		{"/set ", configPathCandidates()},
-		{"/keys ", providerNameCandidates()},
 	}
 
 	for _, cmd := range cmds {
@@ -179,42 +159,3 @@ func (a App) tryMentionComplete(val string) (string, bool) { //nolint:gocritic /
 	return prefix + "@" + replacement, true
 }
 
-// providerNameCandidates returns shorthand names for all supported providers.
-func providerNameCandidates() []string {
-	providers := config.ProviderEnvInfo()
-	names := make([]string, len(providers))
-	for i, p := range providers {
-		names[i] = p.Name
-	}
-	return names
-}
-
-// renderModelHints writes matching model ID suggestions to sb (capped).
-func (a App) renderModelHints(sb *strings.Builder, partial string, nameStyle lipgloss.Style) { //nolint:gocritic // called from bubbletea value-receiver methods
-	lp := strings.ToLower(partial)
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	hw := newHintWriter(sb, dimStyle)
-	for _, id := range a.modelIDCandidates() {
-		if strings.HasPrefix(strings.ToLower(id), lp) {
-			hw.add(nameStyle.Render("  " + id))
-		}
-	}
-	hw.flush()
-}
-
-// renderToolHints writes matching tool name suggestions to sb (capped).
-func (a App) renderToolHints(sb *strings.Builder, partial string, nameStyle, descStyle lipgloss.Style) { //nolint:gocritic // called from bubbletea value-receiver methods
-	lp := strings.ToLower(partial)
-	hw := newHintWriter(sb, descStyle)
-	for _, d := range tools.Definitions {
-		if strings.HasPrefix(strings.ToLower(d.Name), lp) {
-			hw.add(nameStyle.Render("  " + d.Name))
-		}
-	}
-	for _, d := range a.mcpDefs {
-		if strings.HasPrefix(strings.ToLower(d.Name), lp) {
-			hw.add(nameStyle.Render("  "+d.Name) + descStyle.Render("  (mcp)"))
-		}
-	}
-	hw.flush()
-}

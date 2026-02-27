@@ -475,55 +475,6 @@ func TestHandleConfigCommand_Reset(t *testing.T) {
 	assert.False(t, app.recipeModified)
 }
 
-// ── /set command handler ────────────────────────────────────────────────────
-
-func TestHandleSetCommand_QueryMode(t *testing.T) {
-	ads := []models.ModelAdapter{uiStub{"m1"}}
-	a := newAppForTest(t, ads)
-	a.sessionRecipe = &recipe.Recipe{}
-	a.sessionRecipe.Constraints.Timeout = 5 * time.Minute
-	result, _ := a.handleSetCommand("constraints.timeout")
-	app := result.(App)
-	last := app.feed[len(app.feed)-1].text
-	assert.Contains(t, last, "5m0s")
-}
-
-func TestHandleSetCommand_SetValue(t *testing.T) {
-	ads := []models.ModelAdapter{uiStub{"m1"}}
-	a := newAppForTest(t, ads)
-	result, _ := a.handleSetCommand("constraints.timeout 15m")
-	app := result.(App)
-	assert.True(t, app.recipeModified)
-	assert.Equal(t, 15*time.Minute, app.sessionRecipe.Constraints.Timeout)
-	last := app.feed[len(app.feed)-1].text
-	assert.Contains(t, last, "Set constraints.timeout = 15m")
-}
-
-func TestHandleSetCommand_InvalidPath(t *testing.T) {
-	a := newAppForTest(t, nil)
-	result, _ := a.handleSetCommand("bogus.path value")
-	app := result.(App)
-	last := app.feed[len(app.feed)-1].text
-	assert.Contains(t, last, "Error")
-	assert.Contains(t, last, "unknown config path")
-}
-
-func TestHandleSetCommand_InvalidValue(t *testing.T) {
-	a := newAppForTest(t, nil)
-	result, _ := a.handleSetCommand("constraints.timeout not-a-duration")
-	app := result.(App)
-	last := app.feed[len(app.feed)-1].text
-	assert.Contains(t, last, "Error")
-}
-
-func TestHandleSetCommand_BareShowsUsage(t *testing.T) {
-	a := newAppForTest(t, nil)
-	result, _ := a.handleSetCommand("")
-	app := result.(App)
-	last := app.feed[len(app.feed)-1].text
-	assert.Contains(t, last, "Usage")
-}
-
 // ── /config overlay key navigation ──────────────────────────────────────────
 
 func TestConfigOverlay_EscapeCloses(t *testing.T) {
@@ -552,7 +503,7 @@ func TestConfigOverlay_UpDown(t *testing.T) {
 	assert.Equal(t, 0, app.configSelectedIdx)
 }
 
-// ── tab-completion for /config and /set ─────────────────────────────────────
+// ── tab-completion for /config ───────────────────────────────────────────────
 
 func TestTryArgComplete_ConfigSection(t *testing.T) {
 	a := newAppForTest(t, nil)
@@ -561,15 +512,6 @@ func TestTryArgComplete_ConfigSection(t *testing.T) {
 		t.Fatal("expected completion")
 	}
 	assert.Contains(t, result, "/config sandbox ")
-}
-
-func TestTryArgComplete_SetPath(t *testing.T) {
-	a := newAppForTest(t, nil)
-	result, ok := a.tryArgComplete("/set constraints.t")
-	if !ok {
-		t.Fatal("expected completion")
-	}
-	assert.Contains(t, result, "/set constraints.timeout ")
 }
 
 // ── modified badge in View ──────────────────────────────────────────────────
@@ -715,20 +657,6 @@ func TestTextSections_HavePaths(t *testing.T) {
 			assert.True(t, ok, "text section %q Path %q not in configPaths", sec.Name, sec.Path)
 		}
 	}
-}
-
-func TestHandleSetCommand_SystemPrompt(t *testing.T) {
-	a := newAppForTest(t, nil)
-	result, _ := a.handleSetCommand("system_prompt Hello world")
-	app := result.(App)
-	assert.True(t, app.recipeModified)
-	assert.Equal(t, "Hello world", app.sessionRecipe.SystemPrompt)
-
-	// Query the value back.
-	result2, _ := app.handleSetCommand("system_prompt")
-	app2 := result2.(App)
-	last := app2.feed[len(app2.feed)-1].text
-	assert.Contains(t, last, "Hello world")
 }
 
 func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {

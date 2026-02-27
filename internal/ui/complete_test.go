@@ -101,106 +101,11 @@ func TestLastWord(t *testing.T) {
 
 // ─── tryArgComplete integration tests ───────────────────────────────────────
 
-func TestTryArgComplete_ModelSingleMatch(t *testing.T) {
-	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"gpt-4o"}})
-	result, ok := a.tryArgComplete("/model gpt")
-	if !ok {
-		t.Fatal("expected completion")
-	}
-	if result != "/model gpt-4o " {
-		t.Errorf("got %q, want %q", result, "/model gpt-4o ")
-	}
-}
-
-func TestTryArgComplete_ModelMultipleMatches(t *testing.T) {
-	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"claude-opus-4-6"}})
-	result, ok := a.tryArgComplete("/model claude")
-	if !ok {
-		t.Fatal("expected completion")
-	}
-	if result != "/model claude-" {
-		t.Errorf("got %q, want %q", result, "/model claude-")
-	}
-}
-
-func TestTryArgComplete_MultiWord(t *testing.T) {
-	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"gpt-4o"}})
-	result, ok := a.tryArgComplete("/model claude-sonnet-4-6 gpt")
-	if !ok {
-		t.Fatal("expected completion")
-	}
-	if result != "/model claude-sonnet-4-6 gpt-4o " {
-		t.Errorf("got %q, want %q", result, "/model claude-sonnet-4-6 gpt-4o ")
-	}
-}
-
-func TestTryArgComplete_ToolsOff(t *testing.T) {
-	a := newAppForTest(t, nil)
-	result, ok := a.tryArgComplete("/tools off ba")
-	if !ok {
-		t.Fatal("expected completion")
-	}
-	if result != "/tools off bash " {
-		t.Errorf("got %q, want %q", result, "/tools off bash ")
-	}
-}
-
-func TestTryArgComplete_ToolsOn(t *testing.T) {
-	a := newAppForTest(t, nil)
-	result, ok := a.tryArgComplete("/tools on rea")
-	if !ok {
-		t.Fatal("expected completion")
-	}
-	if result != "/tools on read_file " {
-		t.Errorf("got %q, want %q", result, "/tools on read_file ")
-	}
-}
-
-func TestTryArgComplete_NoMatch(t *testing.T) {
-	a := newAppForTest(t, []models.ModelAdapter{uiStub{"gpt-4o"}})
-	_, ok := a.tryArgComplete("/model xyz")
-	if ok {
-		t.Error("expected no completion for unknown prefix")
-	}
-}
-
 func TestTryArgComplete_NotAnArgCommand(t *testing.T) {
 	a := newAppForTest(t, nil)
 	_, ok := a.tryArgComplete("/verbose")
 	if ok {
 		t.Error("expected no completion for /verbose")
-	}
-}
-
-func TestTryArgComplete_BareModelNoArgs(t *testing.T) {
-	// "/model" without trailing space should not trigger arg completion
-	// (it should fall through to command-name completion instead).
-	a := newAppForTest(t, []models.ModelAdapter{uiStub{"gpt-4o"}})
-	_, ok := a.tryArgComplete("/model")
-	if ok {
-		t.Error("expected no arg completion for bare /model without space")
-	}
-}
-
-func TestTryArgComplete_SubsetSingleMatch(t *testing.T) {
-	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"gpt-4o"}})
-	result, ok := a.tryArgComplete("/subset gpt")
-	if !ok {
-		t.Fatal("expected completion")
-	}
-	if result != "/subset gpt-4o " {
-		t.Errorf("got %q, want %q", result, "/subset gpt-4o ")
-	}
-}
-
-func TestTryArgComplete_SubsetMultipleMatches(t *testing.T) {
-	a := newAppForTest(t, []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}, uiStub{"claude-opus-4-6"}})
-	result, ok := a.tryArgComplete("/subset claude")
-	if !ok {
-		t.Fatal("expected completion")
-	}
-	if result != "/subset claude-" {
-		t.Errorf("got %q, want %q", result, "/subset claude-")
 	}
 }
 
