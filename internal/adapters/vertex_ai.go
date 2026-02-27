@@ -11,7 +11,6 @@ import (
 
 	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
-	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -98,18 +97,10 @@ func (a *VertexAIAdapter) RunAgent(
 		return BuildErrorResponse(a.modelID, qualifiedID, start, 0, 0, err), err
 	}
 
-	// Resolve system prompt: prefer payload from context, fall back to built-in.
-	var systemMsg string
-	var toolDescOverrides map[string]string
-	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
-		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
-		toolDescOverrides = payload.ToolDescriptions
-	} else {
-		systemMsg = tools.SystemPromptSuffix()
-	}
+	systemMsg := tools.SystemPromptSuffix()
 
 	config := &genai.GenerateContentConfig{
-		Tools:             buildGeminiTools(ctx, toolDescOverrides),
+		Tools:             buildGeminiTools(ctx),
 		SystemInstruction: genai.NewContentFromText(systemMsg, ""),
 	}
 	if seed, ok := tools.SeedFromContext(ctx); ok {

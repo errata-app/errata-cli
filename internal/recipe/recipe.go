@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/suarezc/errata/internal/config"
-	"github.com/suarezc/errata/internal/prompt"
 )
 
 //go:embed default.recipe.md
@@ -49,21 +48,11 @@ type Recipe struct {
 	SuccessCriteria []string
 	Metadata        MetadataConfig
 
-	// ── Variant/override system (Gaps 1-3, 6) ────────────────────────────
+	// Uniform per-tool description overrides (applied to all models).
+	ToolDescriptions map[string]string // tool_name → description
 
-	// Gap 1: per-model system prompt variants/overrides
-	SystemPromptVariants  map[string]string // variant_name → content
-	SystemPromptOverrides map[string]string // model_id or "provider:" → content or variant ref
-
-	// Gap 2: per-tool description variants/overrides
-	ToolDescriptions         map[string]string            // tool_name → description
-	ToolDescriptionVariants  map[string]map[string]string // tool → variant → description
-	ToolDescriptionOverrides map[string]map[string]string // model → tool → description
-
-	// Gap 3: sub-agent mode prompts with variants/overrides
-	SubAgentModes         map[string]string            // mode_name → prompt
-	SubAgentModeVariants  map[string]map[string]string // mode → variant → prompt
-	SubAgentModeOverrides map[string]map[string]string // model → mode → prompt
+	// Sub-agent mode prompts (applied to all models).
+	SubAgentModes map[string]string // mode_name → prompt
 
 	// Gap 4: conditional mid-conversation injections
 	SystemReminders []SystemReminderConfig
@@ -71,13 +60,11 @@ type Recipe struct {
 	// Gap 5: lifecycle event hooks
 	Hooks []HookConfig
 
-	// Gap 6: context summarization prompt with variants
-	SummarizationPrompt         string
-	SummarizationPromptVariants map[string]string // variant_name → prompt
+	// Context summarization prompt (applied to all models).
+	SummarizationPrompt string
 
-	// Gap 7: deterministic output processing rules
-	OutputProcessing          map[string]OutputRuleConfig            // tool → rule
-	OutputProcessingOverrides map[string]map[string]OutputRuleConfig // model → tool → rule
+	// Deterministic output processing rules (applied to all models).
+	OutputProcessing map[string]OutputRuleConfig // tool → rule
 
 	// Model profiles for capability overrides
 	ModelProfiles map[string]ModelProfileConfig // model_id → profile
@@ -180,7 +167,6 @@ type OutputRuleConfig struct {
 type ModelProfileConfig struct {
 	ContextBudget  int    // override context budget (0 = not set)
 	ToolFormat     string // "native", "function_calling", "text_in_prompt" ("" = not set)
-	Tier           string // maps to variant names for section resolution
 	SystemRole     *bool  // nil = not set
 	MidConvoSystem *bool  // nil = not set
 }
@@ -281,47 +267,29 @@ func parseBytes(data []byte) (*Recipe, error) {
 			r.SuccessCriteria = parseList(body)
 		case "metadata":
 			r.Metadata = parseMetadata(body)
-		// ── Gap 1: System Prompt variants/overrides ──
-		case "system prompt variants":
-			r.SystemPromptVariants = parseSubSectionMap(body)
-		case "system prompt overrides":
-			r.SystemPromptOverrides = parseSubSectionMap(body)
-
-		// ── Gap 2: Tool Descriptions ──
+		// ── Tool Descriptions ──
 		case "tool descriptions":
 			r.ToolDescriptions = parseSubSectionMap(body)
-		case "tool description variants":
-			r.ToolDescriptionVariants = parseTwoLevelMap(body)
-		case "tool description overrides":
-			r.ToolDescriptionOverrides = parseTwoLevelMap(body)
 
-		// ── Gap 3: Sub-Agent Modes ──
+		// ── Sub-Agent Modes ──
 		case "sub-agent modes":
 			r.SubAgentModes = parseSubSectionMap(body)
-		case "sub-agent mode variants":
-			r.SubAgentModeVariants = parseTwoLevelMap(body)
-		case "sub-agent mode overrides":
-			r.SubAgentModeOverrides = parseTwoLevelMap(body)
 
-		// ── Gap 4: System Reminders ──
+		// ── System Reminders ──
 		case "system reminders":
 			r.SystemReminders = parseSystemReminders(body)
 
-		// ── Gap 5: Hooks ──
+		// ── Hooks ──
 		case "hooks":
 			r.Hooks = parseHooks(body)
 
-		// ── Gap 6: Summarization ──
+		// ── Summarization ──
 		case "context summarization prompt":
 			r.SummarizationPrompt = parseProse(body)
-		case "context summarization prompt variants":
-			r.SummarizationPromptVariants = parseSubSectionMap(body)
 
-		// ── Gap 7: Output Processing ──
+		// ── Output Processing ──
 		case "output processing":
 			r.OutputProcessing = parseOutputRules(body)
-		case "output processing overrides":
-			r.OutputProcessingOverrides = parseOutputOverrides(body)
 
 		// ── Model Profiles ──
 		case "model profiles":
@@ -390,11 +358,6 @@ type subSection struct {
 // Returns one subSection per ### block. Lines before the first ### are ignored.
 func splitSubSections(body string) []subSection {
 	return splitOnPrefix(body, "### ")
-}
-
-// splitDeepSubSections splits a sub-section body on "#### " header boundaries.
-func splitDeepSubSections(body string) []subSection {
-	return splitOnPrefix(body, "#### ")
 }
 
 // splitOnPrefix splits body into named blocks at lines starting with prefix.
@@ -479,28 +442,6 @@ func parseSubSectionMap(body string) map[string]string {
 	return m
 }
 
-// parseTwoLevelMap parses a section body into a map[outer]map[inner]content
-// using ### for outer keys and #### for inner keys.
-func parseTwoLevelMap(body string) map[string]map[string]string {
-	outers := splitSubSections(body)
-	if len(outers) == 0 {
-		return nil
-	}
-	m := make(map[string]map[string]string, len(outers))
-	for _, outer := range outers {
-		inners := splitDeepSubSections(outer.body)
-		if len(inners) == 0 {
-			continue
-		}
-		inner := make(map[string]string, len(inners))
-		for _, s := range inners {
-			inner[s.name] = s.body
-		}
-		m[outer.name] = inner
-	}
-	return m
-}
-
 // parseSystemReminders parses ### sub-sections into SystemReminderConfig entries.
 func parseSystemReminders(body string) []SystemReminderConfig {
 	subs := splitSubSections(body)
@@ -554,27 +495,6 @@ func parseOutputRules(body string) map[string]OutputRuleConfig {
 	return m
 }
 
-// parseOutputOverrides parses ### model / #### tool sub-sections.
-func parseOutputOverrides(body string) map[string]map[string]OutputRuleConfig {
-	outers := splitSubSections(body)
-	if len(outers) == 0 {
-		return nil
-	}
-	m := make(map[string]map[string]OutputRuleConfig, len(outers))
-	for _, outer := range outers {
-		inners := splitDeepSubSections(outer.body)
-		if len(inners) == 0 {
-			continue
-		}
-		inner := make(map[string]OutputRuleConfig, len(inners))
-		for _, s := range inners {
-			inner[s.name] = parseOneOutputRule(s.body)
-		}
-		m[outer.name] = inner
-	}
-	return m
-}
-
 // parseOneOutputRule parses key:value pairs into an OutputRuleConfig.
 func parseOneOutputRule(body string) OutputRuleConfig {
 	kv := parseMap(body)
@@ -618,9 +538,6 @@ func parseModelProfiles(body string) map[string]ModelProfileConfig {
 		}
 		if v, ok := kv["tool_format"]; ok {
 			p.ToolFormat = v
-		}
-		if v, ok := kv["tier"]; ok {
-			p.Tier = v
 		}
 		if v, ok := kv["system_role"]; ok {
 			b := strings.EqualFold(v, "true")
@@ -915,121 +832,6 @@ func (r *Recipe) ApplyTo(cfg *config.Config) {
 	if r.ModelParams.Seed != nil {
 		cfg.Seed = r.ModelParams.Seed
 	}
-}
-
-// ─── VariantSet helpers ─────────────────────────────────────────────────────
-
-// SystemPromptVS returns a VariantSet for the system prompt section.
-func (r *Recipe) SystemPromptVS() prompt.VariantSet {
-	return prompt.VariantSet{
-		Default:   r.SystemPrompt,
-		Variants:  r.SystemPromptVariants,
-		Overrides: r.SystemPromptOverrides,
-	}
-}
-
-// ToolDescriptionVS returns a VariantSet for a specific tool's description.
-func (r *Recipe) ToolDescriptionVS(toolName string) prompt.VariantSet {
-	var overrides map[string]string
-	if len(r.ToolDescriptionOverrides) > 0 {
-		// Flatten: model → tool → desc becomes tool-specific overrides keyed by model
-		overrides = make(map[string]string)
-		for model, tools := range r.ToolDescriptionOverrides {
-			if desc, ok := tools[toolName]; ok {
-				overrides[model] = desc
-			}
-		}
-		if len(overrides) == 0 {
-			overrides = nil
-		}
-	}
-	return prompt.VariantSet{
-		Default:   r.ToolDescriptions[toolName],
-		Variants:  r.ToolDescriptionVariants[toolName],
-		Overrides: overrides,
-	}
-}
-
-// SubAgentModeVS returns a VariantSet for a specific sub-agent mode.
-func (r *Recipe) SubAgentModeVS(modeName string) prompt.VariantSet {
-	var overrides map[string]string
-	if len(r.SubAgentModeOverrides) > 0 {
-		overrides = make(map[string]string)
-		for model, modes := range r.SubAgentModeOverrides {
-			if p, ok := modes[modeName]; ok {
-				overrides[model] = p
-			}
-		}
-		if len(overrides) == 0 {
-			overrides = nil
-		}
-	}
-	return prompt.VariantSet{
-		Default:   r.SubAgentModes[modeName],
-		Variants:  r.SubAgentModeVariants[modeName],
-		Overrides: overrides,
-	}
-}
-
-// SummarizationVS returns a VariantSet for the summarization prompt.
-func (r *Recipe) SummarizationVS() prompt.VariantSet {
-	return prompt.VariantSet{
-		Default:  r.SummarizationPrompt,
-		Variants: r.SummarizationPromptVariants,
-	}
-}
-
-// AllToolDescriptionNames returns all tool names that have any description content
-// across base descriptions, variants, or overrides.
-func (r *Recipe) AllToolDescriptionNames() []string {
-	seen := make(map[string]bool)
-	for name := range r.ToolDescriptions {
-		seen[name] = true
-	}
-	for name := range r.ToolDescriptionVariants {
-		seen[name] = true
-	}
-	for _, tools := range r.ToolDescriptionOverrides {
-		for name := range tools {
-			seen[name] = true
-		}
-	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	return names
-}
-
-// AllSubAgentModeNames returns all mode names that have any prompt content
-// across base modes, variants, or overrides.
-func (r *Recipe) AllSubAgentModeNames() []string {
-	seen := make(map[string]bool)
-	for name := range r.SubAgentModes {
-		seen[name] = true
-	}
-	for name := range r.SubAgentModeVariants {
-		seen[name] = true
-	}
-	for _, modes := range r.SubAgentModeOverrides {
-		for name := range modes {
-			seen[name] = true
-		}
-	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	return names
-}
-
-// TierForModel returns the tier string from the model's profile, if any.
-// Returns "" when the model has no profile or no tier set.
-func (r *Recipe) TierForModel(modelID string) string {
-	if profile, ok := r.ModelProfiles[modelID]; ok {
-		return profile.Tier
-	}
-	return ""
 }
 
 // MarshalMarkdown serializes the recipe back to the Markdown format used by

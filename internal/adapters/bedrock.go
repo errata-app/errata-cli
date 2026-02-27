@@ -13,7 +13,6 @@ import (
 
 	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
-	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -74,17 +73,9 @@ func (a *BedrockAdapter) RunAgent(
 	}
 	client := bedrockruntime.NewFromConfig(awsCfg)
 
-	// Resolve system prompt: prefer payload from context, fall back to built-in.
-	var systemMsg string
-	var toolDescOverrides map[string]string
-	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
-		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
-		toolDescOverrides = payload.ToolDescriptions
-	} else {
-		systemMsg = tools.SystemPromptSuffix()
-	}
+	systemMsg := tools.SystemPromptSuffix()
 
-	toolConfig := buildBedrockToolConfig(ctx, toolDescOverrides)
+	toolConfig := buildBedrockToolConfig(ctx)
 
 	// Build message history.
 	messages := make([]bedrocktypes.Message, 0, len(history)+1)
@@ -223,7 +214,7 @@ func (a *BedrockAdapter) RunAgent(
 }
 
 // buildBedrockToolConfig translates active tool definitions into Bedrock's ToolConfiguration.
-func buildBedrockToolConfig(ctx context.Context, descOverrides map[string]string) *bedrocktypes.ToolConfiguration {
+func buildBedrockToolConfig(ctx context.Context) *bedrocktypes.ToolConfiguration {
 	defs := tools.ActiveToolsFromContext(ctx)
 	if len(defs) == 0 {
 		return nil
@@ -242,9 +233,6 @@ func buildBedrockToolConfig(ctx context.Context, descOverrides map[string]string
 		copy(required, def.Required)
 
 		desc := def.Description
-		if d, ok := descOverrides[def.Name]; ok {
-			desc = d
-		}
 
 		schema := map[string]any{
 			"type":       "object",

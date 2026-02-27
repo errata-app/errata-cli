@@ -244,7 +244,7 @@ func CompactHistories(
 		if len(h) == 0 {
 			continue
 		}
-		sumPrompt := prompt.ResolveSummarizationPrompt(ctx, adapter.ID())
+		sumPrompt := prompt.ResolveSummarizationPrompt(ctx)
 		resp, err := adapter.RunAgent(ctx, h, sumPrompt, func(e models.AgentEvent) {
 			if onEvent != nil {
 				onEvent(adapter.ID(), e)

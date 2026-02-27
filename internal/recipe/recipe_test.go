@@ -276,9 +276,9 @@ func TestDiscover_FallsBackToEmbeddedDefault(t *testing.T) {
 	r, err := recipe.Discover("")
 	require.NoError(t, err)
 	require.NotNil(t, r)
-	// Default recipe sets context strategy and sub-agent depth.
+	// Default recipe sets context strategy (sub-agent depth gated by SubagentEnabled).
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.Equal(t, 1, r.SubAgent.MaxDepth)
+	assert.Equal(t, -1, r.SubAgent.MaxDepth, "default recipe no longer sets sub-agent depth (feature gated)")
 }
 
 func TestDiscover_CwdRecipeMd(t *testing.T) {
@@ -498,69 +498,8 @@ func TestDefault_IsNonNil(t *testing.T) {
 	r := recipe.Default()
 	require.NotNil(t, r)
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.Equal(t, 1, r.SubAgent.MaxDepth)
+	assert.Equal(t, -1, r.SubAgent.MaxDepth, "default recipe no longer sets sub-agent depth (feature gated)")
 	assert.Equal(t, 5*time.Minute, r.Constraints.Timeout)
-}
-
-// ─── Gap 1: System Prompt Variants/Overrides ─────────────────────────────────
-
-func TestParse_SystemPromptVariants(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## System Prompt
-Full system prompt here.
-
-## System Prompt Variants
-### concise
-Short prompt.
-
-### minimal
-Tiny prompt.
-`))
-	require.NoError(t, err)
-	assert.Equal(t, "Full system prompt here.", r.SystemPrompt)
-	require.Len(t, r.SystemPromptVariants, 2)
-	assert.Equal(t, "Short prompt.", r.SystemPromptVariants["concise"])
-	assert.Equal(t, "Tiny prompt.", r.SystemPromptVariants["minimal"])
-}
-
-func TestParse_SystemPromptOverrides(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## System Prompt Overrides
-### gpt-4o
-Custom GPT-4o prompt.
-
-### gemini-2.0-flash
-concise
-`))
-	require.NoError(t, err)
-	require.Len(t, r.SystemPromptOverrides, 2)
-	assert.Equal(t, "Custom GPT-4o prompt.", r.SystemPromptOverrides["gpt-4o"])
-	assert.Equal(t, "concise", r.SystemPromptOverrides["gemini-2.0-flash"])
-}
-
-func TestRecipe_SystemPromptVS(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## System Prompt
-Default prompt.
-
-## System Prompt Variants
-### concise
-Short.
-
-## System Prompt Overrides
-### gpt-4o
-concise
-`))
-	require.NoError(t, err)
-	vs := r.SystemPromptVS()
-	assert.Equal(t, "Default prompt.", vs.Default)
-
-	content, src := vs.Resolve("gpt-4o", "openai", "")
-	assert.Equal(t, "Short.", content)
-	assert.Contains(t, src, "variant:concise")
-
-	content, _ = vs.Resolve("unknown", "", "")
-	assert.Equal(t, "Default prompt.", content)
 }
 
 // ─── Gap 2: Tool Descriptions ────────────────────────────────────────────────
@@ -581,60 +520,6 @@ Read files to understand code.
 	assert.Contains(t, r.ToolDescriptions["read_file"], "Read files")
 }
 
-func TestParse_ToolDescriptionVariants(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Tool Description Variants
-### bash
-#### concise
-Run shell commands. Check exit codes.
-#### minimal
-Shell access.
-`))
-	require.NoError(t, err)
-	require.Contains(t, r.ToolDescriptionVariants, "bash")
-	assert.Equal(t, "Run shell commands. Check exit codes.", r.ToolDescriptionVariants["bash"]["concise"])
-	assert.Equal(t, "Shell access.", r.ToolDescriptionVariants["bash"]["minimal"])
-}
-
-func TestParse_ToolDescriptionOverrides(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Tool Description Overrides
-### gpt-4o
-#### bash
-GPT-4o specific bash description.
-`))
-	require.NoError(t, err)
-	require.Contains(t, r.ToolDescriptionOverrides, "gpt-4o")
-	assert.Equal(t, "GPT-4o specific bash description.", r.ToolDescriptionOverrides["gpt-4o"]["bash"])
-}
-
-func TestRecipe_ToolDescriptionVS(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Tool Descriptions
-### bash
-Default bash description.
-
-## Tool Description Variants
-### bash
-#### concise
-Short bash.
-
-## Tool Description Overrides
-### gpt-4o
-#### bash
-concise
-`))
-	require.NoError(t, err)
-	vs := r.ToolDescriptionVS("bash")
-	assert.Equal(t, "Default bash description.", vs.Default)
-
-	content, _ := vs.Resolve("gpt-4o", "openai", "")
-	assert.Equal(t, "Short bash.", content)
-
-	content, _ = vs.Resolve("unknown", "", "")
-	assert.Equal(t, "Default bash description.", content)
-}
-
 // ─── Gap 3: Sub-Agent Modes ─────────────────────────────────────────────────
 
 func TestParse_SubAgentModes(t *testing.T) {
@@ -650,18 +535,6 @@ You are a planning specialist. Do NOT make changes.
 	require.Len(t, r.SubAgentModes, 2)
 	assert.Contains(t, r.SubAgentModes["explore"], "READ-ONLY")
 	assert.Contains(t, r.SubAgentModes["plan"], "planning specialist")
-}
-
-func TestParse_SubAgentModeVariants(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Sub-Agent Mode Variants
-### explore
-#### concise
-Read-only codebase search. Return file paths and findings.
-`))
-	require.NoError(t, err)
-	require.Contains(t, r.SubAgentModeVariants, "explore")
-	assert.Contains(t, r.SubAgentModeVariants["explore"]["concise"], "Read-only codebase search")
 }
 
 // ─── Gap 4: System Reminders ─────────────────────────────────────────────────
@@ -738,17 +611,6 @@ Summarize for context continuity. Preserve: file paths, decisions.
 	assert.Contains(t, r.SummarizationPrompt, "context continuity")
 }
 
-func TestParse_SummarizationPromptVariants(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Context Summarization Prompt Variants
-### concise
-Summarize. Keep: file paths, decisions.
-`))
-	require.NoError(t, err)
-	require.Len(t, r.SummarizationPromptVariants, 1)
-	assert.Contains(t, r.SummarizationPromptVariants["concise"], "Summarize")
-}
-
 // ─── Gap 7: Output Processing ────────────────────────────────────────────────
 
 func TestParse_OutputProcessing(t *testing.T) {
@@ -776,19 +638,6 @@ truncation: head
 	assert.Equal(t, "head", wf.Truncation)
 }
 
-func TestParse_OutputProcessingOverrides(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Output Processing Overrides
-### gemini-2.0-flash
-#### bash
-max_lines: 50
-truncation: tail
-`))
-	require.NoError(t, err)
-	require.Contains(t, r.OutputProcessingOverrides, "gemini-2.0-flash")
-	assert.Equal(t, 50, r.OutputProcessingOverrides["gemini-2.0-flash"]["bash"].MaxLines)
-}
-
 // ─── Model Profiles ──────────────────────────────────────────────────────────
 
 func TestParse_ModelProfiles(t *testing.T) {
@@ -800,7 +649,7 @@ tool_format: function_calling
 mid_convo_system: false
 
 ### gemini-2.0-flash
-tier: minimal
+context_budget: 1000000
 `))
 	require.NoError(t, err)
 	require.Len(t, r.ModelProfiles, 2)
@@ -812,8 +661,7 @@ tier: minimal
 	assert.False(t, *gpt.MidConvoSystem)
 
 	gemini := r.ModelProfiles["gemini-2.0-flash"]
-	assert.Equal(t, "minimal", gemini.Tier)
-	assert.Equal(t, 0, gemini.ContextBudget)
+	assert.Equal(t, 1000000, gemini.ContextBudget)
 }
 
 // ─── Backward Compatibility ──────────────────────────────────────────────────
@@ -830,14 +678,6 @@ func TestParse_FullRecipe_BackwardCompat(t *testing.T) {
 
 ## System Prompt
 You are working on a Go monorepo.
-
-## System Prompt Variants
-### concise
-Go monorepo. Test after changes.
-
-## System Prompt Overrides
-### gpt-4o
-Custom GPT prompt.
 
 ## Tools
 - read_file
@@ -914,8 +754,6 @@ seed: 42
 	assert.Equal(t, int64(42), *r.ModelParams.Seed)
 
 	// New sections also parsed.
-	assert.Len(t, r.SystemPromptVariants, 1)
-	assert.Len(t, r.SystemPromptOverrides, 1)
 	assert.Len(t, r.ToolDescriptions, 1)
 	assert.Len(t, r.ModelProfiles, 1)
 	assert.Len(t, r.SubAgentModes, 1)
@@ -936,18 +774,6 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Equal(t, "My Project Recipe", r.Name)
 	assert.Len(t, r.Models, 3)
 
-	// System Prompt Variants
-	require.NotNil(t, r.SystemPromptVariants)
-	assert.Contains(t, r.SystemPromptVariants, "concise")
-	assert.Contains(t, r.SystemPromptVariants, "minimal")
-	assert.Contains(t, r.SystemPromptVariants["concise"], "Go monorepo")
-
-	// System Prompt Overrides
-	require.NotNil(t, r.SystemPromptOverrides)
-	assert.Contains(t, r.SystemPromptOverrides, "gpt-4o")
-	assert.Contains(t, r.SystemPromptOverrides, "gemini-2.0-flash")
-	assert.Equal(t, "concise", r.SystemPromptOverrides["gemini-2.0-flash"])
-
 	// Tool Descriptions
 	require.NotNil(t, r.ToolDescriptions)
 	assert.Contains(t, r.ToolDescriptions, "bash")
@@ -955,33 +781,11 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Contains(t, r.ToolDescriptions, "search_code")
 	assert.Contains(t, r.ToolDescriptions["bash"], "exit codes")
 
-	// Tool Description Variants
-	require.NotNil(t, r.ToolDescriptionVariants)
-	assert.Contains(t, r.ToolDescriptionVariants["bash"], "concise")
-	assert.Contains(t, r.ToolDescriptionVariants["search_code"], "concise")
-
-	// Tool Description Overrides
-	require.NotNil(t, r.ToolDescriptionOverrides)
-	assert.Contains(t, r.ToolDescriptionOverrides, "gemini-2.0-flash")
-	assert.Contains(t, r.ToolDescriptionOverrides["gemini-2.0-flash"], "bash")
-	assert.Contains(t, r.ToolDescriptionOverrides["gemini-2.0-flash"], "search_code")
-
-	// Sub-Agent Modes
-	require.NotNil(t, r.SubAgentModes)
-	assert.Contains(t, r.SubAgentModes, "explore")
-	assert.Contains(t, r.SubAgentModes, "plan")
-	assert.Contains(t, r.SubAgentModes["explore"], "read-only")
-
-	// Sub-Agent Mode Variants
-	require.NotNil(t, r.SubAgentModeVariants)
-	assert.Contains(t, r.SubAgentModeVariants["explore"], "concise")
+	// Sub-Agent Modes removed from example recipe (feature gated).
+	assert.Empty(t, r.SubAgentModes)
 
 	// Context Summarization Prompt
 	assert.Contains(t, r.SummarizationPrompt, "Summarize this conversation")
-
-	// Context Summarization Prompt Variants
-	require.NotNil(t, r.SummarizationPromptVariants)
-	assert.Contains(t, r.SummarizationPromptVariants, "concise")
 
 	// System Reminders
 	require.Len(t, r.SystemReminders, 4)
@@ -1016,13 +820,6 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Equal(t, "head_tail", r.OutputProcessing["search_code"].Truncation)
 	assert.Equal(t, 500, r.OutputProcessing["read_file"].MaxLines)
 
-	// Output Processing Overrides
-	require.NotNil(t, r.OutputProcessingOverrides)
-	geminiRules := r.OutputProcessingOverrides["gemini-2.0-flash"]
-	require.NotNil(t, geminiRules)
-	assert.Equal(t, 50, geminiRules["bash"].MaxLines)
-	assert.Equal(t, 30, geminiRules["search_code"].MaxLines)
-
 	// Model Profiles
 	require.NotNil(t, r.ModelProfiles)
 	gpt := r.ModelProfiles["gpt-4o"]
@@ -1031,150 +828,12 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 
 	gemini := r.ModelProfiles["gemini-2.0-flash"]
 	assert.Equal(t, 1000000, gemini.ContextBudget)
-	assert.Equal(t, "concise", gemini.Tier)
 
 	llama := r.ModelProfiles["local-llama"]
 	assert.Equal(t, 8192, llama.ContextBudget)
 	assert.Equal(t, "text_in_prompt", llama.ToolFormat)
-	assert.Equal(t, "minimal", llama.Tier)
 	require.NotNil(t, llama.MidConvoSystem)
 	assert.False(t, *llama.MidConvoSystem)
-}
-
-// ─── VariantSet helper coverage ──────────────────────────────────────────────
-
-func TestRecipe_SubAgentModeVS(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Sub-Agent Modes
-### explore
-Read-only exploration.
-
-## Sub-Agent Mode Variants
-### explore
-#### concise
-Explore briefly.
-
-## Sub-Agent Mode Overrides
-### gpt-4o
-#### explore
-concise
-`))
-	require.NoError(t, err)
-
-	vs := r.SubAgentModeVS("explore")
-	assert.Equal(t, "Read-only exploration.", vs.Default)
-
-	content, src := vs.Resolve("gpt-4o", "openai", "")
-	assert.Equal(t, "Explore briefly.", content)
-	assert.Contains(t, src, "variant:concise")
-
-	content, _ = vs.Resolve("unknown", "", "")
-	assert.Equal(t, "Read-only exploration.", content)
-}
-
-func TestRecipe_SubAgentModeVS_NoOverrides(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Sub-Agent Modes
-### explore
-Read-only.
-`))
-	require.NoError(t, err)
-	vs := r.SubAgentModeVS("explore")
-	assert.Equal(t, "Read-only.", vs.Default)
-	assert.Nil(t, vs.Overrides)
-}
-
-func TestRecipe_SummarizationVS(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Context Summarization Prompt
-Summarize the conversation.
-
-## Context Summarization Prompt Variants
-### concise
-Brief summary.
-`))
-	require.NoError(t, err)
-	vs := r.SummarizationVS()
-	assert.Equal(t, "Summarize the conversation.", vs.Default)
-	require.Contains(t, vs.Variants, "concise")
-	assert.Equal(t, "Brief summary.", vs.Variants["concise"])
-}
-
-func TestRecipe_AllToolDescriptionNames(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Tool Descriptions
-### bash
-Use bash.
-
-## Tool Description Variants
-### read_file
-#### concise
-Read files.
-
-## Tool Description Overrides
-### gpt-4o
-#### search_code
-GPT search.
-`))
-	require.NoError(t, err)
-	names := r.AllToolDescriptionNames()
-	assert.Contains(t, names, "bash")
-	assert.Contains(t, names, "read_file")
-	assert.Contains(t, names, "search_code")
-	assert.Len(t, names, 3)
-}
-
-func TestRecipe_AllToolDescriptionNames_Empty(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Models\n- m\n"))
-	require.NoError(t, err)
-	assert.Empty(t, r.AllToolDescriptionNames())
-}
-
-func TestRecipe_AllSubAgentModeNames(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Sub-Agent Modes
-### explore
-Explore.
-
-## Sub-Agent Mode Variants
-### plan
-#### concise
-Plan briefly.
-
-## Sub-Agent Mode Overrides
-### gpt-4o
-#### debug
-GPT debug.
-`))
-	require.NoError(t, err)
-	names := r.AllSubAgentModeNames()
-	assert.Contains(t, names, "explore")
-	assert.Contains(t, names, "plan")
-	assert.Contains(t, names, "debug")
-	assert.Len(t, names, 3)
-}
-
-func TestRecipe_AllSubAgentModeNames_Empty(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Models\n- m\n"))
-	require.NoError(t, err)
-	assert.Empty(t, r.AllSubAgentModeNames())
-}
-
-func TestRecipe_TierForModel(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
-## Model Profiles
-### gpt-4o
-tier: concise
-`))
-	require.NoError(t, err)
-	assert.Equal(t, "concise", r.TierForModel("gpt-4o"))
-	assert.Empty(t, r.TierForModel("unknown-model"))
-}
-
-func TestRecipe_TierForModel_NilProfiles(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Models\n- m\n"))
-	require.NoError(t, err)
-	assert.Empty(t, r.TierForModel("anything"))
 }
 
 // ─── Parse edge cases ───────────────────────────────────────────────────────
@@ -1243,16 +902,12 @@ func TestParse_Constraints_InvalidMaxSteps(t *testing.T) {
 
 func TestParse_EmptyNewSections(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, `
-## System Prompt Variants
-## System Prompt Overrides
 ## Tool Descriptions
 ## Model Profiles
 ## System Reminders
 ## Hooks
 `))
 	require.NoError(t, err)
-	assert.Nil(t, r.SystemPromptVariants)
-	assert.Nil(t, r.SystemPromptOverrides)
 	assert.Nil(t, r.ToolDescriptions)
 	assert.Nil(t, r.ModelProfiles)
 	assert.Empty(t, r.SystemReminders)

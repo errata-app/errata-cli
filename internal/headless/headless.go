@@ -18,6 +18,7 @@ import (
 	"github.com/suarezc/errata/internal/criteria"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
+	"github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
@@ -224,6 +225,8 @@ func buildActiveDefs(rec *recipe.Recipe, mcpDefs []tools.ToolDef) []tools.ToolDe
 	}
 	activeDefs := tools.DefinitionsAllowed(toolAllowlist, nil)
 	activeDefs = append(activeDefs, tools.FilterDefs(mcpDefs, nil)...)
+	// Apply recipe-level tool description overrides (uniform for all models).
+	activeDefs = tools.ApplyDescriptions(activeDefs, rec.ToolDescriptions)
 	// Apply sandbox restrictions.
 	if rec.Sandbox.Filesystem == "read_only" {
 		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
@@ -250,6 +253,7 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	ctx := tools.WithActiveTools(parent, activeDefs)
 	ctx = tools.WithMCPDispatchers(ctx, opts.MCPDispatchers)
 	ctx = tools.WithBashPrefixes(ctx, bashPrefixes)
+	ctx = prompt.WithSummarizationPrompt(ctx, rec.SummarizationPrompt)
 	ctx = sandbox.WithConfig(ctx, sandbox.Config{
 		Filesystem:  rec.Sandbox.Filesystem,
 		Network:     rec.Sandbox.Network,
@@ -261,15 +265,17 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
 		CheckpointPath:   checkpoint.DefaultPath,
 	})
-	ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
-		opts.Adapters, opts.Cfg, opts.MCPDispatchers,
-		func(modelID string, e models.AgentEvent) {
-			if opts.Verbose {
-				fmt.Fprintf(opts.stderr(), "    [sub-agent %s] %s: %s\n", modelID, e.Type, truncate(e.Data, 80))
-			}
-		},
-	))
-	ctx = tools.WithSubagentDepth(ctx, 0)
+	if tools.SubagentEnabled {
+		ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
+			opts.Adapters, opts.Cfg, opts.MCPDispatchers,
+			func(modelID string, e models.AgentEvent) {
+				if opts.Verbose {
+					fmt.Fprintf(opts.stderr(), "    [sub-agent %s] %s: %s\n", modelID, e.Type, truncate(e.Data, 80))
+				}
+			},
+		))
+		ctx = tools.WithSubagentDepth(ctx, 0)
+	}
 	if opts.Cfg.Seed != nil {
 		ctx = tools.WithSeed(ctx, *opts.Cfg.Seed)
 	}

@@ -41,6 +41,24 @@ const (
 	SpawnAgentToolName = "spawn_agent"
 )
 
+// SubagentEnabled gates all user-facing sub-agent functionality.
+// When false, spawn_agent is excluded from Definitions, the config panel
+// omits the sub-agent section, and dispatcher wiring is skipped.
+// Set to true to re-enable the feature.
+const SubagentEnabled = false
+
+func init() {
+	if !SubagentEnabled {
+		filtered := Definitions[:0]
+		for _, d := range Definitions {
+			if d.Name != SpawnAgentToolName {
+				filtered = append(filtered, d)
+			}
+		}
+		Definitions = filtered
+	}
+}
+
 // maxReadLines is the hard cap on lines returned by ExecuteRead.
 const maxReadLines = 2000
 
@@ -451,6 +469,22 @@ func FilterDefs(defs []ToolDef, disabled map[string]bool) []ToolDef {
 	return out
 }
 
+// ApplyDescriptions returns a copy of defs with descriptions replaced from descs.
+// Tool names not present in descs are left unchanged.
+func ApplyDescriptions(defs []ToolDef, descs map[string]string) []ToolDef {
+	if len(descs) == 0 {
+		return defs
+	}
+	out := make([]ToolDef, len(defs))
+	copy(out, defs)
+	for i := range out {
+		if d, ok := descs[out[i].Name]; ok {
+			out[i].Description = d
+		}
+	}
+	return out
+}
+
 // systemPromptExtra holds optional user-supplied text appended after the
 // built-in tool guidance. Set once at startup via SetSystemPromptExtra.
 var systemPromptExtra string
@@ -477,8 +511,7 @@ Tool use guidance:
 
 // SystemPromptGuidance returns the fixed tool-use guidance text.
 // This is the same guidance as in SystemPromptSuffix but without the
-// user-authored extra. Used by adapters that read their system prompt
-// from a PromptPayload instead.
+// user-authored extra.
 func SystemPromptGuidance() string {
 	return toolUseGuidance
 }

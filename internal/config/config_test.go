@@ -21,7 +21,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "gpt-4o", cfg.DefaultOpenAIModel)
 	assert.Equal(t, "gemini-2.0-flash", cfg.DefaultGeminiModel)
 	assert.Equal(t, "data/preferences.jsonl", cfg.PreferencesPath)
-	assert.Equal(t, 1, cfg.SubagentMaxDepth)
+	assert.Equal(t, 0, cfg.SubagentMaxDepth, "default is 0 (disabled) when SubagentEnabled=false; comes from recipe when enabled")
 	assert.Equal(t, 20, cfg.MaxHistoryTurns)
 	assert.Nil(t, cfg.Seed)
 	assert.Empty(t, cfg.MCPServers)

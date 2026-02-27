@@ -17,6 +17,7 @@ import (
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/recipe"
+	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
@@ -123,9 +124,18 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	}
 	histories := a.conversationHistories
 	prog := a.prog
+	compactRecipe := a.recipe
+	if a.sessionRecipe != nil {
+		compactRecipe = a.sessionRecipe
+	}
+	var compactSumPrompt string
+	if compactRecipe != nil {
+		compactSumPrompt = compactRecipe.SummarizationPrompt
+	}
 	return a.withMessage("Compacting conversation history…"), func() tea.Msg {
+		ctx := promptpkg.WithSummarizationPrompt(context.Background(), compactSumPrompt)
 		updated := runner.CompactHistories(
-			context.Background(), toCompact, histories,
+			ctx, toCompact, histories,
 			func(modelID string, e models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: e})
 			},
@@ -257,6 +267,16 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			tools.WebSearchToolName: true,
 		})
 	}
+	// Apply recipe-level tool description overrides (uniform for all models).
+	activeRecipe := a.recipe
+	if a.sessionRecipe != nil {
+		activeRecipe = a.sessionRecipe
+	}
+	var sumPrompt string
+	if activeRecipe != nil {
+		activeDefs = tools.ApplyDescriptions(activeDefs, activeRecipe.ToolDescriptions)
+		sumPrompt = activeRecipe.SummarizationPrompt
+	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
 	contextStrategy := a.contextStrategy
@@ -276,13 +296,14 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		var compacted map[string][]models.ConversationTurn
 		// Skip auto-compact when context strategy is "manual" or "off".
 		if contextStrategy != "manual" && contextStrategy != "off" {
+			compactCtx := promptpkg.WithSummarizationPrompt(baseCtx, sumPrompt)
 			for _, ad := range ads {
 				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
 						Type: "text", Data: "[auto-compacting history…]",
 					}})
 					effectiveHistories = runner.CompactHistories(
-						baseCtx, []models.ModelAdapter{ad},
+						compactCtx, []models.ModelAdapter{ad},
 						effectiveHistories, func(id string, e models.AgentEvent) {
 							prog.Send(agentEventMsg{modelID: id, event: e})
 						},
@@ -305,13 +326,15 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
 			CheckpointPath:   checkpoint.DefaultPath,
 		})
-		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
-			ads, cfg, mcpDispatchers,
-			func(modelID string, e models.AgentEvent) {
-				prog.Send(agentEventMsg{modelID: modelID, event: e})
-			},
-		))
-		runCtx = tools.WithSubagentDepth(runCtx, 0)
+		if tools.SubagentEnabled {
+			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
+				ads, cfg, mcpDispatchers,
+				func(modelID string, e models.AgentEvent) {
+					prog.Send(agentEventMsg{modelID: modelID, event: e})
+				},
+			))
+			runCtx = tools.WithSubagentDepth(runCtx, 0)
+		}
 		if seed != nil {
 			runCtx = tools.WithSeed(runCtx, *seed)
 		}
@@ -446,6 +469,16 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 			tools.WebSearchToolName: true,
 		})
 	}
+	// Apply recipe-level tool description overrides (uniform for all models).
+	resumeRecipe := a.recipe
+	if a.sessionRecipe != nil {
+		resumeRecipe = a.sessionRecipe
+	}
+	var resumeSumPrompt string
+	if resumeRecipe != nil {
+		activeDefs = tools.ApplyDescriptions(activeDefs, resumeRecipe.ToolDescriptions)
+		resumeSumPrompt = resumeRecipe.SummarizationPrompt
+	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
 	contextStrategy := a.contextStrategy
@@ -464,13 +497,14 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		if contextStrategy != "manual" && contextStrategy != "off" {
+			compactCtx := promptpkg.WithSummarizationPrompt(baseCtx, resumeSumPrompt)
 			for _, ad := range ads {
 				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
 						Type: "text", Data: "[auto-compacting history…]",
 					}})
 					effectiveHistories = runner.CompactHistories(
-						baseCtx, []models.ModelAdapter{ad},
+						compactCtx, []models.ModelAdapter{ad},
 						effectiveHistories, func(id string, e models.AgentEvent) {
 							prog.Send(agentEventMsg{modelID: id, event: e})
 						},
@@ -493,13 +527,15 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
 			CheckpointPath:   checkpoint.DefaultPath,
 		})
-		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
-			ads, cfg, mcpDispatchers,
-			func(modelID string, e models.AgentEvent) {
-				prog.Send(agentEventMsg{modelID: modelID, event: e})
-			},
-		))
-		runCtx = tools.WithSubagentDepth(runCtx, 0)
+		if tools.SubagentEnabled {
+			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
+				ads, cfg, mcpDispatchers,
+				func(modelID string, e models.AgentEvent) {
+					prog.Send(agentEventMsg{modelID: modelID, event: e})
+				},
+			))
+			runCtx = tools.WithSubagentDepth(runCtx, 0)
+		}
 		if seed != nil {
 			runCtx = tools.WithSeed(runCtx, *seed)
 		}

@@ -596,10 +596,7 @@ func (s *promptCapturingStub) RunAgent(_ context.Context, hist []models.Conversa
 
 func TestCompactHistories_UsesCustomSummarizationPrompt(t *testing.T) {
 	ad := &promptCapturingStub{id: "model-x", summary: "compact summary"}
-	payloads := map[string]prompt.PromptPayload{
-		"model-x": {SummarizationPrompt: "Custom: summarize now!"},
-	}
-	ctx := prompt.WithPayloads(context.Background(), payloads)
+	ctx := prompt.WithSummarizationPrompt(context.Background(), "Custom: summarize now!")
 	h := map[string][]models.ConversationTurn{
 		"model-x": makeTurns("user", "hello", "assistant", "hi"),
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 // ── buildConfigSections ─────────────────────────────────────────────────────
@@ -44,7 +45,9 @@ func TestBuildConfigSections_SectionKinds(t *testing.T) {
 	assert.Equal(t, "scalar", kindMap["parameters"])
 	assert.Equal(t, "scalar", kindMap["constraints"])
 	assert.Equal(t, "scalar", kindMap["context"])
-	assert.Equal(t, "scalar", kindMap["sub-agent"])
+	if tools.SubagentEnabled {
+		assert.Equal(t, "scalar", kindMap["sub-agent"])
+	}
 	assert.Equal(t, "scalar", kindMap["sandbox"])
 }
 
@@ -248,13 +251,36 @@ func TestSetConfigValue_RoundTrip(t *testing.T) {
 		{"context.compact_threshold", "0.75", "0.75"},
 		{"sandbox.filesystem", "read_only", "read_only"},
 		{"sandbox.network", "none", "none"},
-		{"sub_agent.model", "claude-sonnet-4-6", "claude-sonnet-4-6"},
-		{"sub_agent.max_depth", "3", "3"},
-		{"sub_agent.tools", "inherit", "inherit"},
 		{"parameters.seed", "42", "42"},
 		{"parameters.temperature", "0.7", "0.7"},
 		{"parameters.max_tokens", "4096", "4096"},
 		{"system_prompt", "You are helpful.", "You are helpful."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
+			err := setConfigValue(rec, tt.path, tt.value)
+			require.NoError(t, err)
+			got := getConfigValue(rec, tt.path)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestSetConfigValue_SubAgentPaths(t *testing.T) {
+	if !tools.SubagentEnabled {
+		// sub_agent paths are not registered when SubagentEnabled is false.
+		rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
+		err := setConfigValue(rec, "sub_agent.model", "claude-sonnet-4-6")
+		require.Error(t, err, "sub_agent paths should be unknown when feature is disabled")
+		return
+	}
+	tests := []struct {
+		path, value, want string
+	}{
+		{"sub_agent.model", "claude-sonnet-4-6", "claude-sonnet-4-6"},
+		{"sub_agent.max_depth", "3", "3"},
+		{"sub_agent.tools", "inherit", "inherit"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -636,8 +662,16 @@ func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
 	a.sessionRecipe = cloneRecipe(a.recipe)
 	a.configOverlayActive = true
 	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
-	// context-summarization is index 12.
-	a.configExpandedIdx = 12
+	// Find context-summarization section dynamically (index varies with SubagentEnabled).
+	csIdx := -1
+	for i, sec := range a.configSections {
+		if sec.Name == "context-summarization" {
+			csIdx = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, csIdx, "context-summarization section must exist")
+	a.configExpandedIdx = csIdx
 	a.configTextEditing = true
 	a.configTextArea.SetValue("Custom summarization prompt")
 

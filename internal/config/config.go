@@ -121,7 +121,9 @@ func Load() Config {
 		PromptHistoryPath:     "data/prompt_history.jsonl",
 	}
 
-	cfg.SubagentMaxDepth = 1 // default: sub-agents cannot spawn sub-agents
+	// SubagentMaxDepth default (1) comes from the default recipe's ## Sub-Agent section.
+	// When tools.SubagentEnabled is false, the default recipe omits that section,
+	// leaving SubagentMaxDepth at 0 (disabled). See internal/tools/tools.go.
 	cfg.MaxHistoryTurns = 20
 
 	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
