@@ -33,39 +33,11 @@ func TestAll_DescriptionsNonEmpty(t *testing.T) {
 	}
 }
 
-func TestWeb_ExcludesTUIOnly(t *testing.T) {
-	web := commands.Web()
-	for _, c := range web {
-		if c.TUIOnly {
-			t.Errorf("Web() returned TUIOnly command %q", c.Name)
-		}
-	}
-}
-
-func TestWeb_SubsetOfAll(t *testing.T) {
-	allNames := make(map[string]bool)
+func TestAll_ContainsExit(t *testing.T) {
 	for _, c := range commands.All {
-		allNames[c.Name] = true
-	}
-	for _, c := range commands.Web() {
-		if !allNames[c.Name] {
-			t.Errorf("Web() returned unknown command %q", c.Name)
+		if c.Name == "/exit" {
+			return
 		}
 	}
-}
-
-func TestWeb_SmallerThanAll(t *testing.T) {
-	// At least /exit is TUIOnly, so Web() must be strictly smaller.
-	if len(commands.Web()) >= len(commands.All) {
-		t.Errorf("expected Web() (%d) to be smaller than All (%d)",
-			len(commands.Web()), len(commands.All))
-	}
-}
-
-func TestAll_ExitIsTUIOnly(t *testing.T) {
-	for _, c := range commands.All {
-		if c.Name == "/exit" && !c.TUIOnly {
-			t.Error("/exit should be TUIOnly")
-		}
-	}
+	t.Error("/exit not found in All")
 }

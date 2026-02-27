@@ -7,13 +7,8 @@ runs each as a full coding agent with nine built-in tools plus any dynamically-r
 tools, shows live tool-event panels, lets the user select the best proposal, and applies the
 winner's file writes to disk. Every selection is logged for preference analysis over time.
 
-Two user surfaces share the same core engine:
-- **TUI** (`./errata`) — bubbletea REPL for terminal use
-- **Web** (`./errata serve`) — browser UI over WebSocket, persists conversation history to `data/history.json`
-
 This is a Go-primary project. Default to Go idioms, conventions, and tooling (`go test`, `go vet`,
-`gofmt`) unless otherwise specified. JavaScript and CSS are used only for the web frontend
-(`internal/web/static/`).
+`gofmt`) unless otherwise specified.
 
 ---
 
@@ -22,7 +17,6 @@ This is a Go-primary project. Default to Go idioms, conventions, and tooling (`g
 - **Language:** Go 1.23+
 - **CLI:** `github.com/spf13/cobra` — subcommand routing and `--help`
 - **TUI:** `github.com/charmbracelet/bubbletea` + `github.com/charmbracelet/lipgloss`
-- **Web:** `net/http` + `github.com/coder/websocket` (embedded static assets via `//go:embed`)
 - **AI SDKs:** `anthropic-sdk-go v1.26`, `openai-go v1.12`, `google.golang.org/genai v1.47`
 - **Config:** `github.com/joho/godotenv` + `os.Getenv`
 - **Preferences:** append-only JSONL at `data/preferences.jsonl`
@@ -36,7 +30,7 @@ This is a Go-primary project. Default to Go idioms, conventions, and tooling (`g
 ```
 errata/
 ├── cmd/errata/
-│   └── main.go              # cobra root (errata, errata stats, errata serve)
+│   └── main.go              # cobra root (errata, errata stats, errata run)
 ├── internal/
 │   ├── config/
 │   │   └── config.go        # Config struct, Load(), ResolvedActiveModels()
@@ -61,7 +55,7 @@ errata/
 │   ├── tools/
 │   │   └── tools.go         # FileWrite, ToolDef, ExecuteRead(), ApplyWrites(), FilterDefs(), SetSystemPromptExtra()
 │   ├── diff/
-│   │   └── diff.go          # Compute() → FileDiff (LCS; shared by TUI + web)
+│   │   └── diff.go          # Compute() → FileDiff (LCS)
 │   ├── preferences/
 │   │   └── preferences.go   # Record(), LoadAll(), Summarize()
 │   ├── history/
@@ -71,7 +65,7 @@ errata/
 │   ├── checkpoint/
 │   │   └── checkpoint.go    # Save(), Load(), Clear(), Build(), IncrementalSaver — interrupted run state persistence
 │   ├── commands/
-│   │   └── commands.go      # Command{Name,Desc,TUIOnly}; All, Web() — canonical slash command registry
+│   │   └── commands.go      # Command{Name,Desc}; All — canonical slash command registry
 │   ├── prompthistory/
 │   │   └── prompthistory.go # Load(), Append() — prompt history JSONL persistence
 │   ├── ui/
@@ -81,13 +75,6 @@ errata/
 │   │   ├── complete.go      # tab completion and hint rendering (capped at 8 lines)
 │   │   ├── panels.go        # live agent panel rendering + fmtTokens()
 │   │   └── diff.go          # diff + selection menu rendering
-│   └── web/
-│       ├── server.go        # Server struct, route registration, embedded static assets
-│       ├── handlers.go      # WebSocket handler, wsConn per-connection struct, REST handlers
-│       └── static/
-│           ├── index.html
-│           ├── style.css
-│           └── app.js
 ├── go.mod / go.sum
 └── Makefile
 ```
@@ -99,8 +86,6 @@ errata/
 ```bash
 go build -o errata ./cmd/errata            # build binary
 ./errata                                    # start TUI REPL
-./errata serve                              # start web server (default :8080)
-./errata serve --port 3000                  # custom port
 ./errata stats                              # print preference summary (non-interactive)
 ./errata --debug-log data/log.jsonl         # enable JSONL debug logging
 ./errata -r myrecipe.md                     # use explicit recipe file
@@ -113,7 +98,7 @@ make build-all                              # cross-compile darwin/linux/windows
 
 ## REPL Slash Commands
 
-Both the TUI and the web textarea accept slash commands.
+The TUI REPL accepts slash commands.
 
 | Command | Description |
 |---------|-------------|
@@ -144,8 +129,7 @@ Both the TUI and the web textarea accept slash commands.
 | `/exit` or `/quit` | Exit (TUI only) |
 | `Ctrl-D` | Exit (TUI only) |
 
-**Verbose mode** defaults to **off** in the TUI and **on** in the web UI (since the web is
-designed for discussion and text responses are useful there).
+**Verbose mode** defaults to **off**.
 
 **TUI prompt history** (Up-arrow cycling and Ctrl-R search):
 - `↑` on the first textarea line → cycle backward through previous prompts
@@ -155,14 +139,12 @@ designed for discussion and text responses are useful there).
 - Only real AI prompts (not slash commands) are recorded
 
 The canonical command list is defined in `internal/commands/commands.go` (`commands.All`).
-Both surfaces derive their lists from this single source; web commands are served via
-`GET /api/commands` and fetched at page load.
 
 ---
 
 ## Core Workflow
 
-1. User types a prompt (TUI REPL or web textarea)
+1. User types a prompt (TUI REPL)
 2. `runner.RunAll()` fans out to all active adapters concurrently via goroutines
 3. Each adapter runs a multi-turn agentic loop using the active tool set:
 
@@ -191,8 +173,8 @@ Both surfaces derive their lists from this single source; web commands are serve
 
 Agent timeout: **5 minutes** per adapter (`context.WithTimeout`).
 
-**Interruption:** Users can cancel a running prompt with ESC or Ctrl-C (TUI), the Cancel
-button (web), or SIGINT/SIGTERM (headless). Cancellation propagates via `context.WithCancel`
+**Interruption:** Users can cancel a running prompt with ESC or Ctrl-C (TUI)
+or SIGINT/SIGTERM (headless). Cancellation propagates via `context.WithCancel`
 through all active adapter API calls. Partial results (accumulated text, proposed writes,
 token counts) are preserved in the response with `Interrupted: true`. A checkpoint is saved
 to `data/checkpoint.json` so the run can be resumed with `/resume`.
@@ -234,14 +216,13 @@ These are surfaced in:
 - **TUI panels** — `done  1234ms  ·  8.4k tok  ·  $0.0083` in the panel status line
 - **TUI diff headers** — same stats in the `── model-id  …` section separator
 - **TUI selection menu** — `(1234ms  $0.0083)` next to each option
-- **Web diff headers and selection buttons** — same format
-- **`/models` listing** — `$X in / $Y out /1M` per model (both TUI and web)
+- **`/models` listing** — `$X in / $Y out /1M` per model
 
 ---
 
 ## Model Filtering (`/model`)
 
-Both surfaces maintain a per-session **active adapter filter** (nil = use all). The filter
+The TUI maintains a per-session **active adapter filter** (nil = use all). The filter
 is sticky — it persists across prompts until explicitly reset.
 
 - `/model claude-sonnet-4-6` → only that adapter runs for subsequent prompts
@@ -251,15 +232,8 @@ is sticky — it persists across prompts until explicitly reset.
 Validation is **strict**: unknown model IDs are rejected immediately with the list of
 available IDs. No changes take effect if any ID in the list is invalid.
 
-**Implementation:** `App.activeAdapters` (TUI) and `activeAdapters` local var (web, per
-connection). Both pass the filtered slice to `runner.RunAll`; only filtered panels are
-created. The server-side WebSocket message type is `set_models`; client sends
-`{type: "set_models", model_ids: [{id, provider}, ...]}` (elements are `ModelSpec` objects),
-server replies `{type: "models_set", models: [...]}`. The `provider` field lets the server
-route novel model IDs that don't match a known prefix via `adapters.NewAdapterForProvider`.
-
-**Web persistence:** The web client saves the active model filter to `localStorage` under
-`errata_model_filter` and restores it on reconnect by re-sending `set_models`.
+**Implementation:** `App.activeAdapters` passes the filtered slice to `runner.RunAll`;
+only filtered panels are created.
 
 ---
 
@@ -274,7 +248,7 @@ history fill relative to the model's known context window.
 to whole user+assistant pairs) before each API call. Override via recipe `## Context` `max_history_turns:`.
 
 **Compaction (manual + automatic):**
-- `/compact` (both surfaces) calls `runner.CompactHistories`, which runs each adapter
+- `/compact` calls `runner.CompactHistories`, which runs each adapter
   against its own history with a summarization prompt and replaces the history with a
   single `[user: "[Previous conversation — compacted]", assistant: <summary>]` pair.
 - Auto-compact triggers in `RunAll` when `runner.ShouldAutoCompact` returns true
@@ -311,76 +285,6 @@ Log schema per line:
 
 ---
 
-## Web Architecture
-
-The web server embeds all static assets at compile time (`//go:embed static`).
-Each browser tab gets one persistent WebSocket connection; the server maintains
-per-connection state (active adapter filter, last run results, cancel function).
-
-### REST endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/stats` | Preference tally JSON |
-| `GET` | `/api/models` | Active model IDs JSON |
-| `GET` | `/api/commands` | Web-applicable slash commands JSON (`commands.Web()`); fetched by the browser at page load to populate the slash-completion dropdown |
-| `GET` | `/api/available-models` | Active models + all models from each configured provider (concurrent fetch, 15 s timeout); each provider entry includes `name`, `count`, `total_count` (pre-filter API count), `truncated` (models omitted past cap), and `models[]` — each entry has `id`, `input_pmt`, `output_pmt` (per-million-token USD, omitted when unknown); display capped at `ModelListCap=10` per provider |
-| `GET` | `/api/tools` | All available tool definitions as JSON — built-in and MCP tools; each entry has `name`, `description`, `source` (`"builtin"` or `"mcp"`); useful for building toggle UIs or programmatic introspection |
-
-### WebSocket message protocol
-
-**Client → Server:**
-
-| `type` | Fields | Description |
-|--------|--------|-------------|
-| `run` | `prompt`, `verbose` | Start a new agent run |
-| `select` | `model_id` | Apply a model's proposed writes |
-| `cancel` | — | Cancel the running agents |
-| `set_models` | `model_ids` | Set model filter (empty = reset to all); elements are `{id, provider}` objects (`ModelSpec`); `provider` enables routing of novel IDs via `NewAdapterForProvider` |
-| `resume` | — | Resume an interrupted run (re-run only interrupted models) |
-| `compact` | — | Summarize conversation history to free context window |
-| `clear_display` | — | Clear display only (no server-side effect; `/clear`) |
-| `clear_history` | — | Wipe server-side conversation history and delete `data/history.json` (`/wipe`) |
-
-**Server → Client:**
-
-| `type` | Fields | Description |
-|--------|--------|-------------|
-| `agent_event` | `model_id`, `event_type`, `data` | Streaming tool event |
-| `complete` | `responses[]` | All agents finished; payload includes diffs, tokens, cost |
-| `applied` | `applied[]` | File writes applied successfully |
-| `cancelled` | `responses[]` | Run was cancelled; includes partial results with `interrupted` flag per response |
-| `compact_complete` | — | History compaction finished |
-| `display_cleared` | — | Confirms display-only clear (`/clear`) |
-| `history_cleared` | — | Confirms server-side history was wiped (`/wipe`) |
-| `models_set` | `models[]` | Confirms new active model filter |
-| `error` | `message` | Server-side error |
-
-### Web client state machine
-
-```
-idle → running → selecting → idle
-                    ↓
-                 (skip)
-```
-
-**Connection lifecycle:** The textarea and Send button start `disabled` with placeholder
-"Connecting…" in the HTML. `ws.onopen` enables them and restores the normal placeholder.
-`ws.onclose` disables them again with "Reconnecting…". `toIdle()` only re-enables inputs
-when `ws.readyState === WebSocket.OPEN`, preventing the hang-on-reconnect race condition.
-
-**Display history** is persisted to `localStorage` (capped at 50 entries). Completed runs
-are stored as typed `{type:'run'}` entries that render as collapsible panels in the history view.
-
-**Conversation history** (the per-model `[]ConversationTurn` sent to the AI on each prompt)
-is stored server-side in `Server.histories` and persisted to `data/history.json` after every
-run and compact. All browser tabs share the same history. Reconnecting picks up where the
-previous connection left off. `/clear` clears only the display history (localStorage).
-`/wipe` sends `clear_history` to the server and wipes both the display history and the
-conversation history (disk).
-
----
-
 ## Package Import Graph
 
 ```
@@ -399,8 +303,7 @@ history        ← models, encoding/json, os
 logging        ← models (ModelAdapter, ModelResponse), stdlib
 preferences    ← models (for ModelResponse latency/ID), encoding/json, os
 ui             ← models, pricing, tools, runner, diff, history, adapters, config, commands, prompthistory, checkpoint, bubbletea, lipgloss
-web            ← models, runner, tools, diff, preferences, logging, history, adapters, config, commands, checkpoint, coder/websocket
-cmd/errata     ← config, adapters, pricing, logging, ui, web, mcp, tools
+cmd/errata     ← config, adapters, pricing, logging, ui, mcp, tools
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -470,8 +373,8 @@ in the request `context.Context` via `tools.WithActiveTools`. Each adapter reads
 
 **MCP dispatchers are context-scoped:** MCP tool dispatch functions are stored in context via
 `tools.WithMCPDispatchers`. `DispatchTool` reads them and calls the matching dispatcher before
-any built-in case, so MCP tools can shadow or extend the built-in set. Both TUI (`launchRun`)
-and web (`wsHandleRun`) build the combined active-tool context before passing it to `runner.RunAll`.
+any built-in case, so MCP tools can shadow or extend the built-in set. The TUI (`launchRun`)
+builds the combined active-tool context before passing it to `runner.RunAll`.
 
 **`ModelID` is enforced by the runner:** `runner.RunAll` overwrites `resp.ModelID = a.ID()`
 after every `RunAgent` call. Adapters do not need to set it. Provider SDKs return resolved
@@ -555,7 +458,7 @@ long-running concurrent work.
 diffs via `DiffLinesToRunes` → `DiffMainRunes` → `DiffCharsToLines`.
 Output is a flat list of `Add / Remove / Context` lines, capped at `MaxDiffLines = 20`.
 Hunk headers (`@@`) are omitted; instead, a "… N more lines" truncation notice is shown.
-Used by both TUI (`internal/ui/diff.go`) and web (`internal/web/handlers.go`).
+Used by the TUI (`internal/ui/diff.go`).
 
 ---
 
@@ -648,7 +551,7 @@ the `tools` capability can be connected via the recipe `## MCP Servers` section.
 
 ### MCP tool dispatch flow
 
-1. `launchRun` / `wsHandleRun` builds `activeDefs` by combining `tools.ActiveDefinitions(disabled)` + `tools.FilterDefs(mcpDefs, disabled)` — both respect `/tools off`
+1. `launchRun` builds `activeDefs` by combining `tools.ActiveDefinitions(disabled)` + `tools.FilterDefs(mcpDefs, disabled)` — both respect `/tools off`
 2. `tools.WithActiveTools(ctx, activeDefs)` stores the combined list
 3. `tools.WithMCPDispatchers(ctx, dispatchers)` stores the call functions
 4. Each adapter reads `ActiveToolsFromContext(ctx)` to build the tool list sent to the API
@@ -737,16 +640,6 @@ Set `LITELLM_BASE_URL` in `.env` and specify models via recipe:
 - claude-opus-4-6
 - gpt-4o
 ```
-
-### Running as a web service
-
-```bash
-./errata serve --port 8080
-```
-
-The web server uses WebSocket per browser tab. All tabs share the same server-side
-conversation history (`data/history.json`). The `/api/tools` endpoint lets custom UIs
-introspect the active tool set dynamically.
 
 ---
 
