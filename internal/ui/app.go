@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
@@ -43,10 +42,6 @@ type runCompleteMsg struct {
 
 type compactCompleteMsg struct {
 	histories map[string][]models.ConversationTurn
-}
-
-type listModelsResultMsg struct {
-	results []adapters.ProviderModels
 }
 
 type welcomeMsg struct{}
@@ -392,23 +387,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.feedVP.GotoBottom()
 		return a, nil
 
-	case listModelsResultMsg:
-		var activeSet map[string]bool
-		if a.activeAdapters != nil {
-			activeSet = make(map[string]bool, len(a.activeAdapters))
-			for _, ad := range a.activeAdapters {
-				activeSet[ad.ID()] = true
-			}
-		}
-		return a.withMessage(formatAvailableModels(msg.results, activeSet)), nil
-
 	case welcomeMsg:
 		return a.withMessage(
 			"Welcome to Errata! No API keys are configured.\n" +
-				"Use /keys to view provider status and add keys.\n" +
-				"  e.g.  /keys anthropic sk-ant-...\n" +
-				"  e.g.  /keys openai sk-...\n" +
-				"Type /keys for the full list of providers.",
+				"Set API keys in .env and restart, or use /config to view settings.",
 		), nil
 
 	case compactCompleteMsg:
@@ -634,33 +616,6 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 			if val[0] == '/' {
 				lower := strings.ToLower(val)
 				switch {
-				case strings.HasPrefix(lower, "/model "):
-					partial := lastWord(val[len("/model "):])
-					a.renderModelHints(&sb, partial, nameStyle)
-
-				case strings.HasPrefix(lower, "/subset "):
-					partial := lastWord(val[len("/subset "):])
-					a.renderModelHints(&sb, partial, nameStyle)
-
-				case strings.HasPrefix(lower, "/tools on "):
-					partial := lastWord(val[len("/tools on "):])
-					a.renderToolHints(&sb, partial, nameStyle, descStyle)
-
-				case strings.HasPrefix(lower, "/tools off "):
-					partial := lastWord(val[len("/tools off "):])
-					a.renderToolHints(&sb, partial, nameStyle, descStyle)
-
-				case strings.HasPrefix(lower, "/keys "):
-					partial := lastWord(val[len("/keys "):])
-					lp := strings.ToLower(partial)
-					hw := newHintWriter(&sb, descStyle)
-					for _, name := range providerNameCandidates() {
-						if strings.HasPrefix(name, lp) {
-							hw.add(nameStyle.Render("  " + name))
-						}
-					}
-					hw.flush()
-
 				case strings.HasPrefix(lower, "/config "):
 					partial := lastWord(val[len("/config "):])
 					lp := strings.ToLower(partial)
@@ -668,17 +623,6 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 					for _, name := range interactiveSections {
 						if strings.HasPrefix(name, lp) {
 							hw.add(nameStyle.Render("  " + name))
-						}
-					}
-					hw.flush()
-
-				case strings.HasPrefix(lower, "/set "):
-					partial := lastWord(val[len("/set "):])
-					lp := strings.ToLower(partial)
-					hw := newHintWriter(&sb, descStyle)
-					for _, path := range configPathCandidates() {
-						if strings.HasPrefix(path, lp) {
-							hw.add(nameStyle.Render("  " + path))
 						}
 					}
 					hw.flush()
