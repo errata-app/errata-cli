@@ -229,7 +229,7 @@ var Definitions = []ToolDef{
 		Properties: map[string]ToolParam{
 			"task":     {Type: "string", Description: "The specific task for the sub-agent to complete."},
 			"role":     {Type: "string", Description: "Tool access role: 'explorer' (read-only search/file/web), 'planner' (explorer + bash), 'coder' (full tools, can propose writes). Default: coder"},
-			"model_id": {Type: "string", Description: "Model to use. Defaults to ERRATA_SUBAGENT_MODEL or the current model."},
+			"model_id": {Type: "string", Description: "Model to use. Defaults to the current model."},
 		},
 		Required: []string{"task"},
 	},
@@ -506,14 +506,24 @@ Tool use guidance:
 - Use web_fetch to read documentation, GitHub issues, package READMEs, or any public URL.
 - Use web_search for quick factual lookups (definitions, Wikipedia summaries). For specific URLs, use web_fetch directly.
 - write_file and edit_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
-- Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.
 `
+
+// spawnAgentGuidance is appended to toolUseGuidance only when SubagentEnabled is true.
+const spawnAgentGuidance = `- Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.`
+
+// effectiveGuidance returns toolUseGuidance with spawn_agent line included only when enabled.
+func effectiveGuidance() string {
+	if SubagentEnabled {
+		return toolUseGuidance + spawnAgentGuidance + "\n"
+	}
+	return toolUseGuidance
+}
 
 // SystemPromptGuidance returns the fixed tool-use guidance text.
 // This is the same guidance as in SystemPromptSuffix but without the
 // user-authored extra.
 func SystemPromptGuidance() string {
-	return toolUseGuidance
+	return effectiveGuidance()
 }
 
 // SystemPromptSuffix returns guidance text appended to each adapter's system prompt
@@ -521,10 +531,11 @@ func SystemPromptGuidance() string {
 // If SetSystemPromptExtra has been called, that text is appended after the
 // built-in guidance so project-specific context reaches every model.
 func SystemPromptSuffix() string {
+	g := effectiveGuidance()
 	if systemPromptExtra == "" {
-		return toolUseGuidance
+		return g
 	}
-	return toolUseGuidance + "\n" + systemPromptExtra
+	return g + "\n" + systemPromptExtra
 }
 
 // validatePath resolves path relative to cwd and rejects paths that escape it.
