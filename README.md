@@ -48,7 +48,7 @@ cp .env.example .env
 ```
 
 ```bash
-# .env
+# .env — only API keys and credentials; all behavioural config is in recipe.md
 
 # Native providers — auto-detected; one default model per available key
 ANTHROPIC_API_KEY=sk-ant-...
@@ -61,17 +61,33 @@ OPENROUTER_API_KEY=sk-or-...
 # LiteLLM — self-hosted proxy (base URL must include /v1)
 LITELLM_BASE_URL=http://localhost:4000/v1
 LITELLM_API_KEY=optional
+
+# Amazon Bedrock — uses AWS SDK credential chain
+AWS_REGION=us-east-1
+
+# Azure OpenAI — both key and endpoint required
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_ENDPOINT=https://myresource.openai.azure.com
+
+# Vertex AI — uses Application Default Credentials
+VERTEX_AI_PROJECT=my-gcp-project
+VERTEX_AI_LOCATION=us-central1
 ```
 
-Errata auto-detects native providers from available keys:
+Errata auto-detects providers from available keys/credentials:
 
-| Provider  | Default model         |
-|-----------|-----------------------|
-| Anthropic | `claude-sonnet-4-6`   |
-| OpenAI    | `gpt-4o`              |
-| Google    | `gemini-2.0-flash`    |
+| Provider   | Default model         | Env vars required |
+|------------|-----------------------|-------------------|
+| Anthropic  | `claude-sonnet-4-6`   | `ANTHROPIC_API_KEY` |
+| OpenAI     | `gpt-4o`              | `OPENAI_API_KEY` |
+| Google AI  | `gemini-2.0-flash`    | `GOOGLE_API_KEY` |
+| Bedrock    | `anthropic.claude-sonnet-4-*` | `AWS_REGION` + AWS credentials |
+| Azure OpenAI | `gpt-4o`           | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` |
+| Vertex AI  | `gemini-2.0-flash`    | `VERTEX_AI_PROJECT` + `VERTEX_AI_LOCATION` |
 
-OpenRouter and LiteLLM models must be listed explicitly in `ERRATA_ACTIVE_MODELS`.
+OpenRouter, LiteLLM, and cloud-provider models must be listed explicitly in a recipe
+`## Models` section (e.g. `anthropic/claude-sonnet-4-6`, `litellm/codestral`,
+`bedrock/anthropic.claude-sonnet-4-*`).
 
 ---
 
@@ -83,16 +99,6 @@ OpenRouter and LiteLLM models must be listed explicitly in `ERRATA_ACTIVE_MODELS
 ./errata                     # auto-discovers recipe.md in cwd
 ./errata -r path/to/recipe.md
 ```
-
-### Web UI
-
-```bash
-./errata serve               # starts on :8080
-./errata serve --port 3000
-```
-
-Open `http://localhost:8080` in your browser. The web UI is functionally identical to the
-TUI and shares the same WebSocket-based backend.
 
 ### Headless mode (recipe runner)
 
@@ -175,27 +181,14 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/help` | Show available commands |
 | `/clear` | Clear display (preserves conversation context) |
 | `/wipe` | Wipe display and conversation memory |
-| `/compact` | Summarize conversation history to free up context window |
-| `/verbose` | Toggle verbose mode (model text alongside tool events) |
-| `/models` | List all available models from each configured provider with per-model pricing |
-| `/tools` | Show current tool status (`on`/`off`); MCP tools are labelled `(mcp)` |
-| `/tools off <name...>` | Disable one or more tools for this session (e.g. `/tools off bash`) |
-| `/tools on <name...>` | Re-enable specific tools |
-| `/tools reset` | Re-enable all tools |
-| `/stats` | Show preference win counts and per-model session cost |
-| `/totalcost` | Show total inference cost accumulated this session |
-| `/model <id> [id...]` | Restrict subsequent runs to specific model(s) |
-| `/model` | Reset model filter — all configured models run again |
-| `/config` | View/edit configuration interactively; `/config <section>` jumps to a section |
-| `/set <path> [value]` | Get or set a config value (e.g. `/set constraints.timeout 10m`) |
-| `/seed <n>` | Set seed for reproducibility; bare `/seed` clears |
-| `/subset <id...>` | Target specific model(s); bare `/subset` shows current |
-| `/all` | Reset to all models |
-| `/remind [name]` | Fire a named reminder; bare `/remind` lists available |
+| `/compact` | Summarise conversation history to free up context |
+| `/verbose` | Toggle verbose mode |
+| `/config` | View/edit configuration; `/config <section>` jumps to section |
+| `/resume` | Resume interrupted run — re-runs only interrupted models |
 | `/export recipe [path]` | Export the session recipe to Markdown (default: `recipe_export.md`) |
 | `/export output [path]` | Export the latest run's output report |
 | `/import recipe <path>` | Import a recipe file, replacing the session config |
-| `/resume` | Resume an interrupted run — re-runs only interrupted models |
+| `/stats` | Show preference wins and session cost |
 | `/exit` or `/quit` | Exit |
 | `Ctrl-D` | Exit |
 
@@ -214,35 +207,21 @@ Pick a number — that model's writes are applied to disk immediately.
 
 ## Model filtering
 
-You can narrow which models run without restarting Errata. The filter is sticky — it
-persists across prompts until explicitly reset.
+You can control which models run via the recipe `## Models` section or at runtime via
+`/config` (models section).
 
-**At runtime (both TUI and web):**
+**Via recipe:**
 
+```markdown
+## Models
+- claude-sonnet-4-6
+- gpt-4o
+- anthropic/claude-opus-4-6      # OpenRouter format
+- litellm/codestral              # LiteLLM format
 ```
-/model claude-sonnet-4-6          # only Claude for the next runs
-/model claude-sonnet-4-6 gpt-4o   # two models
-/model                            # reset — all configured models run again
-```
 
-Unknown model IDs are rejected immediately with a list of valid options.
-
-**Statically via environment variable:**
-
-```bash
-# .env
-# Native models
-ERRATA_ACTIVE_MODELS=claude-opus-4-6,claude-sonnet-4-6
-
-# OpenRouter models — use "provider/model" format
-ERRATA_ACTIVE_MODELS=anthropic/claude-sonnet-4-6,openai/gpt-4o,meta-llama/llama-3-70b-instruct
-
-# LiteLLM models — use "litellm/<model>" format
-ERRATA_ACTIVE_MODELS=litellm/claude-sonnet-4-6,litellm/gpt-4o
-
-# Mix native and OpenRouter
-ERRATA_ACTIVE_MODELS=claude-sonnet-4-6,anthropic/claude-opus-4-6
-```
+**At runtime:** Use `/config models` to add, remove, or reorder models for the current
+session. Changes are session-local — use `/export recipe` to persist them.
 
 ---
 
@@ -265,7 +244,7 @@ defaults, or `/export recipe` to save your modifications.
 
 ## Recipe export and import
 
-Export the current session recipe (including any `/config` or `/set` modifications) to
+Export the current session recipe (including any `/config` modifications) to
 a Markdown file:
 
 ```
@@ -291,7 +270,7 @@ Export the latest run's output report:
 ## Verbose mode
 
 Toggle `/verbose` to also see each model's explanatory text alongside tool events. Verbose
-mode is off by default in the TUI and on by default in the web UI.
+mode is off by default.
 
 ---
 
@@ -306,7 +285,7 @@ is in use.
 Two mechanisms keep history from growing unbounded:
 
 **Sliding window (automatic):** Only the most recent 20 turns are sent to the model on
-each call. Set `ERRATA_MAX_HISTORY_TURNS` in `.env` to override.
+each call. Override via recipe `## Context` section (`max_history_turns:`).
 
 **Compaction (manual or automatic):** `/compact` asks each model to write a concise
 summary of the conversation so far, then replaces the full history with that summary.
@@ -325,7 +304,6 @@ proposed file writes, token counts) are preserved — nothing is thrown away.
 | Surface | Method |
 |---------|--------|
 | TUI | Press `ESC` or `Ctrl-C` while models are running |
-| Web | Click the Cancel button |
 | Headless (`errata run`) | Send `SIGINT` (Ctrl-C) or `SIGTERM` |
 
 When a run is cancelled, models that had already finished keep their full results. Models
@@ -360,21 +338,18 @@ databases, etc.) and expose its tools to every model in the comparison harness.
 
 ### Configuration
 
-```bash
-# .env
-# Format: name:command arg1 arg2,...  (comma-separated for multiple servers)
-ERRATA_MCP_SERVERS=exa:npx @exa-ai/exa-mcp-server
+MCP servers are configured in the recipe `## MCP Servers` section:
+
+```markdown
+## MCP Servers
+- exa: npx @exa-ai/exa-mcp-server
+- search: npx @modelcontextprotocol/server-brave-search
 ```
 
-Multiple servers:
-
-```bash
-ERRATA_MCP_SERVERS=exa:npx @exa-ai/exa-mcp-server,search:npx @modelcontextprotocol/server-brave-search
-```
-
-Each server is launched as a subprocess using stdio transport (the standard MCP deployment
-model). Errata performs the MCP handshake at startup, discovers all tools the server
-exposes, and registers them alongside the nine built-in tools.
+Each entry is a `name: command` pair. The command is launched as a subprocess using stdio
+transport (the standard MCP deployment model). Errata performs the MCP handshake at startup,
+discovers all tools the server exposes, and registers them alongside the nine built-in tools.
+API keys needed by the MCP server (e.g. `EXA_API_KEY`) should be set in `.env`.
 
 ### Supported servers (examples)
 
@@ -393,73 +368,64 @@ If an MCP server fails to start or the handshake fails, Errata continues without
 emits a warning:
 
 - **TUI:** warning printed to stderr before the REPL starts
-- **Web UI:** warning delivered to the browser as an error message immediately on connect
 
 Runtime errors during a tool call (e.g. the MCP server crashes mid-run) are surfaced in
 the live panel as an error event so you can see the failure in context.
 
 ### Managing MCP tools at runtime
 
-MCP tools appear in `/tools` listings labelled `(mcp)` and can be toggled like built-in tools:
-
-```
-/tools                     # list all tools including MCP
-/tools off exa_search      # disable a specific MCP tool for this session
-/tools on  exa_search      # re-enable it
-/tools reset               # re-enable everything
-```
-
-The web UI `GET /api/tools` endpoint returns the full tool list with `"source": "builtin"` or
-`"source": "mcp"` for each entry.
+MCP tools appear alongside built-in tools in `/config` (tools section) and can be toggled
+the same way. Disabling a tool via `/config` works identically for both built-in and MCP
+tool names.
 
 ---
 
 ## Deployment configuration
 
-Errata exposes several environment variables for fine-tuning the harness to match your
-workflow or deployment environment.
+All behavioural configuration is done via recipe files. See [Recipes](#recipes) for the
+full list of sections.
 
 ### Custom system prompt
 
-Append instructions to every model's system prompt without modifying source code:
+Use the recipe `## System Prompt` section to append instructions to every model's system
+prompt:
 
-```bash
-# .env
-ERRATA_SYSTEM_PROMPT="This project uses Python 3.11 and pytest. Always run pytest before proposing changes. Follow PEP 8 strictly."
+```markdown
+## System Prompt
+This project uses Python 3.11 and pytest. Always run pytest before proposing changes.
+Follow PEP 8 strictly.
 ```
 
 The extra text is appended after the built-in tool guidance in each model's system prompt.
-Use this for:
-- Project-specific coding conventions
-- Domain knowledge (e.g. "this is a financial system — never log PII")
-- Workflow constraints (e.g. "always write tests before implementation")
 
-### Tool management
+### Restricting the tool set
 
-```bash
-# Disable bash execution for all sessions (can still be toggled at runtime)
-# Not yet a startup flag — use /tools off bash at the REPL
+Use the recipe `## Tools` section to specify an allowlist of tools. Tools not in the
+allowlist are excluded. Tool state can also be toggled at runtime via `/config` (tools
+section).
+
+### Restricting to specific models
+
+```markdown
+## Models
+- claude-opus-4-6
+- gpt-4o
 ```
 
-Tools can always be toggled per-session with `/tools off <name>` and `/tools on <name>`.
+### Pointing at a self-hosted model proxy
 
-### Model pinning
+Set `LITELLM_BASE_URL` in `.env` and specify models via recipe:
 
-```bash
-ERRATA_ACTIVE_MODELS=claude-opus-4-6,gpt-4o   # only these two models
-```
-
-### History and preferences paths
-
-```bash
-ERRATA_HISTORY_PATH=~/.errata/history.json          # default: data/history.json
-ERRATA_PREFERENCES_PATH=~/.errata/preferences.jsonl # default: data/preferences.jsonl
+```markdown
+## Models
+- litellm/llama-3-70b
+- litellm/codestral
 ```
 
 ### Debug logging
 
 ```bash
-ERRATA_DEBUG_LOG=data/log.jsonl   # append-only JSONL with full prompt/response content
+./errata --debug-log data/log.jsonl
 ```
 
 Each log entry includes the model ID, session ID, all tool events, token counts, latency,
@@ -467,8 +433,11 @@ and cost. Useful for auditing or building fine-tuning datasets.
 
 ### Context window
 
-```bash
-ERRATA_MAX_HISTORY_TURNS=20   # default; reduce for smaller context windows
+Override the default sliding window size via recipe `## Context` section:
+
+```markdown
+## Context
+max_history_turns: 10
 ```
 
 ---
@@ -479,7 +448,7 @@ A recipe is a Markdown file (`recipe.md`) that configures Errata for a specific 
 workflow. Errata auto-discovers `recipe.md` in the current directory, or you can specify one
 with `--recipe path/to/file.md` (or `-r`).
 
-Recipes are used by all three surfaces (TUI, web, headless) and can configure models, system
+Recipes are used by both surfaces (TUI and headless) and can configure models, system
 prompts, tools, context management, and more. The headless `errata run` command additionally
 requires a `## Tasks` section.
 
@@ -510,9 +479,8 @@ You are working on a Go project. Run `go test ./...` after changes.
 |---------|---------|
 | `## Models` | List of model IDs to use (overrides env config) |
 | `## System Prompt` | Custom system prompt appended to built-in guidance |
-| `## System Prompt Variants` | Named prompt variants (e.g. `### concise`) |
-| `## System Prompt Overrides` | Per-model prompt overrides (e.g. `### gpt-4o`) |
 | `## Tools` | Allowlist of enabled tools; supports glob patterns for bash (e.g. `bash(go test *)`) |
+| `## Tool Guidance` | Extra tool-use instructions injected into the system prompt |
 | `## Tool Descriptions` | Custom descriptions injected into tool definitions |
 | `## Sub-Agent Modes` | Named sub-agent personas (e.g. `### explore`, `### plan`) |
 | `## Model Parameters` | Provider parameters (e.g. `seed: 42`) |
@@ -587,7 +555,7 @@ make install         # go install to $GOPATH/bin
 ```
 errata/
 ├── cmd/errata/
-│   └── main.go                  # cobra entrypoint (errata, errata run, errata serve, errata stats)
+│   └── main.go                  # cobra entrypoint (errata, errata run, errata stats)
 ├── internal/
 │   ├── adapters/
 │   │   ├── registry.go          # NewAdapter(), ListAdapters() — routing by prefix/slash
@@ -597,13 +565,16 @@ errata/
 │   │   ├── openai.go            # OpenAIAdapter.RunAgent()
 │   │   ├── gemini.go            # GeminiAdapter.RunAgent()
 │   │   ├── openrouter.go        # OpenRouterAdapter — any model via "provider/model" IDs
-│   │   └── litellm.go           # LiteLLMAdapter — local/self-hosted proxy
+│   │   ├── litellm.go           # LiteLLMAdapter — local/self-hosted proxy
+│   │   ├── azure_openai.go      # AzureOpenAIAdapter — Azure-hosted OpenAI models
+│   │   ├── bedrock.go           # BedrockAdapter — AWS Bedrock (Converse API)
+│   │   └── vertex_ai.go         # VertexAIAdapter — Google Cloud Vertex AI
 │   ├── capabilities/
 │   │   └── defaults.go          # per-model capability defaults (context budget, tool format)
 │   ├── checkpoint/
 │   │   └── checkpoint.go        # Save/Load/Clear/Build/IncrementalSaver — /resume state
 │   ├── commands/
-│   │   └── commands.go          # canonical slash command registry (TUI + web)
+│   │   └── commands.go          # canonical slash command registry
 │   ├── config/
 │   │   └── config.go            # Config struct, Load(), ResolvedActiveModels()
 │   ├── criteria/
@@ -631,8 +602,7 @@ errata/
 │   ├── pricing/
 │   │   └── pricing.go           # LoadPricing(), CostUSD(), ContextWindowTokens()
 │   ├── prompt/
-│   │   ├── assembler.go         # AssembleSystemPrompt() — prompt construction with variants
-│   │   └── variant.go           # VariantSet resolution for per-model prompts
+│   │   └── assembler.go         # DefaultSummarizationPrompt, WithSummarizationPrompt(), ResolveSummarizationPrompt()
 │   ├── prompthistory/
 │   │   └── prompthistory.go     # prompt history persistence (Up-arrow / Ctrl-R)
 │   ├── recipe/
@@ -659,13 +629,6 @@ errata/
 │   │   ├── mention.go           # @file mention expansion
 │   │   ├── panels.go            # live agent panel rendering (lipgloss)
 │   │   └── selection.go         # model selection UI
-│   └── web/
-│       ├── server.go            # Server struct, route registration, embedded static assets
-│       ├── handlers.go          # WebSocket handler, REST handlers
-│       └── static/
-│           ├── index.html
-│           ├── style.css
-│           └── app.js
 ├── recipe.example.md                # full-featured recipe example (every section)
 ├── go.mod
 ├── go.sum
