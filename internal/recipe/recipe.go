@@ -68,6 +68,10 @@ type Recipe struct {
 
 	// Model profiles for capability overrides
 	ModelProfiles map[string]ModelProfileConfig // model_id → profile
+
+	// ToolGuidance replaces the built-in tool-use guidance when set.
+	// Empty = not set (use default).
+	ToolGuidance string
 }
 
 // ToolsConfig describes which tools are available in a recipe.
@@ -294,6 +298,10 @@ func parseBytes(data []byte) (*Recipe, error) {
 		// ── Model Profiles ──
 		case "model profiles":
 			r.ModelProfiles = parseModelProfiles(body)
+
+		// ── Tool Guidance ──
+		case "tool guidance":
+			r.ToolGuidance = parseProse(body)
 
 		default:
 			fmt.Fprintf(os.Stderr, "recipe: unknown section %q, skipping\n", s.header)
@@ -832,6 +840,9 @@ func (r *Recipe) ApplyTo(cfg *config.Config) {
 	if r.ModelParams.Seed != nil {
 		cfg.Seed = r.ModelParams.Seed
 	}
+	if r.ToolGuidance != "" {
+		cfg.ToolGuidance = r.ToolGuidance
+	}
 }
 
 // MarshalMarkdown serializes the recipe back to the Markdown format used by
@@ -858,6 +869,13 @@ func (r *Recipe) MarshalMarkdown() string {
 	if r.SystemPrompt != "" {
 		sb.WriteString("\n## System Prompt\n")
 		sb.WriteString(r.SystemPrompt)
+		sb.WriteByte('\n')
+	}
+
+	// Tool Guidance
+	if r.ToolGuidance != "" {
+		sb.WriteString("\n## Tool Guidance\n")
+		sb.WriteString(r.ToolGuidance)
 		sb.WriteByte('\n')
 	}
 

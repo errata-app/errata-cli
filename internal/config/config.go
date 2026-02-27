@@ -101,6 +101,11 @@ type Config struct {
 	// nil means not set (provider default); non-nil is passed through even if 0.
 	// Set via recipe ## Model Parameters seed: or /seed command.
 	Seed *int64
+
+	// ToolGuidance replaces the built-in tool-use guidance in every adapter's
+	// system prompt when set. Empty means use the default guidance.
+	// Set via recipe ## Tool Guidance.
+	ToolGuidance string
 }
 
 // Load reads .env (if present) then environment variables and returns a Config.

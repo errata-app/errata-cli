@@ -20,6 +20,18 @@ You are working on a Go monorepo. Always run `go vet ./...` and `go test ./...` 
 making any changes. Use conventional commits (feat:, fix:, chore:). Keep functions
 small and focused; prefer table-driven tests.
 
+## Tool Guidance
+Tool use guidance:
+- Use list_directory to explore the project structure before reading specific files.
+- Use search_files to find files by name pattern (e.g. search_files("**/*.go")).
+- Use search_code to find where a function, type, or string is defined or used.
+- Use read_file only after you know which file you need. For large files, use offset and limit to page through content.
+- Use edit_file for targeted changes to existing files (replaces an exact string). Use write_file only for new files or complete rewrites.
+- Use bash to run tests, builds, or any shell command; always provide a clear description.
+- Use web_fetch to read documentation, GitHub issues, package READMEs, or any public URL.
+- Use web_search for quick factual lookups (definitions, Wikipedia summaries). For specific URLs, use web_fetch directly.
+- write_file and edit_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response.
+
 ## Tools
 - read_file
 - list_directory
