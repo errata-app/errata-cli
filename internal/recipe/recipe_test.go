@@ -276,9 +276,9 @@ func TestDiscover_FallsBackToEmbeddedDefault(t *testing.T) {
 	r, err := recipe.Discover("")
 	require.NoError(t, err)
 	require.NotNil(t, r)
-	// Default recipe sets context strategy and sub-agent depth.
+	// Default recipe sets context strategy (sub-agent depth gated by SubagentEnabled).
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.Equal(t, 1, r.SubAgent.MaxDepth)
+	assert.Equal(t, -1, r.SubAgent.MaxDepth, "default recipe no longer sets sub-agent depth (feature gated)")
 }
 
 func TestDiscover_CwdRecipeMd(t *testing.T) {
@@ -498,7 +498,7 @@ func TestDefault_IsNonNil(t *testing.T) {
 	r := recipe.Default()
 	require.NotNil(t, r)
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.Equal(t, 1, r.SubAgent.MaxDepth)
+	assert.Equal(t, -1, r.SubAgent.MaxDepth, "default recipe no longer sets sub-agent depth (feature gated)")
 	assert.Equal(t, 5*time.Minute, r.Constraints.Timeout)
 }
 
@@ -966,15 +966,9 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Contains(t, r.ToolDescriptionOverrides["gemini-2.0-flash"], "bash")
 	assert.Contains(t, r.ToolDescriptionOverrides["gemini-2.0-flash"], "search_code")
 
-	// Sub-Agent Modes
-	require.NotNil(t, r.SubAgentModes)
-	assert.Contains(t, r.SubAgentModes, "explore")
-	assert.Contains(t, r.SubAgentModes, "plan")
-	assert.Contains(t, r.SubAgentModes["explore"], "read-only")
-
-	// Sub-Agent Mode Variants
-	require.NotNil(t, r.SubAgentModeVariants)
-	assert.Contains(t, r.SubAgentModeVariants["explore"], "concise")
+	// Sub-Agent Modes removed from example recipe (feature gated).
+	assert.Empty(t, r.SubAgentModes)
+	assert.Empty(t, r.SubAgentModeVariants)
 
 	// Context Summarization Prompt
 	assert.Contains(t, r.SummarizationPrompt, "Summarize this conversation")

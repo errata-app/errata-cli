@@ -76,21 +76,6 @@ Run shell commands for builds and tests only. Check exit codes.
 #### search_code
 Regex search across files. Search for usages before making changes.
 
-## Sub-Agent Modes
-### explore
-You are a read-only code explorer. Do NOT propose any file writes. Your job is to
-search the codebase, read files, and report back with findings. Be thorough — check
-imports, usages, and test files.
-
-### plan
-You are a careful planner. Analyze the codebase, identify all files that need changes,
-and produce a step-by-step implementation plan. Do NOT write code — only plan.
-
-## Sub-Agent Mode Variants
-### explore
-#### concise
-Read-only explorer. Search, read, and report findings. No writes.
-
 ## MCP Servers
 - exa: npx @exa-ai/exa-mcp-server
 - brave: npx @modelcontextprotocol/server-brave-search
@@ -210,11 +195,6 @@ context_budget: 8192
 tool_format: text_in_prompt
 tier: minimal
 mid_convo_system: false
-
-## Sub-Agent
-model: claude-sonnet-4-6
-max_depth: 2
-tools: inherit
 
 ## Sandbox
 filesystem: project_only

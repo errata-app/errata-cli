@@ -261,15 +261,17 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
 		CheckpointPath:   checkpoint.DefaultPath,
 	})
-	ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
-		opts.Adapters, opts.Cfg, opts.MCPDispatchers,
-		func(modelID string, e models.AgentEvent) {
-			if opts.Verbose {
-				fmt.Fprintf(opts.stderr(), "    [sub-agent %s] %s: %s\n", modelID, e.Type, truncate(e.Data, 80))
-			}
-		},
-	))
-	ctx = tools.WithSubagentDepth(ctx, 0)
+	if tools.SubagentEnabled {
+		ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
+			opts.Adapters, opts.Cfg, opts.MCPDispatchers,
+			func(modelID string, e models.AgentEvent) {
+				if opts.Verbose {
+					fmt.Fprintf(opts.stderr(), "    [sub-agent %s] %s: %s\n", modelID, e.Type, truncate(e.Data, 80))
+				}
+			},
+		))
+		ctx = tools.WithSubagentDepth(ctx, 0)
+	}
 	if opts.Cfg.Seed != nil {
 		ctx = tools.WithSeed(ctx, *opts.Cfg.Seed)
 	}

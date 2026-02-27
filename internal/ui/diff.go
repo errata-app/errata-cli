@@ -196,7 +196,7 @@ func RenderSelectionMenu(responses []models.ModelResponse) string {
 		}
 		var line string
 		if anyWrites {
-			var files []string
+			files := make([]string, 0, len(resp.ProposedWrites))
 			for _, fw := range resp.ProposedWrites {
 				files = append(files, fw.Path)
 			}

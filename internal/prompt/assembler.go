@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 // PromptPayload is the per-model result of deterministic prompt assembly.
@@ -77,12 +78,15 @@ func Assemble(rec RecipeAccessor, modelID, provider string, caps models.ModelCap
 		toolDescs = nil
 	}
 
-	// Resolve sub-agent mode prompts.
-	subPrompts := make(map[string]string)
-	for _, modeName := range rec.AllSubAgentModeNames() {
-		p, _ := rec.SubAgentModeVS(modeName).Resolve(modelID, provider, tier)
-		if p != "" {
-			subPrompts[modeName] = p
+	// Resolve sub-agent mode prompts (only when sub-agent feature is enabled).
+	var subPrompts map[string]string
+	if tools.SubagentEnabled {
+		subPrompts = make(map[string]string)
+		for _, modeName := range rec.AllSubAgentModeNames() {
+			p, _ := rec.SubAgentModeVS(modeName).Resolve(modelID, provider, tier)
+			if p != "" {
+				subPrompts[modeName] = p
+			}
 		}
 	}
 

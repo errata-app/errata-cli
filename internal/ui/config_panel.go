@@ -41,11 +41,17 @@ type scalarField struct {
 
 // interactiveSections lists the section names shown in /config for interactive
 // sessions. Tasks and SuccessCriteria are hidden.
-var interactiveSections = []string{
-	"models", "system-prompt", "tools", "mcp-servers",
-	"parameters", "constraints", "context", "sub-agent", "sandbox",
-	"reminders", "hooks", "output-processing", "context-summarization",
-}
+var interactiveSections = func() []string {
+	s := []string{
+		"models", "system-prompt", "tools", "mcp-servers",
+		"parameters", "constraints", "context",
+	}
+	if tools.SubagentEnabled {
+		s = append(s, "sub-agent")
+	}
+	s = append(s, "sandbox", "reminders", "hooks", "output-processing", "context-summarization")
+	return s
+}()
 
 // ── section descriptions ─────────────────────────────────────────────────────
 
@@ -124,13 +130,17 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 		{Name: "parameters", Summary: summarizeParameters(rec), Kind: "scalar"},
 		{Name: "constraints", Summary: summarizeConstraints(rec), Kind: "scalar"},
 		{Name: "context", Summary: summarizeContext(rec), Kind: "scalar"},
-		{Name: "sub-agent", Summary: summarizeSubAgent(rec), Kind: "scalar"},
-		{Name: "sandbox", Summary: summarizeSandbox(rec), Kind: "scalar"},
-		{Name: "reminders", Summary: summarizeReminders(rec), Kind: "list"},
-		{Name: "hooks", Summary: summarizeHooks(rec), Kind: "list"},
-		{Name: "output-processing", Summary: summarizeOutputProcessing(rec), Kind: "scalar"},
-		{Name: "context-summarization", Summary: summarizeContextSummarization(rec), Kind: "text", Path: "context_summarization.prompt"},
 	}
+	if tools.SubagentEnabled {
+		sections = append(sections, configSection{Name: "sub-agent", Summary: summarizeSubAgent(rec), Kind: "scalar"})
+	}
+	sections = append(sections,
+		configSection{Name: "sandbox", Summary: summarizeSandbox(rec), Kind: "scalar"},
+		configSection{Name: "reminders", Summary: summarizeReminders(rec), Kind: "list"},
+		configSection{Name: "hooks", Summary: summarizeHooks(rec), Kind: "list"},
+		configSection{Name: "output-processing", Summary: summarizeOutputProcessing(rec), Kind: "scalar"},
+		configSection{Name: "context-summarization", Summary: summarizeContextSummarization(rec), Kind: "text", Path: "context_summarization.prompt"},
+	)
 	for i := range sections {
 		if desc, ok := sectionDescriptions[sections[i].Name]; ok {
 			sections[i].Desc = desc.Brief
@@ -389,6 +399,9 @@ func buildScalarFields(sectionName string, rec *recipe.Recipe) []scalarField {
 			{Key: "compact_threshold", Path: "context.compact_threshold", Value: configPathGet(rec, "context.compact_threshold")},
 		}
 	case "sub-agent":
+		if !tools.SubagentEnabled {
+			return nil
+		}
 		return []scalarField{
 			{Key: "model", Path: "sub_agent.model", Value: configPathGet(rec, "sub_agent.model")},
 			{Key: "max_depth", Path: "sub_agent.max_depth", Value: configPathGet(rec, "sub_agent.max_depth")},
@@ -530,36 +543,6 @@ var configPaths = map[string]configPathEntry{
 			return fmt.Errorf("unknown network %q (valid: full, none)", v)
 		},
 	},
-	"sub_agent.model": {
-		Get: func(r *recipe.Recipe) string { return r.SubAgent.Model },
-		Set: func(r *recipe.Recipe, v string) error {
-			r.SubAgent.Model = v
-			return nil
-		},
-	},
-	"sub_agent.max_depth": {
-		Get: func(r *recipe.Recipe) string {
-			if r.SubAgent.MaxDepth < 0 {
-				return ""
-			}
-			return strconv.Itoa(r.SubAgent.MaxDepth)
-		},
-		Set: func(r *recipe.Recipe, v string) error {
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 0 {
-				return fmt.Errorf("invalid integer %q", v)
-			}
-			r.SubAgent.MaxDepth = n
-			return nil
-		},
-	},
-	"sub_agent.tools": {
-		Get: func(r *recipe.Recipe) string { return r.SubAgent.Tools },
-		Set: func(r *recipe.Recipe, v string) error {
-			r.SubAgent.Tools = v
-			return nil
-		},
-	},
 	"parameters.seed": {
 		Get: func(r *recipe.Recipe) string {
 			if r.ModelParams.Seed == nil {
@@ -637,6 +620,44 @@ var configPaths = map[string]configPathEntry{
 	},
 }
 
+func init() {
+	if tools.SubagentEnabled {
+		configPaths["sub_agent.model"] = configPathEntry{
+			Get: func(r *recipe.Recipe) string { return r.SubAgent.Model },
+			Set: func(r *recipe.Recipe, v string) error {
+				r.SubAgent.Model = v
+				return nil
+			},
+		}
+		configPaths["sub_agent.max_depth"] = configPathEntry{
+			Get: func(r *recipe.Recipe) string {
+				if r.SubAgent.MaxDepth < 0 {
+					return ""
+				}
+				return strconv.Itoa(r.SubAgent.MaxDepth)
+			},
+			Set: func(r *recipe.Recipe, v string) error {
+				n, err := strconv.Atoi(v)
+				if err != nil || n < 0 {
+					return fmt.Errorf("invalid integer %q", v)
+				}
+				r.SubAgent.MaxDepth = n
+				return nil
+			},
+		}
+		configPaths["sub_agent.tools"] = configPathEntry{
+			Get: func(r *recipe.Recipe) string { return r.SubAgent.Tools },
+			Set: func(r *recipe.Recipe, v string) error {
+				r.SubAgent.Tools = v
+				return nil
+			},
+		}
+		configPathDefaults["sub_agent.model"] = "same as parent"
+		configPathDefaults["sub_agent.max_depth"] = "1"
+		configPathDefaults["sub_agent.tools"] = "all"
+	}
+}
+
 // configPathGet returns the current string value for a dot-path.
 func configPathGet(rec *recipe.Recipe, path string) string {
 	if entry, ok := configPaths[path]; ok {
@@ -674,9 +695,6 @@ var configPathDefaults = map[string]string{
 	"context.strategy":            "auto_compact",
 	"context.max_history_turns":   "20",
 	"context.compact_threshold":   "0.80",
-	"sub_agent.model":             "same as parent",
-	"sub_agent.max_depth":         "1",
-	"sub_agent.tools":             "all",
 	"sandbox.filesystem":          "unrestricted",
 	"sandbox.network":             "full",
 	"parameters.seed":             "none",

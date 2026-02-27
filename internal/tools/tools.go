@@ -41,6 +41,24 @@ const (
 	SpawnAgentToolName = "spawn_agent"
 )
 
+// SubagentEnabled gates all user-facing sub-agent functionality.
+// When false, spawn_agent is excluded from Definitions, the config panel
+// omits the sub-agent section, and dispatcher wiring is skipped.
+// Set to true to re-enable the feature.
+const SubagentEnabled = false
+
+func init() {
+	if !SubagentEnabled {
+		filtered := Definitions[:0]
+		for _, d := range Definitions {
+			if d.Name != SpawnAgentToolName {
+				filtered = append(filtered, d)
+			}
+		}
+		Definitions = filtered
+	}
+}
+
 // maxReadLines is the hard cap on lines returned by ExecuteRead.
 const maxReadLines = 2000
 

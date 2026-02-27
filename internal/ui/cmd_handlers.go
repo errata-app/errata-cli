@@ -305,13 +305,15 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
 			CheckpointPath:   checkpoint.DefaultPath,
 		})
-		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
-			ads, cfg, mcpDispatchers,
-			func(modelID string, e models.AgentEvent) {
-				prog.Send(agentEventMsg{modelID: modelID, event: e})
-			},
-		))
-		runCtx = tools.WithSubagentDepth(runCtx, 0)
+		if tools.SubagentEnabled {
+			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
+				ads, cfg, mcpDispatchers,
+				func(modelID string, e models.AgentEvent) {
+					prog.Send(agentEventMsg{modelID: modelID, event: e})
+				},
+			))
+			runCtx = tools.WithSubagentDepth(runCtx, 0)
+		}
 		if seed != nil {
 			runCtx = tools.WithSeed(runCtx, *seed)
 		}
@@ -493,13 +495,15 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
 			CheckpointPath:   checkpoint.DefaultPath,
 		})
-		runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
-			ads, cfg, mcpDispatchers,
-			func(modelID string, e models.AgentEvent) {
-				prog.Send(agentEventMsg{modelID: modelID, event: e})
-			},
-		))
-		runCtx = tools.WithSubagentDepth(runCtx, 0)
+		if tools.SubagentEnabled {
+			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
+				ads, cfg, mcpDispatchers,
+				func(modelID string, e models.AgentEvent) {
+					prog.Send(agentEventMsg{modelID: modelID, event: e})
+				},
+			))
+			runCtx = tools.WithSubagentDepth(runCtx, 0)
+		}
 		if seed != nil {
 			runCtx = tools.WithSeed(runCtx, *seed)
 		}

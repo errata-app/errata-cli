@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/prompt"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 // mockRecipe implements prompt.RecipeAccessor for testing.
@@ -132,8 +133,12 @@ func TestAssemble_SubAgentPrompts(t *testing.T) {
 	caps := models.ModelCapabilities{ToolFormat: models.ToolFormatNative}
 
 	payload := prompt.Assemble(rec, "claude-sonnet-4-6", "anthropic", caps)
-	assert.Equal(t, "read-only explorer", payload.SubAgentPrompts["explore"])
-	assert.Equal(t, "careful planner", payload.SubAgentPrompts["plan"])
+	if tools.SubagentEnabled {
+		assert.Equal(t, "read-only explorer", payload.SubAgentPrompts["explore"])
+		assert.Equal(t, "careful planner", payload.SubAgentPrompts["plan"])
+	} else {
+		assert.Nil(t, payload.SubAgentPrompts, "sub-agent prompts should be nil when feature is disabled")
+	}
 }
 
 func TestAssemble_SummarizationPrompt(t *testing.T) {
