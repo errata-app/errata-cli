@@ -204,7 +204,6 @@ func DefaultCapabilities(provider, modelID string) models.ModelCapabilities {
 type ModelProfile struct {
 	ContextBudget  int
 	ToolFormat     string
-	Tier           string
 	SystemRole     *bool
 	MidConvoSystem *bool
 }

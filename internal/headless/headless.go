@@ -18,6 +18,7 @@ import (
 	"github.com/suarezc/errata/internal/criteria"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
+	"github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
@@ -224,6 +225,8 @@ func buildActiveDefs(rec *recipe.Recipe, mcpDefs []tools.ToolDef) []tools.ToolDe
 	}
 	activeDefs := tools.DefinitionsAllowed(toolAllowlist, nil)
 	activeDefs = append(activeDefs, tools.FilterDefs(mcpDefs, nil)...)
+	// Apply recipe-level tool description overrides (uniform for all models).
+	activeDefs = tools.ApplyDescriptions(activeDefs, rec.ToolDescriptions)
 	// Apply sandbox restrictions.
 	if rec.Sandbox.Filesystem == "read_only" {
 		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
@@ -250,6 +253,7 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	ctx := tools.WithActiveTools(parent, activeDefs)
 	ctx = tools.WithMCPDispatchers(ctx, opts.MCPDispatchers)
 	ctx = tools.WithBashPrefixes(ctx, bashPrefixes)
+	ctx = prompt.WithSummarizationPrompt(ctx, rec.SummarizationPrompt)
 	ctx = sandbox.WithConfig(ctx, sandbox.Config{
 		Filesystem:  rec.Sandbox.Filesystem,
 		Network:     rec.Sandbox.Network,

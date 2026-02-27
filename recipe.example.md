@@ -20,22 +20,6 @@ You are working on a Go monorepo. Always run `go vet ./...` and `go test ./...` 
 making any changes. Use conventional commits (feat:, fix:, chore:). Keep functions
 small and focused; prefer table-driven tests.
 
-## System Prompt Variants
-### concise
-Go monorepo. Run `go vet` and `go test` after changes. Use conventional commits.
-
-### minimal
-Go project. Test after changes.
-
-## System Prompt Overrides
-### gpt-4o
-You are working on a Go monorepo. Always run `go vet ./...` and `go test ./...` after
-making any changes. Use conventional commits (feat:, fix:, chore:). Keep functions
-small and focused. Prefer returning errors over panicking.
-
-### gemini-2.0-flash
-concise
-
 ## Tools
 - read_file
 - list_directory
@@ -59,22 +43,6 @@ large files rather than reading the entire file.
 ### search_code
 Regex search across the codebase. Use this before editing to understand existing
 patterns. Always search for usages before renaming or deleting a function.
-
-## Tool Description Variants
-### bash
-#### concise
-Run tests, builds, and lints. Check exit codes.
-
-### search_code
-#### concise
-Regex search. Search before editing.
-
-## Tool Description Overrides
-### gemini-2.0-flash
-#### bash
-Run shell commands for builds and tests only. Check exit codes.
-#### search_code
-Regex search across files. Search for usages before making changes.
 
 ## MCP Servers
 - exa: npx @exa-ai/exa-mcp-server
@@ -104,11 +72,6 @@ Summarize this conversation for context continuity. Preserve:
 Discard verbose tool output, full file contents, and abandoned approaches.
 Format: Start with "Current task: ..." then list key items concisely.
 Reply with ONLY the summary.
-
-## Context Summarization Prompt Variants
-### concise
-Summarize the conversation. Keep file paths, decisions, errors, and current task.
-Discard verbose output. Start with "Task: ...". Reply with ONLY the summary.
 
 ## System Reminders
 ### context_warning
@@ -171,15 +134,6 @@ truncation: head_tail
 max_lines: 500
 truncation: head
 
-## Output Processing Overrides
-### gemini-2.0-flash
-#### bash
-max_lines: 50
-truncation: tail
-#### search_code
-max_lines: 30
-truncation: head_tail
-
 ## Model Profiles
 ### gpt-4o
 context_budget: 128000
@@ -188,12 +142,10 @@ tool_format: function_calling
 ### gemini-2.0-flash
 context_budget: 1000000
 tool_format: function_calling
-tier: concise
 
 ### local-llama
 context_budget: 8192
 tool_format: text_in_prompt
-tier: minimal
 mid_convo_system: false
 
 ## Sandbox

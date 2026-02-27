@@ -469,6 +469,22 @@ func FilterDefs(defs []ToolDef, disabled map[string]bool) []ToolDef {
 	return out
 }
 
+// ApplyDescriptions returns a copy of defs with descriptions replaced from descs.
+// Tool names not present in descs are left unchanged.
+func ApplyDescriptions(defs []ToolDef, descs map[string]string) []ToolDef {
+	if len(descs) == 0 {
+		return defs
+	}
+	out := make([]ToolDef, len(defs))
+	copy(out, defs)
+	for i := range out {
+		if d, ok := descs[out[i].Name]; ok {
+			out[i].Description = d
+		}
+	}
+	return out
+}
+
 // systemPromptExtra holds optional user-supplied text appended after the
 // built-in tool guidance. Set once at startup via SetSystemPromptExtra.
 var systemPromptExtra string
@@ -495,8 +511,7 @@ Tool use guidance:
 
 // SystemPromptGuidance returns the fixed tool-use guidance text.
 // This is the same guidance as in SystemPromptSuffix but without the
-// user-authored extra. Used by adapters that read their system prompt
-// from a PromptPayload instead.
+// user-authored extra.
 func SystemPromptGuidance() string {
 	return toolUseGuidance
 }

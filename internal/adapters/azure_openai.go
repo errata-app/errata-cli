@@ -11,7 +11,6 @@ import (
 	"github.com/openai/openai-go/azure"
 	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
-	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -66,17 +65,9 @@ func (a *AzureOpenAIAdapter) RunAgent(
 
 	qualifiedID := "azure/" + a.deployName
 
-	// Resolve system prompt: prefer payload from context, fall back to built-in.
-	var systemMsg string
-	var toolDescOverrides map[string]string
-	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
-		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
-		toolDescOverrides = payload.ToolDescriptions
-	} else {
-		systemMsg = tools.SystemPromptSuffix()
-	}
+	systemMsg := tools.SystemPromptSuffix()
 
-	toolParams := buildOpenAITools(ctx, toolDescOverrides)
+	toolParams := buildOpenAITools(ctx)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
 	messages = append(messages, openai.SystemMessage(systemMsg))
 	for _, turn := range history {

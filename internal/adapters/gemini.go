@@ -10,7 +10,6 @@ import (
 
 	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
-	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -66,18 +65,10 @@ func (a *GeminiAdapter) RunAgent(
 		return BuildErrorResponse(a.modelID, "google/"+a.modelID, start, 0, 0, err), err
 	}
 
-	// Resolve system prompt: prefer payload from context, fall back to built-in.
-	var systemMsg string
-	var toolDescOverrides map[string]string
-	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
-		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
-		toolDescOverrides = payload.ToolDescriptions
-	} else {
-		systemMsg = tools.SystemPromptSuffix()
-	}
+	systemMsg := tools.SystemPromptSuffix()
 
 	config := &genai.GenerateContentConfig{
-		Tools:             buildGeminiTools(ctx, toolDescOverrides),
+		Tools:             buildGeminiTools(ctx),
 		SystemInstruction: genai.NewContentFromText(systemMsg, ""),
 	}
 	if seed, ok := tools.SeedFromContext(ctx); ok {
@@ -148,7 +139,7 @@ func (a *GeminiAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "google/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
 }
 
-func buildGeminiTools(ctx context.Context, descOverrides map[string]string) []*genai.Tool {
+func buildGeminiTools(ctx context.Context) []*genai.Tool {
 	active := tools.ActiveToolsFromContext(ctx)
 	decls := make([]*genai.FunctionDeclaration, 0, len(active))
 	for _, def := range active {
@@ -166,14 +157,9 @@ func buildGeminiTools(ctx context.Context, descOverrides map[string]string) []*g
 		required := make([]string, len(def.Required))
 		copy(required, def.Required)
 
-		desc := def.Description
-		if d, ok := descOverrides[def.Name]; ok {
-			desc = d
-		}
-
 		decls = append(decls, &genai.FunctionDeclaration{
 			Name:        def.Name,
-			Description: desc,
+			Description: def.Description,
 			Parameters: &genai.Schema{
 				Type:       genai.TypeObject,
 				Properties: props,

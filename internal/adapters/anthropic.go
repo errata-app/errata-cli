@@ -10,7 +10,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
-	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -39,17 +38,9 @@ func (a *AnthropicAdapter) RunAgent(
 ) (models.ModelResponse, error) {
 	client := anthropic.NewClient(option.WithAPIKey(a.apiKey))
 
-	// Resolve system prompt: prefer payload from context, fall back to built-in.
-	var systemMsg string
-	var toolDescOverrides map[string]string
-	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
-		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
-		toolDescOverrides = payload.ToolDescriptions
-	} else {
-		systemMsg = tools.SystemPromptSuffix()
-	}
+	systemMsg := tools.SystemPromptSuffix()
 
-	toolParams := buildAnthropicTools(ctx, toolDescOverrides)
+	toolParams := buildAnthropicTools(ctx)
 	messages := make([]anthropic.MessageParam, 0, len(history)+1)
 	for _, turn := range history {
 		switch turn.Role {
@@ -137,7 +128,7 @@ func (a *AnthropicAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, totalCacheCreation, totalOutput, proposed), nil
 }
 
-func buildAnthropicTools(ctx context.Context, descOverrides map[string]string) []anthropic.ToolUnionParam {
+func buildAnthropicTools(ctx context.Context) []anthropic.ToolUnionParam {
 	active := tools.ActiveToolsFromContext(ctx)
 	out := make([]anthropic.ToolUnionParam, 0, len(active))
 	for _, def := range active {
@@ -151,14 +142,9 @@ func buildAnthropicTools(ctx context.Context, descOverrides map[string]string) [
 		required := make([]string, len(def.Required))
 		copy(required, def.Required)
 
-		desc := def.Description
-		if d, ok := descOverrides[def.Name]; ok {
-			desc = d
-		}
-
 		tp := anthropic.ToolParam{
 			Name:        def.Name,
-			Description: anthropic.String(desc),
+			Description: anthropic.String(def.Description),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: props,
 				Required:   required,

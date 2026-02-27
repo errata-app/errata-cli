@@ -11,7 +11,6 @@ import (
 	"github.com/openai/openai-go/shared"
 	"github.com/suarezc/errata/internal/capabilities"
 	"github.com/suarezc/errata/internal/models"
-	promptpkg "github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -40,17 +39,9 @@ func (a *OpenAIAdapter) RunAgent(
 ) (models.ModelResponse, error) {
 	client := openai.NewClient(option.WithAPIKey(a.apiKey))
 
-	// Resolve system prompt: prefer payload from context, fall back to built-in.
-	var systemMsg string
-	var toolDescOverrides map[string]string
-	if payload, ok := promptpkg.PayloadFromContext(ctx, a.modelID); ok {
-		systemMsg = promptpkg.BuildSystemMessage(payload, tools.SystemPromptGuidance())
-		toolDescOverrides = payload.ToolDescriptions
-	} else {
-		systemMsg = tools.SystemPromptSuffix()
-	}
+	systemMsg := tools.SystemPromptSuffix()
 
-	toolParams := buildOpenAITools(ctx, toolDescOverrides)
+	toolParams := buildOpenAITools(ctx)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
 	messages = append(messages, openai.SystemMessage(systemMsg))
 	for _, turn := range history {
@@ -129,7 +120,7 @@ func (a *OpenAIAdapter) RunAgent(
 	return BuildSuccessResponse(a.modelID, "openai/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
 }
 
-func buildOpenAITools(ctx context.Context, descOverrides map[string]string) []openai.ChatCompletionToolParam {
+func buildOpenAITools(ctx context.Context) []openai.ChatCompletionToolParam {
 	active := tools.ActiveToolsFromContext(ctx)
 	out := make([]openai.ChatCompletionToolParam, 0, len(active))
 	for _, def := range active {
@@ -143,11 +134,6 @@ func buildOpenAITools(ctx context.Context, descOverrides map[string]string) []op
 		required := make([]string, len(def.Required))
 		copy(required, def.Required)
 
-		desc := def.Description
-		if d, ok := descOverrides[def.Name]; ok {
-			desc = d
-		}
-
 		params := shared.FunctionParameters{
 			"type":       "object",
 			"properties": props,
@@ -155,7 +141,7 @@ func buildOpenAITools(ctx context.Context, descOverrides map[string]string) []op
 		}
 		fd := shared.FunctionDefinitionParam{
 			Name:        def.Name,
-			Description: openai.String(desc),
+			Description: openai.String(def.Description),
 			Parameters:  params,
 		}
 		out = append(out, openai.ChatCompletionToolParam{
