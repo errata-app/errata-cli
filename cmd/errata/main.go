@@ -21,7 +21,6 @@ import (
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/tools"
 	"github.com/suarezc/errata/internal/ui"
-	"github.com/suarezc/errata/internal/web"
 )
 
 var (
@@ -57,11 +56,6 @@ func main() {
 	root.AddCommand(
 		statsCmd,
 		runCmd,
-		&cobra.Command{
-			Use:   "serve",
-			Short: "Start web interface on localhost:8080",
-			RunE:  runServe,
-		},
 	)
 
 	if err := root.Execute(); err != nil {
@@ -159,39 +153,6 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath)
 	defer cleanup()
 	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec)
-}
-
-func runServe(cmd *cobra.Command, args []string) error {
-	rec := loadRecipe()
-	cfg := config.Load()
-	rec.ApplyTo(&cfg)
-	applyProjectRoot(rec)
-	applyRecipeToolSettings(rec)
-	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath)
-	defer cleanup()
-	if len(ads) == 0 {
-		return fmt.Errorf("no models available — set at least one API key in .env")
-	}
-	for _, w := range warnings {
-		fmt.Fprintln(os.Stderr, "warning:", w)
-	}
-	_ = sessionID // web server creates its own session ID per connection
-	addr := ":8080"
-	fmt.Fprintf(os.Stderr, "Errata running at http://localhost%s\n", addr)
-
-	srv := web.New(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg, mcpDefs, mcpDispatchers, warnings, rec)
-
-	// Graceful shutdown on SIGINT/SIGTERM. Active WebSocket connections will
-	// have their contexts cancelled, triggering per-run checkpoint saves.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Fprintln(os.Stderr, "\nshutting down…")
-		_ = srv.Shutdown(context.Background())
-	}()
-
-	return srv.Start(addr)
 }
 
 func runHeadless(cmd *cobra.Command, args []string) error {
