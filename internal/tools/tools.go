@@ -494,6 +494,18 @@ var systemPromptExtra string
 // Subsequent calls overwrite the previous value.
 func SetSystemPromptExtra(s string) { systemPromptExtra = s }
 
+// toolGuidanceOverride, when non-empty, replaces the built-in toolUseGuidance const.
+// Set via recipe ## Tool Guidance or /config tool-guidance.
+var toolGuidanceOverride string
+
+// SetToolGuidance overrides the built-in tool-use guidance with custom text.
+// Pass "" to restore the default.
+func SetToolGuidance(s string) { toolGuidanceOverride = s }
+
+// DefaultToolGuidance returns the built-in tool-use guidance text.
+// Useful for documentation and as a starting point for customization.
+func DefaultToolGuidance() string { return toolUseGuidance }
+
 // toolUseGuidance is the fixed guidance text that teaches models how to use tools.
 const toolUseGuidance = `
 Tool use guidance:
@@ -511,12 +523,17 @@ Tool use guidance:
 // spawnAgentGuidance is appended to toolUseGuidance only when SubagentEnabled is true.
 const spawnAgentGuidance = `- Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.`
 
-// effectiveGuidance returns toolUseGuidance with spawn_agent line included only when enabled.
+// effectiveGuidance returns toolUseGuidance (or its override) with spawn_agent line
+// included only when enabled.
 func effectiveGuidance() string {
-	if SubagentEnabled {
-		return toolUseGuidance + spawnAgentGuidance + "\n"
+	base := toolUseGuidance
+	if toolGuidanceOverride != "" {
+		base = toolGuidanceOverride
 	}
-	return toolUseGuidance
+	if SubagentEnabled {
+		return base + spawnAgentGuidance + "\n"
+	}
+	return base
 }
 
 // SystemPromptGuidance returns the fixed tool-use guidance text.

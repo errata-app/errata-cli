@@ -781,6 +781,10 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Contains(t, r.ToolDescriptions, "search_code")
 	assert.Contains(t, r.ToolDescriptions["bash"], "exit codes")
 
+	// Tool Guidance
+	assert.Contains(t, r.ToolGuidance, "Tool use guidance")
+	assert.Contains(t, r.ToolGuidance, "list_directory")
+
 	// Sub-Agent Modes removed from example recipe (feature gated).
 	assert.Empty(t, r.SubAgentModes)
 
@@ -1063,4 +1067,59 @@ filesystem: project_only
 `))
 	require.NoError(t, err)
 	assert.False(t, r.Sandbox.AllowLocalFetch)
+}
+
+// ─── Tool Guidance ───────────────────────────────────────────────────────────
+
+func TestParse_ToolGuidance(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, `
+## Tool Guidance
+Custom tool guidance:
+- Always use search_code before editing.
+- Never use bash for file manipulation.
+`))
+	require.NoError(t, err)
+	assert.Contains(t, r.ToolGuidance, "Custom tool guidance")
+	assert.Contains(t, r.ToolGuidance, "Never use bash")
+}
+
+func TestParse_ToolGuidance_Absent(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	require.NoError(t, err)
+	assert.Empty(t, r.ToolGuidance)
+}
+
+func TestApplyTo_ToolGuidance(t *testing.T) {
+	r, _ := recipe.Parse(writeRecipe(t, "## Tool Guidance\nCustom guidance text.\n"))
+	cfg := defaultCfg()
+	r.ApplyTo(&cfg)
+	assert.Equal(t, "Custom guidance text.", cfg.ToolGuidance)
+}
+
+func TestApplyTo_ToolGuidance_Empty_DoesNotOverwrite(t *testing.T) {
+	r, _ := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	cfg := defaultCfg()
+	cfg.ToolGuidance = "existing guidance"
+	r.ApplyTo(&cfg)
+	assert.Equal(t, "existing guidance", cfg.ToolGuidance, "absent ## Tool Guidance must not clear existing config")
+}
+
+func TestMarshalMarkdown_ToolGuidance_RoundTrip(t *testing.T) {
+	orig := &recipe.Recipe{
+		Name:         "Test",
+		ToolGuidance: "My custom guidance:\n- Rule one\n- Rule two",
+	}
+	md := orig.MarshalMarkdown()
+	assert.Contains(t, md, "## Tool Guidance")
+
+	path := writeRecipe(t, md)
+	parsed, err := recipe.Parse(path)
+	require.NoError(t, err)
+	assert.Equal(t, orig.ToolGuidance, parsed.ToolGuidance)
+}
+
+func TestMarshalMarkdown_ToolGuidance_Empty(t *testing.T) {
+	r := &recipe.Recipe{Name: "Test"}
+	md := r.MarshalMarkdown()
+	assert.NotContains(t, md, "## Tool Guidance")
 }

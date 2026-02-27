@@ -1085,3 +1085,55 @@ func TestExecuteBash_NoPrefixes_AllAllowed(t *testing.T) {
 	out := tools.ExecuteBash(context.Background(), "echo unrestricted")
 	assert.Contains(t, out, "unrestricted")
 }
+
+// ─── SetToolGuidance / DefaultToolGuidance ─────────────────────────────────
+
+func TestDefaultToolGuidance_ContainsKeyTools(t *testing.T) {
+	g := tools.DefaultToolGuidance()
+	assert.Contains(t, g, "list_directory")
+	assert.Contains(t, g, "write_file")
+	assert.Contains(t, g, "search_code")
+}
+
+func TestSetToolGuidance_OverridesEffectiveGuidance(t *testing.T) {
+	original := tools.SystemPromptSuffix()
+	tools.SetToolGuidance("Custom guidance: use tools wisely.")
+	defer tools.SetToolGuidance("")
+
+	modified := tools.SystemPromptSuffix()
+	assert.Contains(t, modified, "Custom guidance: use tools wisely.")
+	assert.NotContains(t, modified, "list_directory")
+	assert.NotEqual(t, original, modified)
+}
+
+func TestSetToolGuidance_ClearRestoresDefault(t *testing.T) {
+	original := tools.SystemPromptSuffix()
+	tools.SetToolGuidance("temporary override")
+	tools.SetToolGuidance("")
+
+	restored := tools.SystemPromptSuffix()
+	assert.Equal(t, original, restored)
+}
+
+func TestSetToolGuidance_WithSystemPromptExtra(t *testing.T) {
+	tools.SetToolGuidance("Custom guidance.")
+	tools.SetSystemPromptExtra("Extra context.")
+	defer func() {
+		tools.SetToolGuidance("")
+		tools.SetSystemPromptExtra("")
+	}()
+
+	s := tools.SystemPromptSuffix()
+	assert.Contains(t, s, "Custom guidance.")
+	assert.Contains(t, s, "Extra context.")
+	assert.NotContains(t, s, "list_directory")
+}
+
+func TestSystemPromptGuidance_ReflectsOverride(t *testing.T) {
+	tools.SetToolGuidance("Overridden guidance.")
+	defer tools.SetToolGuidance("")
+
+	g := tools.SystemPromptGuidance()
+	assert.Contains(t, g, "Overridden guidance.")
+	assert.NotContains(t, g, "list_directory")
+}

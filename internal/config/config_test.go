@@ -27,6 +27,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Empty(t, cfg.MCPServers)
 	assert.Empty(t, cfg.SystemPromptExtra)
 	assert.Empty(t, cfg.SubagentModel)
+	assert.Empty(t, cfg.ToolGuidance)
 }
 
 func TestResolvedActiveModels_FromKeys(t *testing.T) {
