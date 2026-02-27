@@ -44,7 +44,12 @@ errata/
 │   │   ├── openai.go        # OpenAIAdapter.RunAgent()
 │   │   ├── gemini.go        # GeminiAdapter.RunAgent()
 │   │   ├── openrouter.go    # OpenRouterAdapter — OpenAI-compat, "provider/model" IDs
-│   │   └── litellm.go       # LiteLLMAdapter — OpenAI-compat, "litellm/<model>" IDs
+│   │   ├── litellm.go       # LiteLLMAdapter — OpenAI-compat, "litellm/<model>" IDs
+│   │   ├── azure_openai.go  # AzureOpenAIAdapter — Azure-hosted OpenAI models
+│   │   ├── bedrock.go       # BedrockAdapter — AWS Bedrock (Converse API)
+│   │   └── vertex_ai.go     # VertexAIAdapter — Google Cloud Vertex AI
+│   ├── capabilities/
+│   │   └── defaults.go      # DefaultCapabilities(), MergeWithProfile(), ModelProfile
 │   ├── pricing/
 │   │   └── pricing.go       # LoadPricing(), CostUSD(), ContextWindowTokens() — OpenRouter fetch + hardcoded fallback
 │   ├── runner/
@@ -53,7 +58,11 @@ errata/
 │   │   ├── client.go        # JSON-RPC 2.0 stdio client (Content-Length framing)
 │   │   └── manager.go       # MCP server subprocess lifecycle, tool discovery, dispatcher registry
 │   ├── tools/
-│   │   └── tools.go         # FileWrite, ToolDef, ExecuteRead(), ApplyWrites(), FilterDefs(), SetSystemPromptExtra()
+│   │   └── tools.go         # FileWrite, ToolDef, ExecuteRead(), ApplyWrites(), FilterDefs(), ApplyDescriptions()
+│   ├── prompt/
+│   │   └── assembler.go     # DefaultSummarizationPrompt, WithSummarizationPrompt(), ResolveSummarizationPrompt()
+│   ├── recipe/
+│   │   └── recipe.go        # Recipe struct, Parse(), MarshalMarkdown() — recipe.md parser
 │   ├── diff/
 │   │   └── diff.go          # Compute() → FileDiff (LCS)
 │   ├── preferences/
@@ -68,6 +77,22 @@ errata/
 │   │   └── commands.go      # Command{Name,Desc}; All — canonical slash command registry
 │   ├── prompthistory/
 │   │   └── prompthistory.go # Load(), Append() — prompt history JSONL persistence
+│   ├── headless/
+│   │   └── headless.go      # Run() — non-interactive recipe task runner (errata run)
+│   ├── output/
+│   │   └── output.go        # BuildReport(), Save(), Collector — structured run output
+│   ├── criteria/
+│   │   └── criteria.go      # Evaluate() — success criteria checker for headless runs
+│   ├── sandbox/
+│   │   └── sandbox.go       # WithConfig(), Config — filesystem/network sandboxing
+│   ├── hooks/
+│   │   └── hooks.go         # Execute() — lifecycle event hooks (post_tool_use, etc.)
+│   ├── reminders/
+│   │   └── reminders.go     # Evaluate() — conditional mid-conversation system reminders
+│   ├── tooloutput/
+│   │   └── tooloutput.go    # Process() — deterministic output processing rules
+│   ├── subagent/
+│   │   └── subagent.go      # NewDispatcher() — sub-agent delegation (compile-time gated)
 │   ├── ui/
 │   │   ├── app.go           # bubbletea program, mode state machine
 │   │   ├── cmd_handlers.go  # slash command dispatch and handlers
@@ -107,21 +132,8 @@ The TUI REPL accepts slash commands.
 | `/wipe` | Wipe display and conversation memory |
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/compact` | Summarize conversation history to free up context window |
-| `/models` | Query each configured provider for all available models; shows per-model pricing ($X in / $Y out /1M tokens); for OpenAI and Gemini shows only chat-capable models with a "N of M, chat only" count; caps display at 10 per provider with "… and N more" notice |
-| `/tools` | Show current tool status (`on`/`off` for each tool, including any active MCP tools) |
-| `/tools off <name...>` | Disable one or more tools for this session — works for both built-in and MCP tools |
-| `/tools on <name...>` | Re-enable specific tools |
-| `/tools reset` | Re-enable all tools |
-| `/stats` | Show preference win counts and per-model session cost |
-| `/totalcost` | Show total inference cost accumulated this session |
-| `/model <id> [id...]` | Restrict runs to specific model(s) — sticky until reset |
-| `/model` | Reset model filter back to all configured models |
 | `/config` | View/edit configuration; `/config <section>` jumps to section; inline text editing with Ctrl+S to save |
-| `/set <path> [value]` | Get or set a config path (e.g. `/set constraints.timeout 10m`); bare path queries current value |
-| `/seed <n>` | Set seed for reproducibility; bare `/seed` clears |
-| `/subset <id...>` | Target specific model(s); bare `/subset` shows current |
-| `/all` | Reset to all models |
-| `/remind [name]` | Fire a named reminder; bare `/remind` lists available |
+| `/stats` | Show preference win counts and per-model session cost |
 | `/export recipe [path]` | Export the current session recipe to Markdown (default: `recipe_export.md`) |
 | `/export output [path]` | Export the latest run's output report (default: `data/outputs/`) |
 | `/import recipe <path>` | Import a recipe file, replacing the current session recipe |
@@ -130,6 +142,9 @@ The TUI REPL accepts slash commands.
 | `Ctrl-D` | Exit (TUI only) |
 
 **Verbose mode** defaults to **off**.
+
+Model filtering, tool toggling, seed, and other settings previously accessible via
+dedicated slash commands are now managed through `/config`.
 
 **TUI prompt history** (Up-arrow cycling and Ctrl-R search):
 - `↑` on the first textarea line → cycle backward through previous prompts
@@ -164,7 +179,7 @@ The canonical command list is defined in `internal/commands/commands.go` (`comma
    - Models see and can call MCP tools identically to built-in tools
    - Loop exits when the model stops calling tools
 
-4. Active tool set is configurable per-session with `/tools off <name>` / `/tools on <name>` / `/tools reset` — works for both built-in and MCP tools
+4. Active tool set is configurable per-session via `/config` (tools section) — works for both built-in and MCP tools
 5. Live tool-event panels render while goroutines run
 6. If no model proposed any file writes, responses are shown as text and the run ends
 7. Otherwise a compact diff view shows each model's proposed changes
@@ -217,23 +232,6 @@ These are surfaced in:
 - **TUI diff headers** — same stats in the `── model-id  …` section separator
 - **TUI selection menu** — `(1234ms  $0.0083)` next to each option
 - **`/models` listing** — `$X in / $Y out /1M` per model
-
----
-
-## Model Filtering (`/model`)
-
-The TUI maintains a per-session **active adapter filter** (nil = use all). The filter
-is sticky — it persists across prompts until explicitly reset.
-
-- `/model claude-sonnet-4-6` → only that adapter runs for subsequent prompts
-- `/model claude-sonnet-4-6 gpt-4o` → two adapters run
-- `/model` (bare) → reset to all configured adapters
-
-Validation is **strict**: unknown model IDs are rejected immediately with the list of
-available IDs. No changes take effect if any ID in the list is invalid.
-
-**Implementation:** `App.activeAdapters` passes the filtered slice to `runner.RunAll`;
-only filtered panels are created.
 
 ---
 
@@ -290,20 +288,31 @@ Log schema per line:
 ```
 tools          ← stdlib only
 pricing        ← stdlib only
+prompt         ← stdlib only (context)
 mcp            ← tools (for ToolDef, MCPDispatcher)
 models         ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
 config         ← stdlib only
 commands       ← stdlib only
 prompthistory  ← stdlib only
+capabilities   ← models
 checkpoint     ← models, tools (for FileWrite conversion)
-adapters       ← models, pricing, tools, config, provider SDKs
-runner         ← models, pricing, checkpoint
+adapters       ← models, pricing, tools, config, capabilities, provider SDKs
+runner         ← models, pricing, prompt, checkpoint
 diff           ← os, strings, sergi/go-diff
 history        ← models, encoding/json, os
 logging        ← models (ModelAdapter, ModelResponse), stdlib
 preferences    ← models (for ModelResponse latency/ID), encoding/json, os
-ui             ← models, pricing, tools, runner, diff, history, adapters, config, commands, prompthistory, checkpoint, bubbletea, lipgloss
-cmd/errata     ← config, adapters, pricing, logging, ui, mcp, tools
+recipe         ← config
+tooloutput     ← stdlib only
+criteria       ← models
+sandbox        ← stdlib only (context)
+hooks          ← stdlib only
+reminders      ← stdlib only
+headless       ← models, tools, prompt, recipe, runner, adapters, config, criteria, output, sandbox, subagent, checkpoint
+output         ← models, recipe, criteria
+subagent       ← models, config, tools
+ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, commands, prompthistory, checkpoint, recipe, output, sandbox, subagent, bubbletea, lipgloss
+cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, recipe
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -318,8 +327,8 @@ graph and must remain adapter-agnostic.
 
 ## Agentic Tool Loop Pattern
 
-Each adapter (`anthropic.go`, `openai.go`, `gemini.go`, `openrouter.go`, `litellm.go`)
-follows the same pattern:
+Each adapter (`anthropic.go`, `openai.go`, `gemini.go`, `openrouter.go`, `litellm.go`,
+`azure_openai.go`, `bedrock.go`, `vertex_ai.go`) follows the same pattern:
 
 ```go
 var totalInput, totalOutput int64
@@ -367,7 +376,7 @@ from `internal/adapters/common.go`. `DispatchTool` first checks MCP dispatchers 
 falls through to the built-in switch. Adding a built-in tool requires only adding a `ToolDef` to
 `tools.Definitions` in `internal/tools/tools.go` and a new case in `DispatchTool`.
 
-**Tool availability is context-scoped:** The active tool set (after `/tools off` filtering) is stored
+**Tool availability is context-scoped:** The active tool set (after filtering) is stored
 in the request `context.Context` via `tools.WithActiveTools`. Each adapter reads it with
 `tools.ActiveToolsFromContext(ctx)` to build the tool list passed to the API.
 
@@ -551,7 +560,7 @@ the `tools` capability can be connected via the recipe `## MCP Servers` section.
 
 ### MCP tool dispatch flow
 
-1. `launchRun` builds `activeDefs` by combining `tools.ActiveDefinitions(disabled)` + `tools.FilterDefs(mcpDefs, disabled)` — both respect `/tools off`
+1. `launchRun` builds `activeDefs` by combining `tools.DefinitionsAllowed(allowlist, disabled)` + `tools.FilterDefs(mcpDefs, disabled)`
 2. `tools.WithActiveTools(ctx, activeDefs)` stores the combined list
 3. `tools.WithMCPDispatchers(ctx, dispatchers)` stores the call functions
 4. Each adapter reads `ActiveToolsFromContext(ctx)` to build the tool list sent to the API
@@ -569,16 +578,9 @@ the `tools` capability can be connected via the recipe `## MCP Servers` section.
 
 ### Tool management with MCP
 
-MCP tools appear alongside built-in tools in `/tools` output (labeled `(mcp)`):
-
-```
-  [on ] read_file
-  [on ] bash
-  [on ] search        (mcp)   ← Exa search tool
-  [off] find_similar  (mcp)   ← disabled for this session
-```
-
-`/tools off search` and `/tools on search` work identically for MCP tool names.
+MCP tools appear alongside built-in tools in `/config` (tools section) and are
+toggled the same way. Disabling a tool via `/config` works identically for both
+built-in and MCP tool names.
 
 ### Schema translation
 
@@ -608,20 +610,13 @@ The team uses conventional commits (feat:, fix:, chore:).
 
 Implementation: `tools.SetSystemPromptExtra(cfg.SystemPromptExtra)` is called once at
 startup in `setupAdapters`. `SystemPromptSuffix()` appends the extra text to its return
-value, which all five adapters call when constructing the system message.
+value, which all adapters call when constructing the system message.
 
 ### Restricting the tool set
 
-Disable tools globally for a deployment by starting with `/tools off <name>` as the
-first command, or by building a wrapper script:
-
-```bash
-# Kiosk mode: code search only, no shell or web access
-./errata <<< '/tools off bash web_fetch web_search'
-```
-
-For persistent per-project defaults, the `/tools off` state is saved to `.errata_tools`
-(cwd-local) so it survives session restarts.
+Use the recipe `## Tools` section to specify an allowlist of tools. Tools not in the
+allowlist are excluded from the active set. Tool state can also be toggled at runtime
+via `/config` (tools section).
 
 ### Pointing at a self-hosted model proxy
 
