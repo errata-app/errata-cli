@@ -39,6 +39,9 @@ type ModelParamsConfig struct {
 
 // Hash returns the content-addressed key for a RecipeSnapshot.
 // The hash is SHA-256 of the canonical JSON representation, prefixed with "sha256:".
+// Name is included because it is part of the recipe's identity from the user's
+// perspective — distinct recipes should produce distinct hashes even if their
+// settings happen to overlap.
 func Hash(cfg *RecipeSnapshot) string {
 	data, _ := json.Marshal(cfg)
 	h := sha256.Sum256(data)
