@@ -1,4 +1,5 @@
 # My Project Recipe
+version: 1
 
 ## Metadata
 name: My Project Recipe

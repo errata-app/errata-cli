@@ -54,6 +54,12 @@ func (o *Options) stderr() io.Writer {
 // Run executes all recipe tasks and returns the headless report.
 func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	rec := opts.Recipe
+
+	// Validate recipe version before execution.
+	if _, err := rec.BuildRunner(); err != nil {
+		return nil, err
+	}
+
 	if len(rec.Tasks) == 0 {
 		return nil, fmt.Errorf("recipe has no tasks — ## Tasks section is required for headless mode")
 	}
@@ -371,6 +377,7 @@ func buildSummary(tasks []TaskResult, parsedCriteria []criteria.Criterion, total
 func snapshotRecipe(rec *recipe.Recipe) RecipeSnapshot {
 	return RecipeSnapshot{
 		Name:            recipeName(rec),
+		Version:         rec.Version,
 		Models:          rec.Models,
 		SystemPrompt:    rec.SystemPrompt,
 		Tasks:           rec.Tasks,
