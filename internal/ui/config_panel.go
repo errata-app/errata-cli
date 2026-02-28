@@ -364,10 +364,19 @@ func buildModelsList(rec *recipe.Recipe, adapters []models.ModelAdapter, activeA
 	return items
 }
 
-func buildToolsList(disabled map[string]bool) []listItem {
+func buildToolsList(allowlist []string, disabled map[string]bool) []listItem {
+	// Show ALL tools. Initial enabled state: in allowlist (or no allowlist) AND not disabled.
+	allowSet := make(map[string]bool, len(allowlist))
+	for _, name := range allowlist {
+		allowSet[name] = true
+	}
 	items := make([]listItem, 0, len(tools.Definitions))
 	for _, d := range tools.Definitions {
-		items = append(items, listItem{Label: d.Name, Active: !disabled[d.Name]})
+		active := !disabled[d.Name]
+		if len(allowlist) > 0 {
+			active = allowSet[d.Name] && !disabled[d.Name]
+		}
+		items = append(items, listItem{Label: d.Name, Active: active})
 	}
 	return items
 }
@@ -816,6 +825,26 @@ func (a *App) applySessionRecipe() {
 	}
 }
 
+// syncToolAllowlist rebuilds the session recipe's tool allowlist from the
+// current configListItems state and syncs it back to app runtime fields.
+func (a *App) syncToolAllowlist() {
+	if a.sessionRecipe == nil {
+		return
+	}
+	// Build allowlist from active tools in the config list.
+	var allowlist []string
+	for _, item := range a.configListItems {
+		if item.Active {
+			allowlist = append(allowlist, item.Label)
+		}
+	}
+	if a.sessionRecipe.Tools == nil {
+		a.sessionRecipe.Tools = &recipe.ToolsConfig{}
+	}
+	a.sessionRecipe.Tools.Allowlist = allowlist
+	a.toolAllowlist = allowlist
+}
+
 // ── rendering ───────────────────────────────────────────────────────────────
 
 func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width int, listItems []listItem, listCursor int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string) string {
@@ -981,7 +1010,7 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:
 			case "models":
 				a.configListItems = buildModelsList(a.sessionRecipe, a.adapters, a.activeAdapters)
 			case "tools":
-				a.configListItems = buildToolsList(a.disabledTools)
+				a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
 			case "mcp-servers":
 				// MCP servers are read-only in the overlay for now.
 				var items []listItem
@@ -1073,6 +1102,8 @@ func (a App) handleConfigListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint
 				} else {
 					a.disabledTools[item.Label] = true
 				}
+				// Sync the effective tool set back to the session recipe allowlist.
+				a.syncToolAllowlist()
 			}
 		}
 		return a, nil

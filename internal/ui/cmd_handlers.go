@@ -22,6 +22,7 @@ import (
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
+	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/subagent"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -292,6 +293,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	seed := a.seed
 	sessionID := a.sessionID
 	rec := a.recipe
+	cpPath := a.checkpointPath
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
@@ -329,7 +331,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
-			CheckpointPath:   checkpoint.DefaultPath,
+			CheckpointPath:   cpPath,
 		})
 		if tools.SubagentEnabled {
 			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
@@ -360,7 +362,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 				panelIDs[i] = ad.ID()
 			}
 			if cp := checkpoint.Build(trimmed, panelIDs, responses, verbose); cp != nil {
-				if err := checkpoint.Save(checkpoint.DefaultPath, *cp); err != nil {
+				if err := checkpoint.Save(cpPath, *cp); err != nil {
 					log.Printf("warning: failed to save checkpoint: %v", err)
 				}
 			}
@@ -380,7 +382,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 }
 
 func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	cp, err := checkpoint.Load(checkpoint.DefaultPath)
+	cp, err := checkpoint.Load(a.checkpointPath)
 	if err != nil {
 		return a.withMessage(fmt.Sprintf("Error loading checkpoint: %v", err)), nil
 	}
@@ -399,7 +401,7 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 	}
 
 	if len(toRerunIDs) == 0 {
-		if err := checkpoint.Clear(checkpoint.DefaultPath); err != nil {
+		if err := checkpoint.Clear(a.checkpointPath); err != nil {
 			log.Printf("warning: failed to clear checkpoint: %v", err)
 		}
 		return a.withMessage("All models from the last run completed. No resume needed."), nil
@@ -424,7 +426,7 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 		rerunAdapters = append(rerunAdapters, found)
 	}
 
-	if err := checkpoint.Clear(checkpoint.DefaultPath); err != nil {
+	if err := checkpoint.Clear(a.checkpointPath); err != nil {
 		log.Printf("warning: failed to clear checkpoint: %v", err)
 	}
 	return a.launchResumeRun(cp.Prompt, rerunAdapters, completedResponses, cp.Verbose)
@@ -474,6 +476,13 @@ func (a App) handleRewindCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 			item.note = "[rewound] " + item.note
 		} else {
 			item.note = "[rewound]"
+		}
+		// Persist the annotation to session feed so it survives resume.
+		if entry.feedIndex < len(a.sessionFeed) {
+			a.sessionFeed[entry.feedIndex].Note = item.note
+			if err := session.SaveFeed(a.feedPath, a.sessionFeed); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
+			}
 		}
 	}
 
@@ -550,6 +559,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	seed := a.seed
 	sessionID := a.sessionID
 	rec := a.recipe
+	resumeCPPath := a.checkpointPath
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
@@ -586,7 +596,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
-			CheckpointPath:   checkpoint.DefaultPath,
+			CheckpointPath:   resumeCPPath,
 		})
 		if tools.SubagentEnabled {
 			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
@@ -618,7 +628,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 				allIDs[i] = r.ModelID
 			}
 			if cp := checkpoint.Build(userPrompt, allIDs, allResp, verbose); cp != nil {
-				if err := checkpoint.Save(checkpoint.DefaultPath, *cp); err != nil {
+				if err := checkpoint.Save(resumeCPPath, *cp); err != nil {
 					log.Printf("warning: failed to save checkpoint: %v", err)
 				}
 			}
@@ -669,7 +679,7 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 					case "models":
 						a.configListItems = buildModelsList(a.sessionRecipe, a.adapters, a.activeAdapters)
 					case "tools":
-						a.configListItems = buildToolsList(a.disabledTools)
+						a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
 					case "mcp-servers":
 						var items []listItem
 						for _, s := range a.sessionRecipe.MCPServers {

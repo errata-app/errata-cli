@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
@@ -24,6 +25,7 @@ import (
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/reminders"
 	"github.com/suarezc/errata/internal/runner"
+	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/tools"
 )
 
@@ -87,7 +89,6 @@ type App struct {
 	activeAdapters []models.ModelAdapter // nil = use all adapters
 	disabledTools  map[string]bool       // tools excluded from runs; nil = all enabled
 	prefPath       string
-	toolStatePath  string // path to .errata_tools persistence file; "" = no persistence
 	sessionID      string
 	cfg            config.Config
 
@@ -163,6 +164,14 @@ type App struct {
 	// rewind stack — each entry captures state for one undo step
 	rewindStack []rewindEntry
 
+	// per-session persistence paths and metadata
+	checkpointPath    string        // per-session checkpoint.json
+	feedPath          string        // per-session feed.json
+	sessionMetaPath   string        // per-session meta.json
+	sessionRecipePath string        // per-session recipe.md
+	sessionMeta       session.Meta  // in-memory metadata, updated after each run
+	sessionFeed       []session.FeedEntry // serialized feed for persistence
+
 	// config overlay state
 	configOverlayActive bool
 	configSections      []configSection
@@ -180,7 +189,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID, toolStatePath string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe) *App {
+func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -189,7 +198,7 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
 
-	h, err := history.Load(histPath)
+	h, err := history.Load(sp.HistoryPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load history: %v\n", err)
 	}
@@ -197,11 +206,6 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 	ph, err := prompthistory.Load(promptHistPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load prompt history: %v\n", err)
-	}
-
-	disabled, err := tools.LoadDisabledTools(toolStatePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load tool state: %v\n", err)
 	}
 
 	cta := textarea.New()
@@ -214,9 +218,8 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 	app := &App{
 		adapters:              adapters,
 		prefPath:              prefPath,
-		histPath:              histPath,
+		histPath:              sp.HistoryPath,
 		promptHistPath:        promptHistPath,
-		toolStatePath:         toolStatePath,
 		promptHistory:         ph,
 		historyIdx:            -1,
 		sessionID:             sessionID,
@@ -225,12 +228,16 @@ func New(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		feedVP:                viewport.New(80, 20),
 		panelIdx:              make(map[string]int),
 		conversationHistories: h,
-		disabledTools:         disabled,
 		sessionCostPerModel:   make(map[string]float64),
 		cfg:                   cfg,
 		mcpDefs:               mcpDefs,
 		mcpDispatchers:        mcpDispatchers,
 		seed:                  cfg.Seed,
+		checkpointPath:        sp.CheckpointPath,
+		feedPath:              sp.FeedPath,
+		sessionMetaPath:       sp.MetaPath,
+		sessionRecipePath:     sp.RecipePath,
+		sessionMeta:           meta,
 	}
 	app.recipe = rec
 	if rec != nil {
@@ -461,6 +468,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
 		}
 
+		// Persist session metadata and feed.
+		a.persistSessionState(msg.responses)
+
 		// Push rewind entry (fileSnapshots populated later by applySelection if writes happen).
 		a.rewindStack = append(a.rewindStack, rewindEntry{
 			historyLengths: preHistLengths,
@@ -497,7 +507,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Successful completion — clear any stale checkpoint.
-		_ = checkpoint.Clear(checkpoint.DefaultPath)
+		clearCheckpoint(a.checkpointPath)
 
 		hasWrites := false
 		for _, resp := range msg.responses {
@@ -705,8 +715,8 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe) error {
-	app := New(adapters, prefPath, histPath, promptHistPath, sessionID, ".errata_tools", cfg, mcpDefs, mcpDispatchers, rec)
+func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool) error {
+	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta)
 
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	app.SetProgram(p)
@@ -720,10 +730,164 @@ func Run(adapters []models.ModelAdapter, prefPath, histPath, promptHistPath, ses
 		p.Quit()
 	}()
 
+	// On resume: replay saved feed as visual history.
+	if resuming {
+		feedEntries, err := session.LoadFeed(sp.FeedPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not load feed: %v\n", err)
+		}
+		app.sessionFeed = feedEntries
+		app.feed = append(app.feed, feedItem{kind: "message", text: fmt.Sprintf("Resumed session %s", sessionID)})
+		app.feed = append(app.feed, replayFeed(feedEntries)...)
+	}
+
 	for _, w := range warnings {
 		app.feed = append(app.feed, feedItem{kind: "message", text: "warning: " + w})
 	}
 
+	// Write initial session metadata.
+	if err := session.SaveMeta(sp.MetaPath, meta); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
+	}
+
 	_, err := p.Run()
 	return err
+}
+
+// persistSessionState updates and saves session metadata, feed, and recipe
+// after a run completes. Called from the runCompleteMsg handler.
+func (a *App) persistSessionState(responses []models.ModelResponse) {
+	now := time.Now()
+	a.sessionMeta.LastActiveAt = now
+	a.sessionMeta.PromptCount++
+	if a.sessionMeta.FirstPrompt == "" {
+		a.sessionMeta.FirstPrompt = truncateStr(a.lastPrompt, 120)
+	}
+	a.sessionMeta.LastPrompt = truncateStr(a.lastPrompt, 120)
+
+	if err := session.SaveMeta(a.sessionMetaPath, a.sessionMeta); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
+	}
+
+	// Build and append feed entry.
+	entry := buildFeedEntry(a.lastPrompt, responses)
+	a.sessionFeed = append(a.sessionFeed, entry)
+	if err := session.SaveFeed(a.feedPath, a.sessionFeed); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
+	}
+
+	// Persist session recipe (captures the exact config used for this run).
+	a.persistSessionRecipe()
+}
+
+// persistSessionRecipe writes the current session recipe to the per-session
+// recipe.md. This is the single save point for config changes — called after
+// every run completion.
+func (a *App) persistSessionRecipe() {
+	if a.sessionRecipePath == "" {
+		return
+	}
+	rec := a.sessionRecipe
+	if rec == nil {
+		rec = a.recipe
+	}
+	if rec == nil {
+		return
+	}
+	md := rec.MarshalMarkdown()
+	_ = os.MkdirAll(filepath.Dir(a.sessionRecipePath), 0o750)
+	_ = os.WriteFile(a.sessionRecipePath, []byte(md), 0o600)
+}
+
+// updateLastFeedNote updates the note on the most recent session feed entry
+// and re-saves feed.json. Called after selection/rating.
+func (a *App) updateLastFeedNote(note string) {
+	if len(a.sessionFeed) == 0 {
+		return
+	}
+	a.sessionFeed[len(a.sessionFeed)-1].Note = note
+	if err := session.SaveFeed(a.feedPath, a.sessionFeed); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
+	}
+}
+
+// clearCheckpoint removes the checkpoint file at the given path. Used instead
+// of checkpoint.Clear to avoid importing the checkpoint package for a single call.
+func clearCheckpoint(path string) {
+	_ = os.Remove(path)
+}
+
+// truncateStr truncates s to at most maxLen runes.
+func truncateStr(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen])
+	}
+	return s
+}
+
+// buildFeedEntry creates a session.FeedEntry from a run's prompt and responses.
+func buildFeedEntry(prompt string, responses []models.ModelResponse) session.FeedEntry {
+	var modelEntries []session.ModelEntry
+	for _, r := range responses {
+		var files []string
+		for _, fw := range r.ProposedWrites {
+			files = append(files, fw.Path)
+		}
+		modelEntries = append(modelEntries, session.ModelEntry{
+			ID:            r.ModelID,
+			Text:          truncateStr(r.Text, 500),
+			ProposedFiles: files,
+		})
+	}
+	return session.FeedEntry{
+		Kind:   "run",
+		Prompt: prompt,
+		Models: modelEntries,
+	}
+}
+
+// replayFeed converts saved feed entries into feedItem structs for display.
+func replayFeed(entries []session.FeedEntry) []feedItem {
+	items := make([]feedItem, 0, len(entries))
+	for _, e := range entries {
+		switch e.Kind {
+		case "message":
+			items = append(items, feedItem{kind: "message", text: e.Text})
+		case "run":
+			// Build a summary: prompt + per-model text snippets.
+			var sb strings.Builder
+			for _, m := range e.Models {
+				preview := truncateStr(m.Text, 200)
+				preview = strings.ReplaceAll(preview, "\n", " ")
+				sb.WriteString(fmt.Sprintf("  %s: %s", m.ID, preview))
+				if len(m.ProposedFiles) > 0 {
+					sb.WriteString(fmt.Sprintf(" [%s]", strings.Join(m.ProposedFiles, ", ")))
+				}
+				sb.WriteByte('\n')
+			}
+			items = append(items, feedItem{
+				kind: "run",
+				prompt: e.Prompt,
+				note:   e.Note,
+				panels: replayPanels(e.Models),
+			})
+		}
+	}
+	return items
+}
+
+// replayPanels creates frozen panel states from saved model entries for
+// display during session resume. The panels are marked done with minimal info.
+func replayPanels(entries []session.ModelEntry) []*panelState {
+	panels := make([]*panelState, len(entries))
+	for i, m := range entries {
+		ps := newPanelState(m.ID, i)
+		ps.done = true
+		if len(m.Text) > 0 {
+			ps.addEvent(models.AgentEvent{Type: models.EventText, Data: truncateStr(m.Text, 200)})
+		}
+		panels[i] = ps
+	}
+	return panels
 }

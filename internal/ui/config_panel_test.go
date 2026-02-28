@@ -385,13 +385,38 @@ func TestBuildModelsList_WithSubset(t *testing.T) {
 
 func TestBuildToolsList_Disabled(t *testing.T) {
 	disabled := map[string]bool{"bash": true}
-	items := buildToolsList(disabled)
+	items := buildToolsList(nil, disabled)
 	for _, item := range items {
 		if item.Label == "bash" {
 			assert.False(t, item.Active)
 		} else {
 			assert.True(t, item.Active)
 		}
+	}
+}
+
+func TestBuildToolsList_WithAllowlist(t *testing.T) {
+	// Only read_file and bash in allowlist; bash also disabled.
+	allowlist := []string{"read_file", "bash"}
+	disabled := map[string]bool{"bash": true}
+	items := buildToolsList(allowlist, disabled)
+
+	for _, item := range items {
+		switch item.Label {
+		case "read_file":
+			assert.True(t, item.Active, "read_file should be active (in allowlist, not disabled)")
+		case "bash":
+			assert.False(t, item.Active, "bash should be inactive (disabled)")
+		default:
+			assert.False(t, item.Active, "%s should be inactive (not in allowlist)", item.Label)
+		}
+	}
+}
+
+func TestBuildToolsList_EmptyAllowlistShowsAll(t *testing.T) {
+	items := buildToolsList(nil, nil)
+	for _, item := range items {
+		assert.True(t, item.Active, "%s should be active with nil allowlist", item.Label)
 	}
 }
 

@@ -20,6 +20,7 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].note = note
 		}
+		a.updateLastFeedNote(note)
 	}
 
 	switch msg.Type {
@@ -124,6 +125,7 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].note = note
 		}
+		a.updateLastFeedNote(note)
 	}
 
 	if strings.EqualFold(choice, "s") {
