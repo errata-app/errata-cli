@@ -17,12 +17,23 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		return a.handleSearchKey(msg)
 	}
 
+	// Sidebar focus mode captures all keystrokes.
+	if a.sidebarFocused {
+		return a.handleSidebarKey(msg)
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
 		return a, tea.Quit
 
 	case tea.KeyCtrlO:
 		return a.toggleExpandLastRun()
+
+	case tea.KeyCtrlCloseBracket:
+		if a.sidebarPinned {
+			a.sidebarFocused = true
+			return a.withFeedRebuilt(false), nil
+		}
 
 	case tea.KeyCtrlR:
 		a.searchActive = true

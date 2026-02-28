@@ -172,6 +172,13 @@ type App struct {
 	sessionMeta       session.Meta  // in-memory metadata, updated after each run
 	sessionFeed       []session.FeedEntry // serialized feed for persistence
 
+	// config sidebar (pinned) state
+	sidebarPinned      bool
+	sidebarFocused     bool          // true when sidebar has keyboard focus
+	sidebarSections    []configSection
+	sidebarExpandedSet map[int]bool // multiple sections can expand simultaneously
+	sidebarScrollY     int
+
 	// config overlay state
 	configOverlayActive bool
 	configSections      []configSection
@@ -293,6 +300,20 @@ func (a *App) feedVPHeight() int {
 	return h
 }
 
+const (
+	sidebarWidth    = 36
+	minWidthSidebar = 80 // below this, sidebar auto-hides (state preserved)
+)
+
+// feedVPWidth returns the width available for the feed viewport, accounting
+// for a pinned sidebar when the terminal is wide enough.
+func (a *App) feedVPWidth() int {
+	if a.sidebarPinned && a.width >= minWidthSidebar+sidebarWidth+1 {
+		return a.width - sidebarWidth - 1
+	}
+	return a.width
+}
+
 // renderFeedContent builds the viewport content string from all feed items.
 func (a *App) renderFeedContent() string {
 	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
@@ -312,11 +333,11 @@ func (a *App) renderFeedContent() string {
 			sb.WriteString(promptStyle.Render("> " + item.prompt))
 			sb.WriteByte('\n')
 			if len(item.panels) > 0 {
-				sb.WriteString(renderInlinePanels(item.panels, a.width))
+				sb.WriteString(renderInlinePanels(item.panels, a.feedVPWidth()))
 				sb.WriteByte('\n')
 			}
 			if item.responses != nil {
-				d := RenderDiffs(item.responses, a.width)
+				d := RenderDiffs(item.responses, a.feedVPWidth())
 				if d != "" {
 					sb.WriteString(d)
 				}
@@ -333,7 +354,7 @@ func (a *App) renderFeedContent() string {
 
 // withFeedRebuilt resizes and refreshes the feed viewport. Returns updated App.
 func (a *App) withFeedRebuilt(gotoBottom bool) App {
-	a.feedVP.Width = a.width
+	a.feedVP.Width = a.feedVPWidth()
 	a.feedVP.Height = a.feedVPHeight()
 	a.feedVP.SetContent(a.renderFeedContent())
 	if gotoBottom {
@@ -365,7 +386,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.input.SetWidth(msg.Width - 4)
+		a.input.SetWidth(a.feedVPWidth() - 4)
 		atBottom := a.feedVP.AtBottom()
 		return a.withFeedRebuilt(atBottom), nil
 
@@ -401,7 +422,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if idx, ok := a.panelIdx[msg.modelID]; ok {
 			a.panels[idx].addEvent(msg.event)
 		}
-		a.feedVP.Width = a.width
+		a.feedVP.Width = a.feedVPWidth()
 		a.feedVP.Height = a.feedVPHeight()
 		a.feedVP.SetContent(a.renderFeedContent())
 		a.feedVP.GotoBottom()
@@ -562,7 +583,23 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 	sb.WriteString(headerStyle.Render("  Errata  A/B testing tool for agentic AI models"))
 	sb.WriteString("\n\n")
 
-	sb.WriteString(a.feedVP.View())
+	feedView := a.feedVP.View()
+	showSidebar := a.sidebarPinned && a.width >= minWidthSidebar+sidebarWidth+1
+	if showSidebar {
+		sidebarContent := renderSidebar(
+			a.sidebarSections, a.sidebarExpandedSet,
+			a.sidebarScrollY, sidebarWidth, a.feedVPHeight(), a.recipeModified, a.sidebarFocused,
+		)
+		sidebarStyle := lipgloss.NewStyle().
+			Width(sidebarWidth).
+			Height(a.feedVPHeight()).
+			BorderLeft(true).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#444444"))
+		sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, feedView, sidebarStyle.Render(sidebarContent)))
+	} else {
+		sb.WriteString(feedView)
+	}
 	sb.WriteByte('\n')
 
 	switch a.mode {
