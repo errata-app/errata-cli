@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
@@ -443,4 +444,87 @@ func TestPaste_WipeCmdResetsPaste(t *testing.T) {
 	app := result.(App)
 	assert.Empty(t, app.pastedText)
 	assert.Equal(t, 0, app.pastedLineCount)
+}
+
+// ─── double-ESC to clear ─────────────────────────────────────────────────────
+
+func escMsg() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyEsc}
+}
+
+func TestDoubleEsc_ClearsTextarea(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("some text to clear")
+
+	// First ESC — records timestamp, shows hint, does not clear.
+	result, _ := a.handleIdleKey(escMsg())
+	a = result.(App)
+	assert.Equal(t, "some text to clear", a.input.Value())
+	assert.True(t, a.escHintVisible)
+
+	// Simulate rapid second ESC within the 300ms window.
+	a.lastEscTime = time.Now()
+	result, cmd := a.handleIdleKey(escMsg())
+	assert.Nil(t, cmd)
+	app := result.(App)
+	assert.Empty(t, app.input.Value())
+	assert.False(t, app.escHintVisible)
+}
+
+func TestSingleEsc_DoesNotClearTextarea(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("keep this")
+
+	result, _ := a.handleIdleKey(escMsg())
+	app := result.(App)
+	// Single ESC should NOT clear — text remains (textarea processes ESC normally).
+	assert.NotEmpty(t, app.input.Value())
+	// Hint should be visible after first ESC with content.
+	assert.True(t, app.escHintVisible)
+}
+
+func TestSingleEsc_NoHintWhenEmpty(t *testing.T) {
+	a := newAppForTest(t, nil)
+	// Textarea is empty — no hint should appear.
+	result, _ := a.handleIdleKey(escMsg())
+	app := result.(App)
+	assert.False(t, app.escHintVisible)
+}
+
+func TestDoubleEsc_ClearsPasteState(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	// Simulate double-ESC: set lastEscTime to now, then send ESC.
+	a.lastEscTime = time.Now()
+	result, cmd := a.handleIdleKey(escMsg())
+	assert.Nil(t, cmd)
+	app := result.(App)
+	assert.Empty(t, app.pastedText)
+	assert.Equal(t, 0, app.pastedLineCount)
+}
+
+func TestDoubleEsc_ClearsHistoryNavigation(t *testing.T) {
+	a := appWithHistory(t, []string{"old prompt"})
+	a.input.SetValue("old prompt")
+	a.historyIdx = 0
+	a.historyInputBuf = "draft"
+
+	a.lastEscTime = time.Now()
+	result, _ := a.handleIdleKey(escMsg())
+	app := result.(App)
+	assert.Empty(t, app.input.Value())
+	assert.Equal(t, -1, app.historyIdx)
+	assert.Empty(t, app.historyInputBuf)
+}
+
+func TestDoubleEsc_NoopWhenEmpty(t *testing.T) {
+	a := newAppForTest(t, nil)
+	// Textarea is empty, no paste — double-ESC should not trigger clear.
+	a.lastEscTime = time.Now()
+	result, _ := a.handleIdleKey(escMsg())
+	app := result.(App)
+	// Should just record lastEscTime, pass through to textarea.
+	assert.NotEqual(t, time.Time{}, app.lastEscTime)
 }

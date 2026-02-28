@@ -48,6 +48,8 @@ type compactCompleteMsg struct {
 
 type welcomeMsg struct{}
 
+type escHintMsg struct{} // fired after 300ms to dismiss "ESC again to clear" hint
+
 // ---- app modes ----
 
 type mode int
@@ -142,6 +144,10 @@ type App struct {
 	searchActive    bool
 	searchQuery     string
 	searchResultIdx int
+
+	// double-ESC to clear prompt
+	lastEscTime    time.Time // timestamp of last ESC press in idle mode
+	escHintVisible bool      // true while "ESC again to clear" hint is shown
 
 	// multi-line paste badge (like Claude Code's "[pasted N lines]")
 	pastedText      string // full text from a bracketed paste
@@ -403,6 +409,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.feedVP.GotoBottom()
 		return a, nil
 
+	case escHintMsg:
+		a.escHintVisible = false
+		return a.withFeedRebuilt(false), nil
+
 	case welcomeMsg:
 		return a.withMessage(
 			"Welcome to Errata! No API keys are configured.\n" +
@@ -648,6 +658,11 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 				BorderForeground(lipgloss.Color("#555555")).
 				Padding(0, 1)
 			sb.WriteString(pasteStyle.Render(fmt.Sprintf("pasted %d lines", a.pastedLineCount)))
+			sb.WriteByte('\n')
+		}
+		if a.escHintVisible {
+			hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Italic(true)
+			sb.WriteString(hintStyle.Render("  ESC again to clear"))
 			sb.WriteByte('\n')
 		}
 		sb.WriteString(a.input.View())

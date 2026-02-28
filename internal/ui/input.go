@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/suarezc/errata/internal/commands"
@@ -20,6 +21,33 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 	switch msg.Type {
 	case tea.KeyCtrlD, tea.KeyCtrlC:
 		return a, tea.Quit
+
+	case tea.KeyEsc:
+		if time.Since(a.lastEscTime) < 300*time.Millisecond && (a.input.Value() != "" || a.pastedText != "") {
+			a.input.Reset()
+			a.pastedText = ""
+			a.pastedLineCount = 0
+			a.historyIdx = -1
+			a.historyInputBuf = ""
+			a.lastEscTime = time.Time{}
+			a.escHintVisible = false
+			return a, nil
+		}
+		a.lastEscTime = time.Now()
+		hasContent := a.input.Value() != "" || a.pastedText != ""
+		var cmds []tea.Cmd
+		var inputCmd tea.Cmd
+		a.input, inputCmd = a.input.Update(msg)
+		if inputCmd != nil {
+			cmds = append(cmds, inputCmd)
+		}
+		if hasContent {
+			a.escHintVisible = true
+			cmds = append(cmds, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
+				return escHintMsg{}
+			}))
+		}
+		return a, tea.Batch(cmds...)
 
 	case tea.KeyCtrlO:
 		return a.toggleExpandLastRun()
