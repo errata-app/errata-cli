@@ -96,9 +96,16 @@ OpenRouter, LiteLLM, and cloud-provider models must be listed explicitly in a re
 ### TUI (terminal REPL)
 
 ```bash
-./errata                     # auto-discovers recipe.md in cwd
-./errata -r path/to/recipe.md
+./errata                         # start a fresh session (auto-discovers recipe.md in cwd)
+./errata -r path/to/recipe.md    # use a specific recipe file
+./errata --continue              # resume the most recent session
+./errata --resume <id>           # resume a session by ID or unique prefix
+./errata sessions                # list all sessions
 ```
+
+Each invocation creates an ephemeral session under `data/sessions/<id>/` that stores
+conversation history, feed, checkpoint, and recipe state. Use `--continue` to pick up
+where you left off, or `--resume <id>` to jump to a specific session.
 
 ### Headless mode (recipe runner)
 
@@ -185,6 +192,7 @@ Pick a number — that model's writes are applied to disk immediately.
 | `/verbose` | Toggle verbose mode |
 | `/config` | View/edit configuration; `/config <section>` jumps to section |
 | `/resume` | Resume interrupted run — re-runs only interrupted models |
+| `/rewind` | Undo last run — restores files and conversation history |
 | `/export recipe [path]` | Export the session recipe to Markdown (default: `recipe_export.md`) |
 | `/export output [path]` | Export the latest run's output report |
 | `/import recipe <path>` | Import a recipe file, replacing the session config |
@@ -555,7 +563,7 @@ make install         # go install to $GOPATH/bin
 ```
 errata/
 ├── cmd/errata/
-│   └── main.go                  # cobra entrypoint (errata, errata run, errata stats)
+│   └── main.go                  # cobra entrypoint (errata, errata run, errata stats, errata sessions)
 ├── internal/
 │   ├── adapters/
 │   │   ├── registry.go          # NewAdapter(), ListAdapters() — routing by prefix/slash
@@ -613,6 +621,8 @@ errata/
 │   │   └── runner.go            # RunAll(), TrimHistory(), CompactHistories(), HasInterrupted()
 │   ├── sandbox/
 │   │   └── sandbox.go           # filesystem/network restrictions (platform-specific)
+│   ├── session/
+│   │   └── session.go           # GenerateID(), Paths, Meta, FeedEntry — session lifecycle
 │   ├── subagent/
 │   │   └── subagent.go          # sub-agent orchestration (spawn, dispatch, depth control)
 │   ├── tooloutput/

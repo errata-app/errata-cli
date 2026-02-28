@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/session"
 )
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -25,7 +27,17 @@ func (s uiStub) RunAgent(_ context.Context, _ []models.ConversationTurn, _ strin
 
 func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 	t.Helper()
-	a := New(ads, t.TempDir()+"/pref.jsonl", t.TempDir()+"/hist.json", t.TempDir()+"/prompt_hist.jsonl", "session", "", config.Config{}, nil, nil, nil)
+	tmp := t.TempDir()
+	sp := session.Paths{
+		Dir:            filepath.Join(tmp, "session"),
+		HistoryPath:    filepath.Join(tmp, "session", "history.json"),
+		CheckpointPath: filepath.Join(tmp, "session", "checkpoint.json"),
+		MetaPath:       filepath.Join(tmp, "session", "meta.json"),
+		FeedPath:       filepath.Join(tmp, "session", "feed.json"),
+		RecipePath:     filepath.Join(tmp, "session", "recipe.md"),
+	}
+	meta := session.Meta{ID: "test-session"}
+	a := New(ads, filepath.Join(tmp, "pref.jsonl"), filepath.Join(tmp, "prompt_hist.jsonl"), "session", config.Config{}, nil, nil, nil, sp, meta)
 	return *a
 }
 

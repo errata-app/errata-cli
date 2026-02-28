@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/suarezc/errata/internal/adapters"
@@ -19,14 +20,19 @@ import (
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/tools"
 	"github.com/suarezc/errata/internal/ui"
 )
 
 var (
-	recipePath   string
-	debugLogPath string
+	recipePath    string
+	debugLogPath  string
+	continueFlag  bool
+	resumeID      string
 )
+
+const sessionsBaseDir = "data/sessions"
 
 func main() {
 	root := &cobra.Command{
@@ -36,6 +42,8 @@ func main() {
 	}
 	root.PersistentFlags().StringVarP(&recipePath, "recipe", "r", "", "recipe file (default: auto-discover recipe.md)")
 	root.PersistentFlags().StringVar(&debugLogPath, "debug-log", "", "path to JSONL debug log")
+	root.Flags().BoolVarP(&continueFlag, "continue", "c", false, "resume the most recent session")
+	root.Flags().StringVar(&resumeID, "resume", "", "resume a session by ID or prefix (empty = most recent)")
 
 	statsCmd := &cobra.Command{
 		Use:   "stats",
@@ -53,9 +61,16 @@ func main() {
 	runCmd.Flags().String("output-dir", "", "Output directory (default: data/outputs/)")
 	runCmd.Flags().Bool("verbose", false, "Show model text events in progress")
 
+	sessionsCmd := &cobra.Command{
+		Use:   "sessions",
+		Short: "List all sessions",
+		RunE:  runSessions,
+	}
+
 	root.AddCommand(
 		statsCmd,
 		runCmd,
+		sessionsCmd,
 	)
 
 	if err := root.Execute(); err != nil {
@@ -101,11 +116,10 @@ func applyRecipeToolSettings(rec *recipe.Recipe) {
 }
 
 // setupAdapters loads config, pricing, adapters, and MCP servers.
-// Returns adapters, session ID, warnings, MCP state (defs + dispatchers),
+// Returns adapters, warnings, MCP state (defs + dispatchers),
 // and a cleanup function the caller must defer.
-func setupAdapters(cfg config.Config, debugLog string) (
+func setupAdapters(cfg config.Config, debugLog, sessionID string) (
 	ads []models.ModelAdapter,
-	sessionID string,
 	warnings []string,
 	mcpDefs []tools.ToolDef,
 	mcpDispatchers map[string]tools.MCPDispatcher,
@@ -113,7 +127,6 @@ func setupAdapters(cfg config.Config, debugLog string) (
 ) {
 	pricing.LoadPricing(cfg.PricingCachePath)
 	ads, warnings = adapters.ListAdapters(cfg)
-	sessionID = logging.RandomHex(16)
 	cleanup = func() {}
 
 	// Apply custom system prompt if configured.
@@ -155,9 +168,87 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	rec.ApplyTo(&cfg)
 	applyProjectRoot(rec)
 	applyRecipeToolSettings(rec)
-	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath)
+
+	// Resolve session: fresh, --continue, or --resume <id>.
+	resuming := false
+	var sessionID string
+	var sp session.Paths
+
+	// --resume with no value acts like --continue.
+	if cmd.Flags().Changed("resume") && resumeID == "" {
+		continueFlag = true
+	}
+
+	switch {
+	case resumeID != "":
+		// --resume <id> — resolve by exact match or prefix.
+		resolved, err := session.Resolve(sessionsBaseDir, resumeID)
+		if err != nil {
+			return fmt.Errorf("session resolve: %w", err)
+		}
+		sessionID = resolved
+		sp = session.PathsFor(sessionsBaseDir, sessionID)
+		resuming = true
+
+	case continueFlag:
+		// --continue — resume most recent session.
+		latest, err := session.LatestID(sessionsBaseDir)
+		if err != nil {
+			return fmt.Errorf("no previous session to continue: %w", err)
+		}
+		sessionID = latest
+		sp = session.PathsFor(sessionsBaseDir, sessionID)
+		resuming = true
+
+	default:
+		// Fresh session.
+		sessionID, sp = session.New(sessionsBaseDir)
+	}
+
+	// If resuming and a session recipe exists, load it instead of the base recipe.
+	if resuming {
+		if _, err := os.Stat(sp.RecipePath); err == nil {
+			sessionRec, parseErr := recipe.Parse(sp.RecipePath)
+			if parseErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not load session recipe: %v (using base recipe)\n", parseErr)
+			} else {
+				rec = sessionRec
+				// Re-apply on top of config.
+				cfg = config.Load()
+				rec.ApplyTo(&cfg)
+				applyRecipeToolSettings(rec)
+			}
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "Session: %s\n", sessionID)
+
+	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath, sessionID)
 	defer cleanup()
-	return ui.Run(ads, cfg.PreferencesPath, cfg.HistoryPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec)
+
+	// Build initial session metadata.
+	now := time.Now()
+	modelIDs := make([]string, len(ads))
+	for i, ad := range ads {
+		modelIDs[i] = ad.ID()
+	}
+	meta := session.Meta{
+		ID:           sessionID,
+		CreatedAt:    now,
+		LastActiveAt: now,
+		Models:       modelIDs,
+	}
+	// If resuming, load existing metadata.
+	if resuming {
+		if existing, err := session.LoadMeta(sp.MetaPath); err == nil && existing != nil {
+			meta = *existing
+			meta.Models = modelIDs // update with current adapters
+		}
+	}
+
+	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming)
+	fmt.Fprintf(os.Stderr, "To continue this session: errata --resume %s\n", sessionID)
+	return err
 }
 
 func runHeadless(cmd *cobra.Command, args []string) error {
@@ -171,7 +262,8 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	applyProjectRoot(rec)
 	applyRecipeToolSettings(rec)
 
-	ads, sessionID, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath)
+	sessionID := logging.RandomHex(16)
+	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath, sessionID)
 	defer cleanup()
 
 	if len(ads) == 0 {
@@ -290,6 +382,35 @@ func runStatsDetailed(cfg config.Config) error {
 			int64(r.s.AvgLatencyMS),
 			cost,
 			r.s.Participations,
+		)
+	}
+	return nil
+}
+
+func runSessions(cmd *cobra.Command, args []string) error {
+	metas, err := session.List(sessionsBaseDir)
+	if err != nil {
+		return fmt.Errorf("could not list sessions: %w", err)
+	}
+	if len(metas) == 0 {
+		fmt.Println("No sessions yet.")
+		return nil
+	}
+
+	fmt.Printf("%-24s %5s  %-20s  %s\n", "Session ID", "Runs", "Last Active", "First Prompt")
+	fmt.Printf("%-24s %5s  %-20s  %s\n",
+		strings.Repeat("-", 24), "-----",
+		strings.Repeat("-", 20), strings.Repeat("-", 30))
+	for _, m := range metas {
+		prompt := m.FirstPrompt
+		if runes := []rune(prompt); len(runes) > 50 {
+			prompt = string(runes[:50]) + "..."
+		}
+		fmt.Printf("%-24s %5d  %-20s  %s\n",
+			m.ID,
+			m.PromptCount,
+			m.LastActiveAt.Format("2006-01-02 15:04:05"),
+			prompt,
 		)
 	}
 	return nil

@@ -69,7 +69,7 @@ before committing. Fix any issues before proceeding.
 ```
 errata/
 ├── cmd/errata/
-│   └── main.go              # cobra root (errata, errata stats, errata run)
+│   └── main.go              # cobra root (errata, errata stats, errata run, errata sessions)
 ├── internal/
 │   ├── config/
 │   │   └── config.go        # Config struct, Load(), ResolvedActiveModels()
@@ -132,6 +132,8 @@ errata/
 │   │   └── tooloutput.go    # Process() — deterministic output processing rules
 │   ├── subagent/
 │   │   └── subagent.go      # NewDispatcher() — sub-agent delegation (compile-time gated)
+│   ├── session/
+│   │   └── session.go      # GenerateID(), Paths, Meta, FeedEntry — ephemeral session lifecycle
 │   ├── ui/
 │   │   ├── app.go           # bubbletea program, mode state machine
 │   │   ├── cmd_handlers.go  # slash command dispatch and handlers
@@ -149,7 +151,11 @@ errata/
 
 ```bash
 go build -o errata ./cmd/errata            # build binary
-./errata                                    # start TUI REPL
+./errata                                    # start TUI REPL (fresh session)
+./errata --continue                         # resume the most recent session
+./errata --resume <id>                      # resume a session by ID or prefix
+./errata --resume                           # alias for --continue (no ID = most recent)
+./errata sessions                           # list all sessions
 ./errata stats                              # print preference summary (non-interactive)
 ./errata --debug-log data/log.jsonl         # enable JSONL debug logging
 ./errata -r myrecipe.md                     # use explicit recipe file
@@ -197,6 +203,13 @@ The canonical command list is defined in `internal/commands/commands.go` (`comma
 ---
 
 ## Core Workflow
+
+**Ephemeral sessions:** Each `./errata` invocation starts a fresh session with a random
+hex ID (e.g. `a3f2b1c9d4e5f607`). Per-session state (history, feed, checkpoint, recipe)
+is stored in `data/sessions/<id>/`. Use `--continue` to resume the most recent session or
+`--resume <id>` to resume by ID/prefix. On resume, the session recipe is loaded (capturing
+tool config, system prompt, etc. from the last run), and the conversation feed is replayed.
+Prompt history and preferences remain global. `errata sessions` lists all sessions.
 
 1. User types a prompt (TUI REPL)
 2. `runner.RunAll()` fans out to all active adapters concurrently via goroutines
@@ -349,9 +362,10 @@ hooks          ← stdlib only
 reminders      ← stdlib only
 headless       ← models, tools, prompt, recipe, runner, adapters, config, criteria, output, sandbox, subagent, checkpoint
 output         ← models, recipe, criteria
+session        ← stdlib only (crypto/rand, encoding/json, os, path/filepath)
 subagent       ← models, config, tools
-ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, commands, prompthistory, checkpoint, recipe, output, sandbox, subagent, bubbletea, lipgloss
-cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, recipe
+ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, commands, prompthistory, checkpoint, recipe, output, sandbox, subagent, session, bubbletea, lipgloss
+cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, recipe, session
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -734,4 +748,5 @@ Table-driven tests preferred for config, preferences, and diff packages.
 - `data/history.json` (contains full conversation context)
 - `data/prompt_history.jsonl` (contains submitted prompts for Up-arrow / Ctrl-R recall)
 - `data/checkpoint.json` (transient interrupted run state for `/resume`)
+- `data/sessions/` (per-session history, feed, checkpoint, recipe)
 - `dist/` (compiled binaries from `make build-all`)
