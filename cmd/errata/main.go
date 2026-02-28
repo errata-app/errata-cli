@@ -246,7 +246,9 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming)
+	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming)
+	fmt.Fprintf(os.Stderr, "To continue this session: errata --resume %s\n", sessionID)
+	return err
 }
 
 func runHeadless(cmd *cobra.Command, args []string) error {
