@@ -33,7 +33,14 @@ var defaultFS embed.FS
 // Recipe holds all settings parsed from a recipe.md file.
 // Nil/zero values mean "not set" — ApplyTo leaves the corresponding
 // config.Config field unchanged when a field is unset.
+//
+// The Version field is the recipe schema version (integer). Every recipe must
+// declare its version explicitly; recipes without a version are rejected.
+// The Recipe type only grows: new fields are added with zero-value defaults so
+// that older-version parsers can migrate forward without breaking.
 type Recipe struct {
+	Version int // recipe schema version (required; currently only 1)
+
 	Name         string
 	Models       []string        // nil = not set
 	SystemPrompt string          // "" = not set
@@ -175,6 +182,48 @@ type ModelProfileConfig struct {
 	MidConvoSystem *bool  // nil = not set
 }
 
+// ─── Runner (version-pinned execution) ──────────────────────────────────────
+
+// Runner encapsulates version-specific recipe execution behavior.
+// Each recipe version maps to its own Runner implementation, ensuring
+// that a recipe's runtime behavior is pinned to the version it was written for.
+type Runner interface {
+	// Version returns the recipe format version this runner implements.
+	Version() int
+	// Recipe returns the underlying recipe configuration.
+	Recipe() *Recipe
+}
+
+// v1Runner implements Runner for version 1 recipes.
+type v1Runner struct {
+	recipe *Recipe
+}
+
+// NewV1Runner creates a Runner for a version 1 recipe.
+func NewV1Runner(r *Recipe) (Runner, error) {
+	if r.Version != 1 {
+		return nil, fmt.Errorf("NewV1Runner: expected version 1, got %d", r.Version)
+	}
+	return &v1Runner{recipe: r}, nil
+}
+
+func (v *v1Runner) Version() int    { return 1 }
+func (v *v1Runner) Recipe() *Recipe { return v.recipe }
+
+// BuildRunner creates a version-specific Runner for this recipe.
+// Returns an error if the recipe version is unsupported.
+func (r *Recipe) BuildRunner() (Runner, error) {
+	switch r.Version {
+	case 1:
+		return NewV1Runner(r)
+	default:
+		return nil, fmt.Errorf("unsupported recipe version %d (max supported: %d)", r.Version, MaxVersion)
+	}
+}
+
+// MaxVersion is the highest recipe version supported by this binary.
+const MaxVersion = 1
+
 // ─── Constructor ──────────────────────────────────────────────────────────────
 
 // newRecipe returns a Recipe with sentinel values for fields that distinguish
@@ -210,9 +259,55 @@ func parseEmbedded() *Recipe {
 	return r
 }
 
-// parseBytes parses recipe content from a byte slice.
+// parseBytes extracts the recipe version and dispatches to the appropriate
+// version-specific parser. Every recipe must declare its version explicitly
+// in the header area (before the first ## section):
+//
+//	version: 1
 func parseBytes(data []byte) (*Recipe, error) {
+	version, err := extractVersion(data)
+	if err != nil {
+		return nil, err
+	}
+	switch version {
+	case 1:
+		return parseV1(data)
+	default:
+		return nil, fmt.Errorf("recipe version %d not supported (max supported: %d)", version, MaxVersion)
+	}
+}
+
+// extractVersion scans the header lines (before the first ## section) for a
+// "version: N" declaration. Returns an error if no version is found or the
+// value is not a positive integer.
+func extractVersion(data []byte) (int, error) {
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			break // past header area
+		}
+		trimmed := strings.TrimSpace(line)
+		key, val, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(strings.ToLower(key)) == "version" {
+			v, err := strconv.Atoi(strings.TrimSpace(val))
+			if err != nil {
+				return 0, fmt.Errorf("recipe version must be an integer, got %q", strings.TrimSpace(val))
+			}
+			if v < 1 {
+				return 0, fmt.Errorf("recipe version must be >= 1, got %d", v)
+			}
+			return v, nil
+		}
+	}
+	return 0, fmt.Errorf("recipe missing required version field (add \"version: 1\" before the first section)")
+}
+
+// parseV1 parses a version 1 recipe. All currently defined sections are v1.
+func parseV1(data []byte) (*Recipe, error) {
 	r := newRecipe()
+	r.Version = 1
 	lines := strings.Split(string(data), "\n")
 
 	// Split into (header, body) pairs on "## " boundaries.
@@ -856,6 +951,11 @@ func (r *Recipe) MarshalMarkdown() string {
 		name = "Errata Recipe"
 	}
 	fmt.Fprintf(&sb, "# %s\n", name)
+
+	// Version (must come before any ## section)
+	if r.Version > 0 {
+		fmt.Fprintf(&sb, "version: %d\n", r.Version)
+	}
 
 	// Models
 	if len(r.Models) > 0 {

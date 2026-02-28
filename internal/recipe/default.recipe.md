@@ -1,4 +1,5 @@
 # Errata Default
+version: 1
 
 ## Context
 max_history_turns: 20

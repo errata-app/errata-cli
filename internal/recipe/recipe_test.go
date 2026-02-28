@@ -24,30 +24,131 @@ func writeRecipe(t *testing.T, content string) string {
 	return f.Name()
 }
 
-// ─── Parse tests ─────────────────────────────────────────────────────────────
-
-func TestParse_Empty(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, ""))
-	require.NoError(t, err)
-	assert.Nil(t, r.Models)
-	assert.Empty(t, r.SystemPrompt)
-	assert.Nil(t, r.Tools)
-	assert.Empty(t, r.Tasks)
+// v1 prepends "version: 1\n" to recipe content for use in tests.
+func v1(content string) string {
+	return "version: 1\n" + content
 }
 
+// ─── Version tests ──────────────────────────────────────────────────────────
+
+func TestParse_MissingVersion(t *testing.T) {
+	_, err := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing required version")
+}
+
+func TestParse_MissingVersion_Empty(t *testing.T) {
+	_, err := recipe.Parse(writeRecipe(t, ""))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing required version")
+}
+
+func TestParse_UnsupportedVersion(t *testing.T) {
+	_, err := recipe.Parse(writeRecipe(t, "version: 99\n## Models\n- m\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+	assert.Contains(t, err.Error(), "99")
+}
+
+func TestParse_VersionZero(t *testing.T) {
+	_, err := recipe.Parse(writeRecipe(t, "version: 0\n## Models\n- m\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ">= 1")
+}
+
+func TestParse_VersionNegative(t *testing.T) {
+	_, err := recipe.Parse(writeRecipe(t, "version: -1\n## Models\n- m\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ">= 1")
+}
+
+func TestParse_VersionNonInteger(t *testing.T) {
+	_, err := recipe.Parse(writeRecipe(t, "version: 1.5\n## Models\n- m\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be an integer")
+}
+
+func TestParse_VersionString(t *testing.T) {
+	_, err := recipe.Parse(writeRecipe(t, "version: latest\n## Models\n- m\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be an integer")
+}
+
+func TestParse_Version1(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
+	require.NoError(t, err)
+	assert.Equal(t, 1, r.Version)
+	require.Len(t, r.Models, 1)
+	assert.Equal(t, "claude-sonnet-4-6", r.Models[0])
+}
+
+func TestParse_VersionAfterTitle(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "# My Recipe\nversion: 1\n\n## Models\n- m\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, r.Version)
+	assert.Equal(t, "My Recipe", r.Name)
+}
+
+func TestParse_VersionBeforeTitle(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, "version: 1\n# My Recipe\n\n## Models\n- m\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, r.Version)
+	assert.Equal(t, "My Recipe", r.Name)
+}
+
+// ─── BuildRunner tests ──────────────────────────────────────────────────────
+
+func TestBuildRunner_V1(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- m\n")))
+	require.NoError(t, err)
+
+	runner, err := r.BuildRunner()
+	require.NoError(t, err)
+	assert.Equal(t, 1, runner.Version())
+	assert.Equal(t, r, runner.Recipe())
+}
+
+func TestBuildRunner_UnsupportedVersion(t *testing.T) {
+	// Construct a recipe directly with an unsupported version.
+	r := &recipe.Recipe{Version: 99}
+	_, err := r.BuildRunner()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported recipe version 99")
+}
+
+func TestBuildRunner_ZeroVersion(t *testing.T) {
+	r := &recipe.Recipe{}
+	_, err := r.BuildRunner()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported recipe version 0")
+}
+
+func TestNewV1Runner_WrongVersion(t *testing.T) {
+	r := &recipe.Recipe{Version: 2}
+	_, err := recipe.NewV1Runner(r)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected version 1")
+}
+
+func TestMaxVersion(t *testing.T) {
+	assert.Equal(t, 1, recipe.MaxVersion)
+}
+
+// ─── Parse tests ─────────────────────────────────────────────────────────────
+
 func TestParse_Title(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "# My Recipe\n\n## Models\n- claude-sonnet-4-6\n"))
+	r, err := recipe.Parse(writeRecipe(t, "# My Recipe\nversion: 1\n\n## Models\n- claude-sonnet-4-6\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "My Recipe", r.Name)
 }
 
 func TestParse_Models(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Models
 - claude-sonnet-4-6
 - openai/gpt-4o
 - gemini-2.5-pro
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.Models, 3)
 	assert.Equal(t, "claude-sonnet-4-6", r.Models[0])
@@ -56,25 +157,25 @@ func TestParse_Models(t *testing.T) {
 }
 
 func TestParse_SystemPrompt(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## System Prompt
 You are a senior Go engineer.
 Follow standard library conventions.
 
 No external dependencies unless necessary.
-`))
+`)))
 	require.NoError(t, err)
 	assert.Contains(t, r.SystemPrompt, "senior Go engineer")
 	assert.Contains(t, r.SystemPrompt, "No external dependencies")
 }
 
 func TestParse_ToolsAllowlist(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tools
 - read_file
 - search_files
 - list_directory
-`))
+`)))
 	require.NoError(t, err)
 	require.NotNil(t, r.Tools)
 	assert.Equal(t, []string{"read_file", "search_files", "list_directory"}, r.Tools.Allowlist)
@@ -82,11 +183,11 @@ func TestParse_ToolsAllowlist(t *testing.T) {
 }
 
 func TestParse_ToolsBashRestriction(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tools
 - read_file
 - bash(go test *, go build *, go vet *)
-`))
+`)))
 	require.NoError(t, err)
 	require.NotNil(t, r.Tools)
 	assert.Contains(t, r.Tools.Allowlist, "bash")
@@ -98,11 +199,11 @@ func TestParse_ToolsBashRestriction(t *testing.T) {
 }
 
 func TestParse_ToolsBashBare(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tools
 - read_file
 - bash
-`))
+`)))
 	require.NoError(t, err)
 	require.NotNil(t, r.Tools)
 	assert.Contains(t, r.Tools.Allowlist, "bash")
@@ -110,17 +211,17 @@ func TestParse_ToolsBashBare(t *testing.T) {
 }
 
 func TestParse_NoToolsSection(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
 	require.NoError(t, err)
 	assert.Nil(t, r.Tools, "absent ## Tools section should leave Tools nil (all tools enabled)")
 }
 
 func TestParse_MCPServers(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## MCP Servers
 - exa: npx @exa-ai/exa-mcp-server
 - fs: npx @modelcontextprotocol/server-filesystem /tmp
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.MCPServers, 2)
 	assert.Equal(t, "exa", r.MCPServers[0].Name)
@@ -130,29 +231,29 @@ func TestParse_MCPServers(t *testing.T) {
 }
 
 func TestParse_Constraints(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Constraints
 timeout: 5m
 max_steps: 30
-`))
+`)))
 	require.NoError(t, err)
 	assert.Equal(t, 5*time.Minute, r.Constraints.Timeout)
 	assert.Equal(t, 30, r.Constraints.MaxSteps)
 }
 
 func TestParse_ConstraintsTimeoutSeconds(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Constraints\ntimeout: 300s\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Constraints\ntimeout: 300s\n")))
 	require.NoError(t, err)
 	assert.Equal(t, 300*time.Second, r.Constraints.Timeout)
 }
 
 func TestParse_Context(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Context
 max_history_turns: 10
 strategy: auto_compact
 compact_threshold: 0.75
-`))
+`)))
 	require.NoError(t, err)
 	assert.Equal(t, 10, r.Context.MaxHistoryTurns)
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
@@ -160,24 +261,24 @@ compact_threshold: 0.75
 }
 
 func TestParse_ContextManual(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Context\nstrategy: manual\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Context\nstrategy: manual\n")))
 	require.NoError(t, err)
 	assert.Equal(t, "manual", r.Context.Strategy)
 }
 
 func TestParse_ContextOff(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Context\nstrategy: off\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Context\nstrategy: off\n")))
 	require.NoError(t, err)
 	assert.Equal(t, "off", r.Context.Strategy)
 }
 
 func TestParse_SubAgent(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Sub-Agent
 model: claude-haiku-3
 max_depth: 2
 tools: read_file, search_files
-`))
+`)))
 	require.NoError(t, err)
 	assert.Equal(t, "claude-haiku-3", r.SubAgent.Model)
 	assert.Equal(t, 2, r.SubAgent.MaxDepth)
@@ -185,35 +286,35 @@ tools: read_file, search_files
 }
 
 func TestParse_SubAgentMaxDepthZero(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Sub-Agent\nmax_depth: 0\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Sub-Agent\nmax_depth: 0\n")))
 	require.NoError(t, err)
 	assert.Equal(t, 0, r.SubAgent.MaxDepth, "max_depth: 0 should disable sub-agents")
 }
 
 func TestParse_SubAgentNotSet(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
 	require.NoError(t, err)
 	assert.Equal(t, -1, r.SubAgent.MaxDepth, "unset max_depth should be -1 sentinel")
 }
 
 func TestParse_Sandbox(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Sandbox
 filesystem: project_only
 network: none
-`))
+`)))
 	require.NoError(t, err)
 	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
 	assert.Equal(t, "none", r.Sandbox.Network)
 }
 
 func TestParse_Tasks(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tasks
 - Refactor the HTTP handler
 - Add table-driven tests
 - Fix the race condition
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.Tasks, 3)
 	assert.Equal(t, "Refactor the HTTP handler", r.Tasks[0])
@@ -221,19 +322,19 @@ func TestParse_Tasks(t *testing.T) {
 
 func TestParse_UnknownSection(t *testing.T) {
 	// Unknown sections should not cause an error.
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Models
 - claude-sonnet-4-6
 
 ## Totally Unknown Section
 some content here
-`))
+`)))
 	require.NoError(t, err)
 	assert.Len(t, r.Models, 1)
 }
 
 func TestParse_Metadata(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Metadata
 name: Go Refactoring Suite
 description: Tests Go refactoring tasks
@@ -241,7 +342,7 @@ tags: go, refactoring
 author: charlessuarez
 version: 1.0
 contribute: true
-`))
+`)))
 	require.NoError(t, err)
 	assert.Equal(t, "Go Refactoring Suite", r.Metadata.Name)
 	assert.Equal(t, "charlessuarez", r.Metadata.Author)
@@ -253,7 +354,7 @@ contribute: true
 // ─── Discover tests ───────────────────────────────────────────────────────────
 
 func TestDiscover_ExplicitPath(t *testing.T) {
-	path := writeRecipe(t, "## Models\n- test-model\n")
+	path := writeRecipe(t, v1("## Models\n- test-model\n"))
 	r, err := recipe.Discover(path)
 	require.NoError(t, err)
 	require.Len(t, r.Models, 1)
@@ -276,6 +377,7 @@ func TestDiscover_FallsBackToEmbeddedDefault(t *testing.T) {
 	r, err := recipe.Discover("")
 	require.NoError(t, err)
 	require.NotNil(t, r)
+	assert.Equal(t, 1, r.Version)
 	// Default recipe sets context strategy (sub-agent depth gated by SubagentEnabled).
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
 	assert.Equal(t, -1, r.SubAgent.MaxDepth, "default recipe no longer sets sub-agent depth (feature gated)")
@@ -288,7 +390,7 @@ func TestDiscover_CwdRecipeMd(t *testing.T) {
 	require.NoError(t, os.Chdir(dir))
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 
-	require.NoError(t, os.WriteFile("recipe.md", []byte("## Models\n- local-model\n"), 0o644))
+	require.NoError(t, os.WriteFile("recipe.md", []byte("version: 1\n## Models\n- local-model\n"), 0o600))
 
 	r, err := recipe.Discover("")
 	require.NoError(t, err)
@@ -303,9 +405,9 @@ func TestDiscover_DotErrataRecipeMd(t *testing.T) {
 	require.NoError(t, os.Chdir(dir))
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 
-	require.NoError(t, os.MkdirAll(".errata", 0o755))
+	require.NoError(t, os.MkdirAll(".errata", 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(".errata", "recipe.md"),
-		[]byte("## Models\n- errata-model\n"), 0o644))
+		[]byte("version: 1\n## Models\n- errata-model\n"), 0o600))
 
 	r, err := recipe.Discover("")
 	require.NoError(t, err)
@@ -317,26 +419,26 @@ func TestDiscover_DotErrataRecipeMd(t *testing.T) {
 
 func defaultCfg() config.Config {
 	return config.Config{
-		ActiveModels:     nil,
+		ActiveModels:      nil,
 		SystemPromptExtra: "",
-		MCPServers:       "",
-		SubagentModel:    "",
-		SubagentMaxDepth: 1,
-		MaxHistoryTurns:  20,
-		AgentTimeout:     0,
-		CompactThreshold: 0,
+		MCPServers:        "",
+		SubagentModel:     "",
+		SubagentMaxDepth:  1,
+		MaxHistoryTurns:   20,
+		AgentTimeout:      0,
+		CompactThreshold:  0,
 	}
 }
 
 func TestApplyTo_Models(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n- openai/gpt-4o\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n- openai/gpt-4o\n")))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
 	assert.Equal(t, []string{"claude-sonnet-4-6", "openai/gpt-4o"}, cfg.ActiveModels)
 }
 
 func TestApplyTo_NilModels_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Constraints\ntimeout: 5m\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\ntimeout: 5m\n")))
 	cfg := defaultCfg()
 	cfg.ActiveModels = []string{"existing-model"}
 	r.ApplyTo(&cfg)
@@ -344,14 +446,14 @@ func TestApplyTo_NilModels_DoesNotOverwrite(t *testing.T) {
 }
 
 func TestApplyTo_SystemPrompt(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## System Prompt\nYou are a Go expert.\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## System Prompt\nYou are a Go expert.\n")))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
 	assert.Equal(t, "You are a Go expert.", cfg.SystemPromptExtra)
 }
 
 func TestApplyTo_MCPServers(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## MCP Servers\n- exa: npx @exa-ai/exa-mcp-server\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## MCP Servers\n- exa: npx @exa-ai/exa-mcp-server\n")))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
 	assert.Contains(t, cfg.MCPServers, "exa:")
@@ -359,7 +461,7 @@ func TestApplyTo_MCPServers(t *testing.T) {
 }
 
 func TestApplyTo_SubagentDepthExplicitZero(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Sub-Agent\nmax_depth: 0\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Sub-Agent\nmax_depth: 0\n")))
 	cfg := defaultCfg()
 	cfg.SubagentMaxDepth = 1
 	r.ApplyTo(&cfg)
@@ -367,7 +469,7 @@ func TestApplyTo_SubagentDepthExplicitZero(t *testing.T) {
 }
 
 func TestApplyTo_SubagentDepthNotSet_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
 	cfg := defaultCfg()
 	cfg.SubagentMaxDepth = 3
 	r.ApplyTo(&cfg)
@@ -375,67 +477,67 @@ func TestApplyTo_SubagentDepthNotSet_DoesNotOverwrite(t *testing.T) {
 }
 
 func TestApplyTo_Timeout(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Constraints\ntimeout: 3m\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\ntimeout: 3m\n")))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
 	assert.Equal(t, 3*time.Minute, cfg.AgentTimeout)
 }
 
 func TestApplyTo_MaxHistoryTurns(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Context\nmax_history_turns: 5\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Context\nmax_history_turns: 5\n")))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
 	assert.Equal(t, 5, cfg.MaxHistoryTurns)
 }
 
 func TestApplyTo_CompactThreshold(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Context\ncompact_threshold: 0.60\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Context\ncompact_threshold: 0.60\n")))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
 	assert.InDelta(t, 0.60, cfg.CompactThreshold, 0.001)
 }
 
 func TestParse_ModelParamsSeed(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Model Parameters
 seed: 42
-`))
+`)))
 	require.NoError(t, err)
 	require.NotNil(t, r.ModelParams.Seed)
 	assert.Equal(t, int64(42), *r.ModelParams.Seed)
 }
 
 func TestParse_ModelParamsSeedZero(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Model Parameters
 seed: 0
-`))
+`)))
 	require.NoError(t, err)
 	require.NotNil(t, r.ModelParams.Seed, "seed: 0 should be set, not nil")
 	assert.Equal(t, int64(0), *r.ModelParams.Seed)
 }
 
 func TestParse_ModelParamsSeedNegative(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Model Parameters
 seed: -1
-`))
+`)))
 	require.NoError(t, err)
 	require.NotNil(t, r.ModelParams.Seed)
 	assert.Equal(t, int64(-1), *r.ModelParams.Seed)
 }
 
 func TestParse_ModelParamsSeedAbsent(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Model Parameters
 temperature: 0.5
-`))
+`)))
 	require.NoError(t, err)
 	assert.Nil(t, r.ModelParams.Seed, "absent seed should be nil")
 }
 
 func TestApplyTo_Seed(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Model Parameters\nseed: 42\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Model Parameters\nseed: 42\n")))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
 	require.NotNil(t, cfg.Seed)
@@ -443,7 +545,7 @@ func TestApplyTo_Seed(t *testing.T) {
 }
 
 func TestApplyTo_SeedNil_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
 	cfg := defaultCfg()
 	existing := int64(99)
 	cfg.Seed = &existing
@@ -453,12 +555,12 @@ func TestApplyTo_SeedNil_DoesNotOverwrite(t *testing.T) {
 }
 
 func TestParse_SuccessCriteria(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Success Criteria
 - no_errors
 - has_writes
 - contains: all tests pass
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.SuccessCriteria, 3)
 	assert.Equal(t, "no_errors", r.SuccessCriteria[0])
@@ -467,7 +569,7 @@ func TestParse_SuccessCriteria(t *testing.T) {
 }
 
 func TestParse_SuccessCriteriaAbsent(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
 	require.NoError(t, err)
 	assert.Nil(t, r.SuccessCriteria)
 }
@@ -475,7 +577,7 @@ func TestParse_SuccessCriteriaAbsent(t *testing.T) {
 func TestParse_ContextTaskMode(t *testing.T) {
 	for _, mode := range []string{"independent", "sequential"} {
 		t.Run(mode, func(t *testing.T) {
-			r, err := recipe.Parse(writeRecipe(t, "## Context\ntask_mode: "+mode+"\n"))
+			r, err := recipe.Parse(writeRecipe(t, v1("## Context\ntask_mode: "+mode+"\n")))
 			require.NoError(t, err)
 			assert.Equal(t, mode, r.Context.TaskMode)
 		})
@@ -483,13 +585,13 @@ func TestParse_ContextTaskMode(t *testing.T) {
 }
 
 func TestParse_ContextTaskModeAbsent(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Context\nstrategy: auto_compact\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Context\nstrategy: auto_compact\n")))
 	require.NoError(t, err)
 	assert.Empty(t, r.Context.TaskMode)
 }
 
 func TestParse_ContextTaskModeInvalid(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Context\ntask_mode: invalid\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Context\ntask_mode: invalid\n")))
 	require.NoError(t, err)
 	assert.Empty(t, r.Context.TaskMode, "unknown task_mode should be ignored")
 }
@@ -497,6 +599,7 @@ func TestParse_ContextTaskModeInvalid(t *testing.T) {
 func TestDefault_IsNonNil(t *testing.T) {
 	r := recipe.Default()
 	require.NotNil(t, r)
+	assert.Equal(t, 1, r.Version)
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
 	assert.Equal(t, -1, r.SubAgent.MaxDepth, "default recipe no longer sets sub-agent depth (feature gated)")
 	assert.Equal(t, 5*time.Minute, r.Constraints.Timeout)
@@ -505,7 +608,7 @@ func TestDefault_IsNonNil(t *testing.T) {
 // ─── Gap 2: Tool Descriptions ────────────────────────────────────────────────
 
 func TestParse_ToolDescriptions(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tool Descriptions
 ### bash
 Use bash for tests and builds.
@@ -513,7 +616,7 @@ Always check exit codes.
 
 ### read_file
 Read files to understand code.
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.ToolDescriptions, 2)
 	assert.Contains(t, r.ToolDescriptions["bash"], "Always check exit codes")
@@ -523,14 +626,14 @@ Read files to understand code.
 // ─── Gap 3: Sub-Agent Modes ─────────────────────────────────────────────────
 
 func TestParse_SubAgentModes(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Sub-Agent Modes
 ### explore
 You are a codebase exploration specialist. READ-ONLY mode.
 
 ### plan
 You are a planning specialist. Do NOT make changes.
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.SubAgentModes, 2)
 	assert.Contains(t, r.SubAgentModes["explore"], "READ-ONLY")
@@ -540,7 +643,7 @@ You are a planning specialist. Do NOT make changes.
 // ─── Gap 4: System Reminders ─────────────────────────────────────────────────
 
 func TestParse_SystemReminders(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## System Reminders
 ### context_warning
 trigger: context_usage > 0.75
@@ -551,7 +654,7 @@ Approaching context limit. Be concise.
 trigger: last_tool_call_failed
 
 Analyze the error before retrying.
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.SystemReminders, 2)
 
@@ -567,7 +670,7 @@ Analyze the error before retrying.
 // ─── Gap 5: Hooks ────────────────────────────────────────────────────────────
 
 func TestParse_Hooks(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Hooks
 ### post_edit_vet
 event: post_tool_use
@@ -580,7 +683,7 @@ inject_output: true
 event: post_response
 command: echo 'done' >> /tmp/log.txt
 timeout: 5s
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.Hooks, 2)
 
@@ -603,10 +706,10 @@ timeout: 5s
 // ─── Gap 6: Summarization Prompt ─────────────────────────────────────────────
 
 func TestParse_SummarizationPrompt(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Context Summarization Prompt
 Summarize for context continuity. Preserve: file paths, decisions.
-`))
+`)))
 	require.NoError(t, err)
 	assert.Contains(t, r.SummarizationPrompt, "context continuity")
 }
@@ -614,7 +717,7 @@ Summarize for context continuity. Preserve: file paths, decisions.
 // ─── Gap 7: Output Processing ────────────────────────────────────────────────
 
 func TestParse_OutputProcessing(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Output Processing
 ### bash
 max_lines: 200
@@ -624,7 +727,7 @@ truncation_message: [Truncated to last 200 lines. Full output: {line_count} line
 ### web_fetch
 max_tokens: 5000
 truncation: head
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.OutputProcessing, 2)
 
@@ -641,7 +744,7 @@ truncation: head
 // ─── Model Profiles ──────────────────────────────────────────────────────────
 
 func TestParse_ModelProfiles(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Model Profiles
 ### gpt-4o
 context_budget: 32000
@@ -650,7 +753,7 @@ mid_convo_system: false
 
 ### gemini-2.0-flash
 context_budget: 1000000
-`))
+`)))
 	require.NoError(t, err)
 	require.Len(t, r.ModelProfiles, 2)
 
@@ -668,7 +771,7 @@ context_budget: 1000000
 
 func TestParse_FullRecipe_BackwardCompat(t *testing.T) {
 	// All new sections alongside existing sections — nothing should break.
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 # Full Test Recipe
 
 ## Models
@@ -735,8 +838,10 @@ network: full
 
 ## Model Parameters
 seed: 42
-`))
+`)))
 	require.NoError(t, err)
+
+	assert.Equal(t, 1, r.Version)
 
 	// Existing sections still work.
 	assert.Len(t, r.Models, 3)
@@ -771,6 +876,7 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	r, err := recipe.Parse(examplePath)
 	require.NoError(t, err)
 
+	assert.Equal(t, 1, r.Version)
 	assert.Equal(t, "My Project Recipe", r.Name)
 	assert.Len(t, r.Models, 3)
 
@@ -843,24 +949,24 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 // ─── Parse edge cases ───────────────────────────────────────────────────────
 
 func TestParse_MCPServers_NoColon(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## MCP Servers\n- no_colon_here\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## MCP Servers\n- no_colon_here\n")))
 	require.NoError(t, err)
 	assert.Empty(t, r.MCPServers)
 }
 
 func TestParse_MCPServers_EmptyNameOrCommand(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## MCP Servers\n- :\n- name:\n- :cmd\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## MCP Servers\n- :\n- name:\n- :cmd\n")))
 	require.NoError(t, err)
 	assert.Empty(t, r.MCPServers, "empty name or command should be skipped")
 }
 
 func TestParse_ModelParams_InvalidValues(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Model Parameters
 temperature: not_a_number
 max_tokens: abc
 seed: xyz
-`))
+`)))
 	require.NoError(t, err)
 	assert.Nil(t, r.ModelParams.Temperature)
 	assert.Nil(t, r.ModelParams.MaxTokens)
@@ -868,36 +974,36 @@ seed: xyz
 }
 
 func TestParse_ModelParams_MaxTokensZero(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Model Parameters\nmax_tokens: 0\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Model Parameters\nmax_tokens: 0\n")))
 	require.NoError(t, err)
 	assert.Nil(t, r.ModelParams.MaxTokens, "max_tokens: 0 should be ignored (must be > 0)")
 }
 
 func TestParse_Sandbox_UnknownValues(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Sandbox
 filesystem: invalid_value
 network: unknown
-`))
+`)))
 	require.NoError(t, err)
 	assert.Empty(t, r.Sandbox.Filesystem)
 	assert.Empty(t, r.Sandbox.Network)
 }
 
 func TestParse_Constraints_IntegerTimeout(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Constraints\ntimeout: 120\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Constraints\ntimeout: 120\n")))
 	require.NoError(t, err)
 	assert.Equal(t, 120*time.Second, r.Constraints.Timeout, "integer timeout should be treated as seconds")
 }
 
 func TestParse_Constraints_InvalidTimeout(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Constraints\ntimeout: abc\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Constraints\ntimeout: abc\n")))
 	require.NoError(t, err)
 	assert.Equal(t, time.Duration(0), r.Constraints.Timeout)
 }
 
 func TestParse_Constraints_InvalidMaxSteps(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Constraints\nmax_steps: not_a_number\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Constraints\nmax_steps: not_a_number\n")))
 	require.NoError(t, err)
 	assert.Equal(t, 0, r.Constraints.MaxSteps)
 }
@@ -905,12 +1011,12 @@ func TestParse_Constraints_InvalidMaxSteps(t *testing.T) {
 // ─── Empty new sections ─────────────────────────────────────────────────────
 
 func TestParse_EmptyNewSections(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tool Descriptions
 ## Model Profiles
 ## System Reminders
 ## Hooks
-`))
+`)))
 	require.NoError(t, err)
 	assert.Nil(t, r.ToolDescriptions)
 	assert.Nil(t, r.ModelProfiles)
@@ -925,6 +1031,7 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 	temp := 0.7
 	maxTok := 4096
 	orig := &recipe.Recipe{
+		Version:      1,
 		Name:         "Test Recipe",
 		Models:       []string{"claude-sonnet-4-6", "gpt-4o"},
 		SystemPrompt: "You are a helpful assistant.",
@@ -963,12 +1070,14 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 	}
 
 	md := orig.MarshalMarkdown()
+	assert.Contains(t, md, "version: 1")
 
 	// Write and re-parse.
 	path := writeRecipe(t, md)
 	parsed, err := recipe.Parse(path)
 	require.NoError(t, err)
 
+	assert.Equal(t, 1, parsed.Version)
 	assert.Equal(t, "Test Recipe", parsed.Name)
 	assert.Equal(t, orig.Models, parsed.Models)
 	assert.Equal(t, orig.SystemPrompt, parsed.SystemPrompt)
@@ -999,6 +1108,7 @@ func TestMarshalMarkdown_DefaultRecipe(t *testing.T) {
 	r := recipe.Default()
 	md := r.MarshalMarkdown()
 	assert.Contains(t, md, "# Errata Default")
+	assert.Contains(t, md, "version: 1")
 	assert.Contains(t, md, "## Context")
 }
 
@@ -1009,17 +1119,34 @@ func TestMarshalMarkdown_EmptyRecipe(t *testing.T) {
 	// Should not contain section headers for empty fields.
 	assert.NotContains(t, md, "## Models")
 	assert.NotContains(t, md, "## Constraints")
+	// Version 0 should not be emitted.
+	assert.NotContains(t, md, "version:")
+}
+
+func TestMarshalMarkdown_Version_RoundTrip(t *testing.T) {
+	orig := &recipe.Recipe{
+		Version: 1,
+		Name:    "Version Test",
+		Models:  []string{"m"},
+	}
+	md := orig.MarshalMarkdown()
+	assert.Contains(t, md, "version: 1")
+
+	path := writeRecipe(t, md)
+	parsed, err := recipe.Parse(path)
+	require.NoError(t, err)
+	assert.Equal(t, 1, parsed.Version)
 }
 
 // ─── bash_timeout in Constraints ─────────────────────────────────────────────
 
 func TestParse_Constraints_BashTimeout(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Constraints
 timeout: 10m
 bash_timeout: 30s
 max_steps: 50
-`))
+`)))
 	require.NoError(t, err)
 	assert.Equal(t, 10*time.Minute, r.Constraints.Timeout)
 	assert.Equal(t, 30*time.Second, r.Constraints.BashTimeout)
@@ -1027,13 +1154,13 @@ max_steps: 50
 }
 
 func TestParse_Constraints_BashTimeoutIntegerSeconds(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Constraints\nbash_timeout: 120\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Constraints\nbash_timeout: 120\n")))
 	require.NoError(t, err)
 	assert.Equal(t, 120*time.Second, r.Constraints.BashTimeout)
 }
 
 func TestParse_Constraints_BashTimeoutInvalid(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Constraints\nbash_timeout: abc\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Constraints\nbash_timeout: abc\n")))
 	require.NoError(t, err)
 	assert.Equal(t, time.Duration(0), r.Constraints.BashTimeout)
 }
@@ -1041,30 +1168,30 @@ func TestParse_Constraints_BashTimeoutInvalid(t *testing.T) {
 // ─── allow_local_fetch in Sandbox ────────────────────────────────────────────
 
 func TestParse_Sandbox_AllowLocalFetch(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Sandbox
 filesystem: project_only
 allow_local_fetch: true
-`))
+`)))
 	require.NoError(t, err)
 	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
 	assert.True(t, r.Sandbox.AllowLocalFetch)
 }
 
 func TestParse_Sandbox_AllowLocalFetchFalse(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Sandbox
 allow_local_fetch: false
-`))
+`)))
 	require.NoError(t, err)
 	assert.False(t, r.Sandbox.AllowLocalFetch)
 }
 
 func TestParse_Sandbox_AllowLocalFetchDefault(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Sandbox
 filesystem: project_only
-`))
+`)))
 	require.NoError(t, err)
 	assert.False(t, r.Sandbox.AllowLocalFetch)
 }
@@ -1072,32 +1199,32 @@ filesystem: project_only
 // ─── Tool Guidance ───────────────────────────────────────────────────────────
 
 func TestParse_ToolGuidance(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, `
+	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tool Guidance
 Custom tool guidance:
 - Always use search_code before editing.
 - Never use bash for file manipulation.
-`))
+`)))
 	require.NoError(t, err)
 	assert.Contains(t, r.ToolGuidance, "Custom tool guidance")
 	assert.Contains(t, r.ToolGuidance, "Never use bash")
 }
 
 func TestParse_ToolGuidance_Absent(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
 	require.NoError(t, err)
 	assert.Empty(t, r.ToolGuidance)
 }
 
 func TestApplyTo_ToolGuidance(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Tool Guidance\nCustom guidance text.\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Tool Guidance\nCustom guidance text.\n")))
 	cfg := defaultCfg()
 	r.ApplyTo(&cfg)
 	assert.Equal(t, "Custom guidance text.", cfg.ToolGuidance)
 }
 
 func TestApplyTo_ToolGuidance_Empty_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, "## Models\n- claude-sonnet-4-6\n"))
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
 	cfg := defaultCfg()
 	cfg.ToolGuidance = "existing guidance"
 	r.ApplyTo(&cfg)
@@ -1106,6 +1233,7 @@ func TestApplyTo_ToolGuidance_Empty_DoesNotOverwrite(t *testing.T) {
 
 func TestMarshalMarkdown_ToolGuidance_RoundTrip(t *testing.T) {
 	orig := &recipe.Recipe{
+		Version:      1,
 		Name:         "Test",
 		ToolGuidance: "My custom guidance:\n- Rule one\n- Rule two",
 	}

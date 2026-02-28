@@ -29,6 +29,7 @@ type RunReport struct {
 // RecipeSnapshot is a JSON-safe subset of recipe.Recipe for the report.
 type RecipeSnapshot struct {
 	Name            string   `json:"name"`
+	Version         int      `json:"version"`
 	Models          []string `json:"models,omitempty"`
 	SystemPrompt    string   `json:"system_prompt,omitempty"`
 	Tasks           []string `json:"tasks"`

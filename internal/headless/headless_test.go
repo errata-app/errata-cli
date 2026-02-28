@@ -53,6 +53,7 @@ var _ models.ModelAdapter = (*mockAdapter)(nil)
 
 func testRecipe(tasks []string, criteriaItems []string) *recipe.Recipe {
 	return &recipe.Recipe{
+		Version:         1,
 		Name:            "Test Recipe",
 		Models:          []string{"model-a", "model-b"},
 		Tasks:           tasks,

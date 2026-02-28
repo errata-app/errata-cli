@@ -185,7 +185,7 @@ func TestHandleImportRecipe_LoadsRecipe(t *testing.T) {
 	a := newAppForTest(t, ads)
 
 	// Write a valid recipe file.
-	recipeContent := "# Imported Recipe\n\n## Models\n- alpha\n- beta\n\n## System Prompt\nYou are helpful.\n"
+	recipeContent := "# Imported Recipe\nversion: 1\n\n## Models\n- alpha\n- beta\n\n## System Prompt\nYou are helpful.\n"
 	path := filepath.Join(t.TempDir(), "recipe.md")
 	require.NoError(t, os.WriteFile(path, []byte(recipeContent), 0o644))
 
