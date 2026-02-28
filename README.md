@@ -123,11 +123,15 @@ optional success criteria and saved as a JSON report. See [Recipes](#recipes) be
 ### Preference summary
 
 ```bash
-./errata stats
-./errata stats --detail   # includes win rate, avg latency, avg cost
+./errata stats                          # overall win counts
+./errata stats --detail                 # win rate, avg latency, avg cost
+./errata stats --recipe my-recipe       # filter by recipe name
+./errata stats --config sha256:abc...   # filter by config hash
 ```
 
-Prints a ranked tally of how often each model has been selected across all past runs.
+Prints a ranked tally of how often each model has been selected. Each preference entry
+records the config hash of the active recipe, so you can compare models under the same
+experimental setup using `--recipe` or `--config`.
 
 ---
 
@@ -530,9 +534,15 @@ Every selection is appended to `data/preferences.jsonl` (never overwritten):
   "models": ["claude-sonnet-4-6", "gpt-4o"],
   "selected": "claude-sonnet-4-6",
   "latencies_ms": {"claude-sonnet-4-6": 891, "gpt-4o": 1243},
+  "config_hash": "sha256:e7b...",
   "session_id": "ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c"
 }
 ```
+
+`config_hash` references a content-addressed snapshot in `data/configs.json` that captures
+the recipe configuration (name, system prompt, active tools, constraints, model parameters)
+at the time of the selection. This enables filtering preference stats by experimental setup
+— entries recorded under different configurations are not directly comparable.
 
 The log is yours — query it with `jq`, load it into a dataframe, or feed it to another model.
 
@@ -585,6 +595,8 @@ errata/
 │   │   └── commands.go          # canonical slash command registry
 │   ├── config/
 │   │   └── config.go            # Config struct, Load(), ResolvedActiveModels()
+│   ├── recipestore/
+│   │   └── recipestore.go       # content-addressed recipe snapshots for preference analysis
 │   ├── criteria/
 │   │   └── criteria.go          # success criteria evaluation (no_errors, has_writes)
 │   ├── diff/

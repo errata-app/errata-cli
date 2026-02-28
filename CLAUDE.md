@@ -59,6 +59,7 @@ and `golangci-lint run ./...` before committing. Fix any issues before proceedin
 - **AI SDKs:** `anthropic-sdk-go v1.26`, `openai-go v1.12`, `google.golang.org/genai v1.47`
 - **Config:** `github.com/joho/godotenv` + `os.Getenv`
 - **Preferences:** append-only JSONL at `data/preferences.jsonl`
+- **Recipe store:** content-addressed recipe snapshots at `data/configs.json` (via `internal/recipestore`)
 - **Run logs:** append-only JSONL at `data/log.jsonl` (via `internal/logging`)
 - **Distribution:** single static binary; cross-compiled via `make build-all`
 
@@ -106,8 +107,10 @@ errata/
 │   │   └── recipe.go        # Recipe struct, Parse(), MarshalMarkdown() — recipe.md parser
 │   ├── diff/
 │   │   └── diff.go          # Compute() → FileDiff (LCS)
+│   ├── recipestore/
+│   │   └── recipestore.go   # Store, RecipeSnapshot, Hash, Put, Get — content-addressed recipe snapshots
 │   ├── preferences/
-│   │   └── preferences.go   # Record(), LoadAll(), Summarize()
+│   │   └── preferences.go   # Record(), LoadAll(), Summarize(), SummarizeDetailed()
 │   ├── history/
 │   │   └── history.go       # Load(), Save(), Clear() — conversation history persistence
 │   ├── logging/
@@ -159,6 +162,8 @@ go build -o errata ./cmd/errata            # build binary
 ./errata --resume                           # alias for --continue (no ID = most recent)
 ./errata sessions                           # list all sessions
 ./errata stats                              # print preference summary (non-interactive)
+./errata stats --recipe myrecipe            # filter stats by recipe name
+./errata stats --config sha256:abc...       # filter stats by config hash
 ./errata --debug-log data/log.jsonl         # enable JSONL debug logging
 ./errata -r myrecipe.md                     # use explicit recipe file
 make test                                   # go test ./...
@@ -344,6 +349,7 @@ Log schema per line:
 tools          ← stdlib only
 pricing        ← stdlib only
 prompt         ← stdlib only (context)
+recipestore    ← stdlib only (crypto/sha256, encoding/json, os)
 mcp            ← tools (for ToolDef, MCPDispatcher)
 models         ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
 config         ← stdlib only
@@ -368,8 +374,8 @@ headless       ← models, tools, prompt, recipe, runner, adapters, config, crit
 output         ← models, recipe, criteria, uid
 session        ← uid, encoding/json, os, path/filepath
 subagent       ← models, config, tools
-ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, commands, prompthistory, checkpoint, recipe, output, sandbox, subagent, session, bubbletea, lipgloss
-cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, recipe, session, uid
+ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, recipestore, commands, prompthistory, checkpoint, recipe, output, sandbox, subagent, session, bubbletea, lipgloss
+cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, recipe, session, uid, recipestore
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -580,11 +586,18 @@ The prefix is stripped before the API call; it remains in the display name.
   "models": ["claude-sonnet-4-6", "gpt-4o"],
   "selected": "claude-sonnet-4-6",
   "latencies_ms": {"claude-sonnet-4-6": 891, "gpt-4o": 1243},
+  "config_hash": "sha256:...",
   "session_id": "ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c"
 }
 ```
 
+`config_hash` is a content-addressed key into `data/configs.json`, which stores the full
+`RecipeSnapshot` (recipe name, system prompt, active tools, constraints, model params) for
+each unique configuration. This enables filtering stats by experimental setup.
+
 Append-only. Corrupt lines are skipped with `log.Printf` (never crash on bad data).
+Legacy entries without `config_hash` are included in unfiltered queries, excluded when
+filtering by hash.
 
 ---
 
@@ -752,5 +765,6 @@ Table-driven tests preferred for config, preferences, and diff packages.
 - `data/history.json` (contains full conversation context)
 - `data/prompt_history.jsonl` (contains submitted prompts for Up-arrow / Ctrl-R recall)
 - `data/checkpoint.json` (transient interrupted run state for `/resume`)
+- `data/configs.json` (content-addressed recipe snapshots for preference analysis)
 - `data/sessions/` (per-session history, feed, checkpoint, recipe)
 - `dist/` (compiled binaries from `make build-all`)

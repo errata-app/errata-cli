@@ -25,22 +25,29 @@ type Entry struct {
 	Rating        string             `json:"rating,omitempty"` // "bad" for single-model thumbs-down; empty otherwise
 	LatenciesMS   map[string]int64   `json:"latencies_ms"`
 	CostsUSD      map[string]float64 `json:"costs_usd,omitempty"`
+	ConfigHash    string             `json:"config_hash,omitempty"` // content-addressed config snapshot hash
 	SessionID     string             `json:"session_id"`
 }
 
+// StatsFilter controls which entries are included in Summarize/SummarizeDetailed.
+// A nil filter matches all entries.
+type StatsFilter struct {
+	ConfigHash string // if non-empty, only include entries with this config hash
+}
+
 // Record appends one preference entry to the JSONL log at path.
-func Record(path, prompt, selectedModel, sessionID string, responses []models.ModelResponse) error {
-	return recordEntry(path, prompt, selectedModel, "", sessionID, responses)
+func Record(path, prompt, selectedModel, configHash, sessionID string, responses []models.ModelResponse) error {
+	return recordEntry(path, prompt, selectedModel, "", configHash, sessionID, responses)
 }
 
 // RecordBad appends a thumbs-down entry for a single-model response.
 // Selected is left empty; Rating is set to "bad".
-func RecordBad(path, prompt, modelID, sessionID string, responses []models.ModelResponse) error {
-	return recordEntry(path, prompt, "", "bad", sessionID, responses)
+func RecordBad(path, prompt, modelID, configHash, sessionID string, responses []models.ModelResponse) error {
+	return recordEntry(path, prompt, "", "bad", configHash, sessionID, responses)
 }
 
 // recordEntry is the shared implementation for Record and RecordBad.
-func recordEntry(path, prompt, selected, rating, sessionID string, responses []models.ModelResponse) error {
+func recordEntry(path, prompt, selected, rating, configHash, sessionID string, responses []models.ModelResponse) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
@@ -75,6 +82,7 @@ func recordEntry(path, prompt, selected, rating, sessionID string, responses []m
 		Rating:        rating,
 		LatenciesMS:   latencies,
 		CostsUSD:      costs,
+		ConfigHash:    configHash,
 		SessionID:     sessionID,
 	}
 
@@ -187,14 +195,31 @@ func LoadAll(path string) []Entry {
 
 // Summarize returns a model_id → win_count tally.
 // Rewound entries are excluded from the tally.
-func Summarize(path string) map[string]int {
+// If filter is non-nil, only entries matching the filter are included.
+func Summarize(path string, filter *StatsFilter) map[string]int {
 	tally := map[string]int{}
 	for _, e := range filterRewound(LoadAll(path)) {
+		if !matchesFilter(e, filter) {
+			continue
+		}
 		if e.Selected != "" {
 			tally[e.Selected]++
 		}
 	}
 	return tally
+}
+
+// matchesFilter returns true if the entry matches the given filter.
+// A nil filter matches everything. Legacy entries (empty ConfigHash)
+// are included in unfiltered queries, excluded when filtering by hash.
+func matchesFilter(e Entry, f *StatsFilter) bool {
+	if f == nil {
+		return true
+	}
+	if f.ConfigHash != "" && e.ConfigHash != f.ConfigHash {
+		return false
+	}
+	return true
 }
 
 // ModelStats holds detailed per-model analytics derived from preference entries.
@@ -212,8 +237,8 @@ type ModelStats struct {
 
 // SummarizeDetailed computes per-model analytics from all preference entries.
 // Rewound entries are excluded. Entries recorded before cost tracking was added
-// have zero cost contribution.
-func SummarizeDetailed(path string) map[string]ModelStats {
+// have zero cost contribution. If filter is non-nil, only matching entries are included.
+func SummarizeDetailed(path string, filter *StatsFilter) map[string]ModelStats {
 	type accumulator struct {
 		wins           int
 		losses         int
@@ -225,6 +250,9 @@ func SummarizeDetailed(path string) map[string]ModelStats {
 
 	acc := map[string]*accumulator{}
 	for _, e := range filterRewound(LoadAll(path)) {
+		if !matchesFilter(e, filter) {
+			continue
+		}
 		for _, m := range e.Models {
 			if _, ok := acc[m]; !ok {
 				acc[m] = &accumulator{}

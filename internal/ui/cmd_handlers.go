@@ -155,9 +155,22 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 }
 
 func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	stats := preferences.SummarizeDetailed(a.prefPath)
+	// Filter stats by current config when a config store is available.
+	var filter *preferences.StatsFilter
+	var recipeName string
+	if a.recipeStore != nil {
+		snap := a.buildRecipeSnapshot()
+		h := a.recipeStore.Put(snap)
+		filter = &preferences.StatsFilter{ConfigHash: h}
+		recipeName = snap.Name
+	}
+	stats := preferences.SummarizeDetailed(a.prefPath, filter)
 	var sb strings.Builder
-	sb.WriteString("Stats:\n")
+	if recipeName != "" {
+		sb.WriteString(fmt.Sprintf("Stats (recipe: %s):\n", recipeName))
+	} else {
+		sb.WriteString("Stats:\n")
+	}
 	if len(stats) == 0 {
 		sb.WriteString("  No preference data yet.\n")
 	} else {
