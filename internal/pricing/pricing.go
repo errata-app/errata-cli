@@ -17,38 +17,30 @@ import (
 
 // modelPricing holds per-million-token prices and context window size for a model.
 // InputPMT / OutputPMT = USD price per million tokens.
-// CacheReadPMT = USD per million cache-read tokens (0 = unknown; falls back to InputPMT).
-// CacheWritePMT = USD per million cache-creation tokens (0 = no charge or unknown).
 // ContextWindow = max input context size in tokens; 0 means unknown.
 type modelPricing struct {
 	InputPMT      float64 `json:"input_pmt"`
 	OutputPMT     float64 `json:"output_pmt"`
-	CacheReadPMT  float64 `json:"cache_read_pmt,omitempty"`
-	CacheWritePMT float64 `json:"cache_write_pmt,omitempty"`
 	ContextWindow int64   `json:"context_window,omitempty"`
 }
 
 // pricingTable is the hardcoded last-resort fallback, keyed by bare model ID.
 // Update this when providers change rates and the OpenRouter fetch is unavailable.
-// Cache rates:
-//   - Anthropic: read = 10% of InputPMT, write = 125% of InputPMT
-//   - OpenAI:    read = 50% of InputPMT, no write charge
-//   - Google:    read = 25% of InputPMT, no write charge
 var pricingTable = map[string]modelPricing{
-	// Anthropic — cache read 10%, cache write 125% of input rate
-	"claude-opus-4-6":           {InputPMT: 15.00, OutputPMT: 75.00, CacheReadPMT: 1.50, CacheWritePMT: 18.75, ContextWindow: 200_000},
-	"claude-sonnet-4-6":         {InputPMT: 3.00, OutputPMT: 15.00, CacheReadPMT: 0.30, CacheWritePMT: 3.75, ContextWindow: 200_000},
-	"claude-haiku-4-5":          {InputPMT: 0.80, OutputPMT: 4.00, CacheReadPMT: 0.08, CacheWritePMT: 1.00, ContextWindow: 200_000},
-	"claude-haiku-4-5-20251001": {InputPMT: 0.80, OutputPMT: 4.00, CacheReadPMT: 0.08, CacheWritePMT: 1.00, ContextWindow: 200_000},
-	// OpenAI — cache read 50% of input rate, no write charge
-	"gpt-4o":      {InputPMT: 2.50, OutputPMT: 10.00, CacheReadPMT: 1.25, ContextWindow: 128_000},
-	"gpt-4o-mini": {InputPMT: 0.15, OutputPMT: 0.60, CacheReadPMT: 0.075, ContextWindow: 128_000},
-	"o1":          {InputPMT: 15.00, OutputPMT: 60.00, CacheReadPMT: 7.50, ContextWindow: 200_000},
-	"o3-mini":     {InputPMT: 1.10, OutputPMT: 4.40, CacheReadPMT: 0.55, ContextWindow: 200_000},
-	// Google — cached content 25% of input rate, no write charge
-	"gemini-2.0-flash": {InputPMT: 0.075, OutputPMT: 0.30, CacheReadPMT: 0.01875, ContextWindow: 1_000_000},
-	"gemini-1.5-pro":   {InputPMT: 1.25, OutputPMT: 5.00, CacheReadPMT: 0.3125, ContextWindow: 2_000_000},
-	"gemini-1.5-flash": {InputPMT: 0.075, OutputPMT: 0.30, CacheReadPMT: 0.01875, ContextWindow: 1_000_000},
+	// Anthropic
+	"claude-opus-4-6":           {InputPMT: 15.00, OutputPMT: 75.00, ContextWindow: 200_000},
+	"claude-sonnet-4-6":         {InputPMT: 3.00, OutputPMT: 15.00, ContextWindow: 200_000},
+	"claude-haiku-4-5":          {InputPMT: 0.80, OutputPMT: 4.00, ContextWindow: 200_000},
+	"claude-haiku-4-5-20251001": {InputPMT: 0.80, OutputPMT: 4.00, ContextWindow: 200_000},
+	// OpenAI
+	"gpt-4o":      {InputPMT: 2.50, OutputPMT: 10.00, ContextWindow: 128_000},
+	"gpt-4o-mini": {InputPMT: 0.15, OutputPMT: 0.60, ContextWindow: 128_000},
+	"o1":          {InputPMT: 15.00, OutputPMT: 60.00, ContextWindow: 200_000},
+	"o3-mini":     {InputPMT: 1.10, OutputPMT: 4.40, ContextWindow: 200_000},
+	// Google
+	"gemini-2.0-flash": {InputPMT: 0.075, OutputPMT: 0.30, ContextWindow: 1_000_000},
+	"gemini-1.5-pro":   {InputPMT: 1.25, OutputPMT: 5.00, ContextWindow: 2_000_000},
+	"gemini-1.5-flash": {InputPMT: 0.075, OutputPMT: 0.30, ContextWindow: 1_000_000},
 }
 
 var (
@@ -226,28 +218,13 @@ func resolvePricing(qualifiedID string) (modelPricing, bool) {
 // (e.g. "anthropic/claude-sonnet-4-6"). Native adapters pass their
 // provider prefix; OpenRouter adapters pass the model ID as-is.
 //
-// regularInput = non-cached input tokens.
-// cacheRead    = tokens served from cache at a discounted rate.
-// cacheCreation = tokens written to cache at a premium rate (Anthropic only).
-// output       = output tokens.
-//
-// When CacheReadPMT is 0 (model not in hardcoded table or not yet fetched),
-// all input tokens are charged at InputPMT as a conservative fallback.
 // Returns 0 for unknown models — the UI omits the cost field in that case.
-func CostUSD(qualifiedID string, regularInput, cacheRead, cacheCreation, output int64) float64 {
+func CostUSD(qualifiedID string, input, output int64) float64 {
 	p, ok := resolvePricing(qualifiedID)
 	if !ok {
 		return 0
 	}
-	if p.CacheReadPMT == 0 {
-		// No cache rates known — charge all input at the standard rate.
-		totalInput := regularInput + cacheRead + cacheCreation
-		return (float64(totalInput)*p.InputPMT + float64(output)*p.OutputPMT) / 1_000_000
-	}
-	return (float64(regularInput)*p.InputPMT +
-		float64(cacheRead)*p.CacheReadPMT +
-		float64(cacheCreation)*p.CacheWritePMT +
-		float64(output)*p.OutputPMT) / 1_000_000
+	return (float64(input)*p.InputPMT + float64(output)*p.OutputPMT) / 1_000_000
 }
 
 func lookupPricing(key string) (modelPricing, bool) {
@@ -279,10 +256,8 @@ type orModelsResp struct {
 	Data []struct {
 		ID      string `json:"id"`
 		Pricing struct {
-			Prompt          string `json:"prompt"`
-			Completion      string `json:"completion"`
-			InputCacheRead  string `json:"input_cache_read"`
-			InputCacheWrite string `json:"input_cache_write"`
+			Prompt     string `json:"prompt"`
+			Completion string `json:"completion"`
 		} `json:"pricing"`
 		ContextLength int64 `json:"context_length"`
 	} `json:"data"`
@@ -317,19 +292,11 @@ func fetchOpenRouterPricing() (map[string]modelPricing, error) {
 		// OpenRouter prices are per-token; convert to per-million-token.
 		// Round to 6 decimal places to eliminate IEEE 754 floating-point noise
 		// (e.g. 0.0000008 * 1e6 = 0.7999999999999999 → 0.8).
-		p := modelPricing{
+		table[m.ID] = modelPricing{
 			InputPMT:      roundPMT(inp * 1_000_000),
 			OutputPMT:     roundPMT(out * 1_000_000),
 			ContextWindow: m.ContextLength,
 		}
-		// Cache rates are optional — only populated when the provider exposes them.
-		if cr, err := strconv.ParseFloat(m.Pricing.InputCacheRead, 64); err == nil && cr > 0 {
-			p.CacheReadPMT = roundPMT(cr * 1_000_000)
-		}
-		if cw, err := strconv.ParseFloat(m.Pricing.InputCacheWrite, 64); err == nil && cw > 0 {
-			p.CacheWritePMT = roundPMT(cw * 1_000_000)
-		}
-		table[m.ID] = p
 	}
 	return table, nil
 }

@@ -89,8 +89,6 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 				LatencyMS:           1500,
 				InputTokens:         1000,
 				OutputTokens:        500,
-				CacheReadTokens:     200,
-				CacheCreationTokens: 50,
 				CostUSD:             0.0042,
 				ProposedWrites: []WriteEntry{
 					{Path: "main.go", Content: "package main\n"},
@@ -199,12 +197,6 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 	}
 	if m0.InputTokens != 1000 {
 		t.Errorf("Models[0].InputTokens = %d", m0.InputTokens)
-	}
-	if m0.CacheReadTokens != 200 {
-		t.Errorf("Models[0].CacheReadTokens = %d", m0.CacheReadTokens)
-	}
-	if m0.CacheCreationTokens != 50 {
-		t.Errorf("Models[0].CacheCreationTokens = %d", m0.CacheCreationTokens)
 	}
 	if len(m0.ProposedWrites) != 1 || m0.ProposedWrites[0].Path != "main.go" {
 		t.Errorf("Models[0].ProposedWrites unexpected: %v", m0.ProposedWrites)

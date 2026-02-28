@@ -414,7 +414,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.latencyMS = resp.LatencyMS
 			p.inputTokens = resp.InputTokens
 			p.outputTokens = resp.OutputTokens
-			p.cacheReadTokens = resp.CacheReadTokens
 			p.costUSD = resp.CostUSD
 			a.totalCostUSD += resp.CostUSD
 			a.sessionCostPerModel[resp.ModelID] += resp.CostUSD

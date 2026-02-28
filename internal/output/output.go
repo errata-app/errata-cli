@@ -75,8 +75,6 @@ type ModelResult struct {
 	LatencyMS           int64        `json:"latency_ms"`
 	InputTokens         int64        `json:"input_tokens"`
 	OutputTokens        int64        `json:"output_tokens"`
-	CacheReadTokens     int64        `json:"cache_read_tokens,omitempty"`
-	CacheCreationTokens int64        `json:"cache_creation_tokens,omitempty"`
 	CostUSD             float64      `json:"cost_usd"`
 	Error               string       `json:"error,omitempty"`
 	ProposedWrites      []WriteEntry `json:"proposed_writes,omitempty"`
@@ -229,8 +227,6 @@ func BuildReport(
 			LatencyMS:           resp.LatencyMS,
 			InputTokens:         resp.InputTokens,
 			OutputTokens:        resp.OutputTokens,
-			CacheReadTokens:     resp.CacheReadTokens,
-			CacheCreationTokens: resp.CacheCreationTokens,
 			CostUSD:             resp.CostUSD,
 			Error:               resp.Error,
 			ProposedWrites:      writes,

@@ -50,10 +50,8 @@ type ModelResponse struct {
 	ModelID             string
 	Text                string
 	LatencyMS           int64
-	InputTokens         int64 // total input tokens displayed (regular + cache read + cache creation)
-	OutputTokens        int64
-	CacheReadTokens     int64 // tokens served from cache at a discounted rate (subset of InputTokens)
-	CacheCreationTokens int64 // tokens written to cache at a premium rate (Anthropic only; subset of InputTokens)
+	InputTokens  int64 // total input tokens
+	OutputTokens int64
 	CostUSD             float64
 	ProposedWrites      []tools.FileWrite
 	Error               string // empty = success

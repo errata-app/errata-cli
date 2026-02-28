@@ -28,13 +28,13 @@ func resetDynamicPricing(t *testing.T) {
 func TestCostUSD_HardcodedModel(t *testing.T) {
 	resetDynamicPricing(t)
 	// claude-sonnet-4-6: $3.00 input / $15.00 output per million tokens
-	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 1_000_000)
 	assert.InDelta(t, 18.0, cost, 0.001) // 3.00 + 15.00
 }
 
 func TestCostUSD_UnknownModel_ReturnsZero(t *testing.T) {
 	resetDynamicPricing(t)
-	assert.Zero(t, CostUSD("no-such-model-xyz", 1_000_000, 0, 0, 1_000_000))
+	assert.Zero(t, CostUSD("no-such-model-xyz", 1_000_000, 1_000_000))
 }
 
 // TestCostUSD_QualifiedIDFallback verifies that "provider/model" strips the
@@ -42,81 +42,20 @@ func TestCostUSD_UnknownModel_ReturnsZero(t *testing.T) {
 func TestCostUSD_QualifiedIDFallback(t *testing.T) {
 	resetDynamicPricing(t)
 	// "anthropic/claude-sonnet-4-6" is not in the hardcoded table, but "claude-sonnet-4-6" is.
-	cost := CostUSD("anthropic/claude-sonnet-4-6", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("anthropic/claude-sonnet-4-6", 1_000_000, 1_000_000)
 	assert.InDelta(t, 18.0, cost, 0.001)
 }
 
 func TestCostUSD_ZeroTokens(t *testing.T) {
 	resetDynamicPricing(t)
-	assert.Zero(t, CostUSD("claude-sonnet-4-6", 0, 0, 0, 0))
+	assert.Zero(t, CostUSD("claude-sonnet-4-6", 0, 0))
 }
 
 func TestCostUSD_OnlyInputTokens(t *testing.T) {
 	resetDynamicPricing(t)
 	// claude-sonnet-4-6: $3.00/M input
-	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0, 0, 0)
+	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0)
 	assert.InDelta(t, 3.0, cost, 0.001)
-}
-
-// ─── Cache-aware CostUSD ──────────────────────────────────────────────────────
-
-// TestCostUSD_CacheReadDiscount verifies that cache-read tokens are charged at
-// CacheReadPMT (10% of InputPMT for Anthropic) rather than the full InputPMT.
-func TestCostUSD_CacheReadDiscount(t *testing.T) {
-	resetDynamicPricing(t)
-	// claude-sonnet-4-6: InputPMT=$3.00, CacheReadPMT=$0.30/M
-	// 1M cache-read tokens at $0.30/M = $0.30
-	cost := CostUSD("claude-sonnet-4-6", 0, 1_000_000, 0, 0)
-	assert.InDelta(t, 0.30, cost, 0.0001)
-}
-
-// TestCostUSD_CacheWritePremium verifies that cache-creation tokens are charged
-// at CacheWritePMT (125% of InputPMT for Anthropic).
-func TestCostUSD_CacheWritePremium(t *testing.T) {
-	resetDynamicPricing(t)
-	// claude-sonnet-4-6: InputPMT=$3.00, CacheWritePMT=$3.75/M
-	// 1M cache-creation tokens at $3.75/M = $3.75
-	cost := CostUSD("claude-sonnet-4-6", 0, 0, 1_000_000, 0)
-	assert.InDelta(t, 3.75, cost, 0.0001)
-}
-
-// TestCostUSD_CacheRead_LessThan_RegularInput verifies that a run with cache
-// reads costs less than the same run charged entirely at the regular input rate.
-func TestCostUSD_CacheRead_LessThan_RegularInput(t *testing.T) {
-	resetDynamicPricing(t)
-	// 1M regular + 1M cache-read for claude-sonnet-4-6
-	costWithCache := CostUSD("claude-sonnet-4-6", 1_000_000, 1_000_000, 0, 0)
-	// Same total input all at regular rate
-	costWithout := CostUSD("claude-sonnet-4-6", 2_000_000, 0, 0, 0)
-	assert.Less(t, costWithCache, costWithout, "cache reads should cost less than regular input")
-}
-
-// TestCostUSD_NoCacheRates_ChargesAllInputAtStandardRate verifies the fallback:
-// when a model has no CacheReadPMT (e.g. dynamically fetched OpenRouter model),
-// all input tokens (regular + cache) are charged at the standard InputPMT.
-func TestCostUSD_NoCacheRates_ChargesAllInputAtStandardRate(t *testing.T) {
-	resetDynamicPricing(t)
-	// Inject a dynamic pricing entry with no cache rates (simulates OpenRouter fetch).
-	pricingMu.Lock()
-	dynamicPricing = map[string]modelPricing{
-		"test/no-cache-model": {InputPMT: 2.0, OutputPMT: 8.0},
-	}
-	pricingMu.Unlock()
-	defer resetDynamicPricing(t)
-
-	// 1M regular + 500k cache-read: all charged at $2.00/M = $3.00 total input cost
-	cost := CostUSD("test/no-cache-model", 1_000_000, 500_000, 0, 0)
-	assert.InDelta(t, 3.0, cost, 0.0001, "all input tokens should be charged at InputPMT when no cache rates")
-}
-
-// TestCostUSD_ZeroCacheTokens_MatchesLegacyBehaviour verifies that passing
-// zero cache tokens produces the same result as the pre-cache 3-param formula.
-func TestCostUSD_ZeroCacheTokens_MatchesLegacyBehaviour(t *testing.T) {
-	resetDynamicPricing(t)
-	// gpt-4o: InputPMT=$2.50, OutputPMT=$10.00
-	// Old formula: (1M * 2.50 + 1M * 10.00) / 1M = $12.50
-	cost := CostUSD("gpt-4o", 1_000_000, 0, 0, 1_000_000)
-	assert.InDelta(t, 12.50, cost, 0.0001)
 }
 
 // ─── readPricingCache ─────────────────────────────────────────────────────────
@@ -192,7 +131,7 @@ func TestLoadPricing_CacheRoundTrip(t *testing.T) {
 	LoadPricing(cacheFile)
 
 	// 1M input * $7/M + 1M output * $21/M = $28
-	cost := CostUSD("pricing-roundtrip-sentinel", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("pricing-roundtrip-sentinel", 1_000_000, 1_000_000)
 	assert.InDelta(t, 28.0, cost, 0.001,
 		"prices must survive the cache round-trip; "+
 			"if this returns 0, modelPricing fields may be unexported or missing json tags")
@@ -281,7 +220,7 @@ func TestLoadPricing_MissingCache_FallsBackToHardcoded(t *testing.T) {
 	LoadPricing(filepath.Join(t.TempDir(), "nonexistent.json"))
 
 	// claude-sonnet-4-6 is in the hardcoded table, so this must be non-zero.
-	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0, 0, 0)
+	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0)
 	assert.Greater(t, cost, 0.0, "hardcoded fallback must provide non-zero price")
 }
 
@@ -321,21 +260,21 @@ func TestStripDateSuffix(t *testing.T) {
 // falls back to the base model's pricing in the hardcoded table.
 func TestCostUSD_DateSuffix_YYYYMMDD(t *testing.T) {
 	resetDynamicPricing(t)
-	cost := CostUSD("anthropic/claude-sonnet-4-6-20250714", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("anthropic/claude-sonnet-4-6-20250714", 1_000_000, 1_000_000)
 	assert.InDelta(t, 18.0, cost, 0.001) // $3 in + $15 out
 }
 
 // TestCostUSD_DateSuffix_ISO verifies the OpenAI YYYY-MM-DD date format.
 func TestCostUSD_DateSuffix_ISO(t *testing.T) {
 	resetDynamicPricing(t)
-	cost := CostUSD("openai/gpt-4o-2024-08-06", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("openai/gpt-4o-2024-08-06", 1_000_000, 1_000_000)
 	assert.InDelta(t, 12.50, cost, 0.001) // $2.50 in + $10 out
 }
 
 // TestCostUSD_DateSuffix_BareID verifies fallback works without a provider prefix.
 func TestCostUSD_DateSuffix_BareID(t *testing.T) {
 	resetDynamicPricing(t)
-	cost := CostUSD("claude-sonnet-4-6-20250714", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("claude-sonnet-4-6-20250714", 1_000_000, 1_000_000)
 	assert.InDelta(t, 18.0, cost, 0.001)
 }
 
@@ -344,7 +283,7 @@ func TestCostUSD_DateSuffix_BareID(t *testing.T) {
 func TestCostUSD_DateSuffix_ExactMatchTakesPrecedence(t *testing.T) {
 	resetDynamicPricing(t)
 	// "claude-haiku-4-5-20251001" has its own entry in the hardcoded table.
-	cost := CostUSD("claude-haiku-4-5-20251001", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("claude-haiku-4-5-20251001", 1_000_000, 1_000_000)
 	expected := 0.80 + 4.00 // InputPMT + OutputPMT for 1M each
 	assert.InDelta(t, expected, cost, 0.001)
 }
@@ -361,7 +300,7 @@ func TestCostUSD_DateSuffix_DynamicExactMatchTakesPrecedence(t *testing.T) {
 	pricingMu.Unlock()
 	defer resetDynamicPricing(t)
 
-	cost := CostUSD("openai/gpt-4o-2024-08-06", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("openai/gpt-4o-2024-08-06", 1_000_000, 1_000_000)
 	assert.InDelta(t, 198.0, cost, 0.001, "dynamic exact match should take precedence")
 }
 
@@ -369,7 +308,7 @@ func TestCostUSD_DateSuffix_DynamicExactMatchTakesPrecedence(t *testing.T) {
 // when the base model is also unknown.
 func TestCostUSD_DateSuffix_NoBaseMatch(t *testing.T) {
 	resetDynamicPricing(t)
-	cost := CostUSD("unknown/mystery-model-20250714", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("unknown/mystery-model-20250714", 1_000_000, 1_000_000)
 	assert.Zero(t, cost)
 }
 
@@ -377,7 +316,7 @@ func TestCostUSD_DateSuffix_NoBaseMatch(t *testing.T) {
 // "mini" are not accidentally stripped.
 func TestCostUSD_NonDateSuffix_NotStripped(t *testing.T) {
 	resetDynamicPricing(t)
-	cost := CostUSD("gpt-4o-mini", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("gpt-4o-mini", 1_000_000, 1_000_000)
 	assert.InDelta(t, 0.75, cost, 0.001) // $0.15 in + $0.60 out
 }
 
@@ -450,7 +389,7 @@ func TestResolvePricing_DotNormalization(t *testing.T) {
 
 	// Qualified ID with hyphen version + date suffix — should resolve via
 	// date strip + dot normalization.
-	cost := CostUSD("anthropic/claude-opus-4-5-20251101", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("anthropic/claude-opus-4-5-20251101", 1_000_000, 1_000_000)
 	assert.InDelta(t, 30.0, cost, 0.001, "should resolve via dot normalization") // $5 + $25
 
 	// Bare ID with hyphen version (no date suffix).
@@ -620,7 +559,7 @@ func TestLoadPricing_StaleCache_UsedWhenFetchFails(t *testing.T) {
 	// LoadPricing: skip fresh cache → try fetch (fails) → use stale cache.
 	LoadPricing(cacheFile)
 
-	cost := CostUSD("stale/test-model", 1_000_000, 0, 0, 1_000_000)
+	cost := CostUSD("stale/test-model", 1_000_000, 1_000_000)
 	assert.InDelta(t, 126.0, cost, 0.001, "stale cache should provide pricing") // $42 + $84
 }
 
@@ -636,7 +575,7 @@ func TestLoadPricing_NoCache_NoNetwork_FallsBackToHardcoded(t *testing.T) {
 	LoadPricing(filepath.Join(t.TempDir(), "nonexistent.json"))
 
 	// Should fall back to hardcoded table.
-	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0, 0, 0)
+	cost := CostUSD("claude-sonnet-4-6", 1_000_000, 0)
 	assert.Greater(t, cost, 0.0, "hardcoded fallback must provide non-zero price")
 }
 

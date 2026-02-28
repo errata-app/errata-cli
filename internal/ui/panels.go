@@ -30,7 +30,6 @@ type panelState struct {
 	latencyMS       int64
 	inputTokens     int64
 	outputTokens    int64
-	cacheReadTokens int64 // tokens served from cache at a discount; 0 when none
 	costUSD         float64
 	histTokens      int64 // estimated history tokens at run start (for fill % display)
 
@@ -108,11 +107,7 @@ func formatDoneSummary(p *panelState) string {
 		parts = append(parts, fmt.Sprintf("%d %s", p.toolUseCount, noun))
 	}
 	if tot := p.inputTokens + p.outputTokens; tot > 0 {
-		tokStr := fmtTokens(tot) + " tokens"
-		if p.cacheReadTokens > 0 {
-			tokStr += fmt.Sprintf(" (%s cached)", fmtTokens(p.cacheReadTokens))
-		}
-		parts = append(parts, tokStr)
+		parts = append(parts, fmtTokens(tot)+" tokens")
 	}
 	if p.latencyMS > 0 {
 		parts = append(parts, formatElapsed(time.Duration(p.latencyMS)*time.Millisecond))

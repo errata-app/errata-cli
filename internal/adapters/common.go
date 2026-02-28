@@ -167,7 +167,7 @@ func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
 		Text:         join(textParts),
 		InputTokens:  totalInput,
 		OutputTokens: totalOutput,
-		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
+		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, totalOutput),
 		LatencyMS:    time.Since(start).Milliseconds(),
 		Writes:       proposed,
 	}
@@ -192,14 +192,13 @@ func applyOutputProcessing(ctx context.Context, toolName, output string) string 
 // BuildErrorResponse constructs a ModelResponse for an API error encountered mid-loop.
 // qualifiedID is the provider-prefixed model ID passed to CostUSD
 // (e.g. "anthropic/claude-sonnet-4-6"); pass the bare modelID for OpenRouter/LiteLLM.
-// Cache tokens are not tracked for error responses (partial run); all input charged at standard rate.
 func BuildErrorResponse(modelID, qualifiedID string, start time.Time, totalInput, totalOutput int64, err error) models.ModelResponse {
 	return models.ModelResponse{
 		ModelID:      modelID,
 		LatencyMS:    time.Since(start).Milliseconds(),
 		InputTokens:  totalInput,
 		OutputTokens: totalOutput,
-		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
+		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, totalOutput),
 		Error:        err.Error(),
 	}
 }
@@ -215,7 +214,7 @@ func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
 		LatencyMS:      time.Since(start).Milliseconds(),
 		InputTokens:    totalInput,
 		OutputTokens:   totalOutput,
-		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, 0, 0, totalOutput),
+		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 		Error:          err.Error(),
 		Interrupted:    true,
@@ -224,26 +223,16 @@ func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
 
 // BuildSuccessResponse constructs a ModelResponse after a completed agentic loop.
 // qualifiedID is the provider-prefixed model ID passed to CostUSD.
-//
-// regularInput = non-cached input tokens.
-// cacheRead    = tokens served from cache at a discounted rate.
-// cacheCreation = tokens written to cache at a premium rate (Anthropic only; 0 for others).
-// totalOutput  = output tokens.
-//
-// InputTokens in the response is the total (regularInput + cacheRead + cacheCreation)
-// for display purposes; cost is computed using provider-specific cache rates.
 func BuildSuccessResponse(modelID, qualifiedID string, textParts []string, start time.Time,
-	regularInput, cacheRead, cacheCreation, totalOutput int64,
+	totalInput, totalOutput int64,
 	proposed []tools.FileWrite) models.ModelResponse {
 	return models.ModelResponse{
-		ModelID:             modelID,
-		Text:                join(textParts),
-		LatencyMS:           time.Since(start).Milliseconds(),
-		InputTokens:         regularInput + cacheRead + cacheCreation,
-		OutputTokens:        totalOutput,
-		CacheReadTokens:     cacheRead,
-		CacheCreationTokens: cacheCreation,
-		CostUSD:             pricing.CostUSD(qualifiedID, regularInput, cacheRead, cacheCreation, totalOutput),
-		ProposedWrites:      proposed,
+		ModelID:        modelID,
+		Text:           join(textParts),
+		LatencyMS:      time.Since(start).Milliseconds(),
+		InputTokens:    totalInput,
+		OutputTokens:   totalOutput,
+		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, totalOutput),
+		ProposedWrites: proposed,
 	}
 }

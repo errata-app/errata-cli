@@ -46,7 +46,7 @@ func runOpenAIAgentLoop(
 
 	var textParts []string
 	var proposed []tools.FileWrite
-	var totalRegularInput, totalOutput, totalCacheRead int64
+	var totalInput, totalOutput int64
 	start := time.Now()
 
 	for {
@@ -61,16 +61,14 @@ func runOpenAIAgentLoop(
 		resp, err := cfg.client.Chat.Completions.New(ctx, params)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed, err), err
+				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, err), err
 			}
-			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
+			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err), err
 		}
 
 		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
-			cached := resp.Usage.PromptTokensDetails.CachedTokens
-			totalRegularInput += resp.Usage.PromptTokens - cached
+			totalInput += resp.Usage.PromptTokens
 			totalOutput += resp.Usage.CompletionTokens
-			totalCacheRead += cached
 		}
 
 		if len(resp.Choices) == 0 {
@@ -102,10 +100,10 @@ func runOpenAIAgentLoop(
 				messages = append(messages, openai.ToolMessage(result, tc.ID))
 			}
 		}
-		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed)
+		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed)
 	}
 
-	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
+	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
 // buildOpenAITools converts the active tool definitions from context into
