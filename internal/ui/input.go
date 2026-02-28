@@ -23,7 +23,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		return a, tea.Quit
 
 	case tea.KeyEsc:
-		if time.Since(a.lastEscTime) < 300*time.Millisecond && (a.input.Value() != "" || a.pastedText != "") {
+		if time.Since(a.lastEscTime) < 1*time.Second && (a.input.Value() != "" || a.pastedText != "") {
 			a.input.Reset()
 			a.pastedText = ""
 			a.pastedLineCount = 0
@@ -43,7 +43,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		}
 		if hasContent {
 			a.escHintVisible = true
-			cmds = append(cmds, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
+			cmds = append(cmds, tea.Tick(1*time.Second, func(time.Time) tea.Msg {
 				return escHintMsg{}
 			}))
 		}
