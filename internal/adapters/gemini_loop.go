@@ -55,22 +55,20 @@ func runGeminiAgentLoop(
 
 	var textParts []string
 	var proposed []tools.FileWrite
-	var totalRegularInput, totalOutput, totalCacheRead int64
+	var totalInput, totalOutput int64
 
 	for {
 		resp, err := cfg.client.Models.GenerateContent(ctx, cfg.apiModelID, contents, config)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed, err), err
+				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, err), err
 			}
-			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
+			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err), err
 		}
 
 		if resp.UsageMetadata != nil {
-			cached := int64(resp.UsageMetadata.CachedContentTokenCount)
-			totalRegularInput += int64(resp.UsageMetadata.PromptTokenCount) - cached
+			totalInput += int64(resp.UsageMetadata.PromptTokenCount)
 			totalOutput += int64(resp.UsageMetadata.CandidatesTokenCount)
-			totalCacheRead += cached
 		}
 
 		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
@@ -99,10 +97,10 @@ func runGeminiAgentLoop(
 			break
 		}
 		contents = append(contents, genai.NewContentFromParts(toolResults, genai.RoleUser))
-		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed)
+		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed)
 	}
 
-	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
+	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
 // queryGeminiCapabilities queries the Gemini/Vertex models API for token

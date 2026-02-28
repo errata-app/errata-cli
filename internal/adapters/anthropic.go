@@ -54,7 +54,7 @@ func (a *AnthropicAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
-	var totalRegularInput, totalOutput, totalCacheRead, totalCacheCreation int64
+	var totalInput, totalOutput int64
 	start := time.Now()
 
 	// Anthropic does not support a seed parameter. If a seed is set,
@@ -79,16 +79,12 @@ func (a *AnthropicAdapter) RunAgent(
 		resp, err := client.Messages.New(ctx, params)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalRegularInput+totalCacheRead+totalCacheCreation, totalOutput, proposed, err), err
+				return BuildInterruptedResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalInput, totalOutput, proposed, err), err
 			}
-			return BuildErrorResponse(a.modelID, "anthropic/"+a.modelID, start, totalRegularInput+totalCacheRead+totalCacheCreation, totalOutput, err), err
+			return BuildErrorResponse(a.modelID, "anthropic/"+a.modelID, start, totalInput, totalOutput, err), err
 		}
-		// Anthropic's InputTokens = regular (non-cached) tokens only.
-		// CacheReadInputTokens and CacheCreationInputTokens are separate categories.
-		totalRegularInput += resp.Usage.InputTokens
+		totalInput += resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens
 		totalOutput += resp.Usage.OutputTokens
-		totalCacheRead += resp.Usage.CacheReadInputTokens
-		totalCacheCreation += resp.Usage.CacheCreationInputTokens
 
 		// Append assistant turn
 		messages = append(messages, resp.ToParam())
@@ -122,10 +118,10 @@ func (a *AnthropicAdapter) RunAgent(
 		}
 
 		messages = append(messages, anthropic.NewUserMessage(toolResults...))
-		EmitSnapshot(onEvent, "anthropic/"+a.modelID, textParts, start, totalRegularInput+totalCacheRead+totalCacheCreation, totalOutput, proposed)
+		EmitSnapshot(onEvent, "anthropic/"+a.modelID, textParts, start, totalInput, totalOutput, proposed)
 	}
 
-	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalRegularInput, totalCacheRead, totalCacheCreation, totalOutput, proposed), nil
+	return BuildSuccessResponse(a.modelID, "anthropic/"+a.modelID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
 func buildAnthropicTools(ctx context.Context) []anthropic.ToolUnionParam {

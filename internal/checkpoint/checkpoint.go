@@ -33,8 +33,6 @@ type ResponseSnapshot struct {
 	LatencyMS           int64           `json:"latency_ms"`
 	InputTokens         int64           `json:"input_tokens"`
 	OutputTokens        int64           `json:"output_tokens"`
-	CacheReadTokens     int64           `json:"cache_read_tokens,omitempty"`
-	CacheCreationTokens int64           `json:"cache_creation_tokens,omitempty"`
 	CostUSD             float64         `json:"cost_usd"`
 	ProposedWrites      []WriteSnapshot `json:"proposed_writes,omitempty"`
 	Error               string          `json:"error,omitempty"`
@@ -80,8 +78,6 @@ func FromModelResponse(r models.ModelResponse) ResponseSnapshot {
 		LatencyMS:           r.LatencyMS,
 		InputTokens:         r.InputTokens,
 		OutputTokens:        r.OutputTokens,
-		CacheReadTokens:     r.CacheReadTokens,
-		CacheCreationTokens: r.CacheCreationTokens,
 		CostUSD:             r.CostUSD,
 		ProposedWrites:      toWriteSnapshots(r.ProposedWrites),
 		Error:               r.Error,
@@ -98,8 +94,6 @@ func (s ResponseSnapshot) ToModelResponse() models.ModelResponse {
 		LatencyMS:           s.LatencyMS,
 		InputTokens:         s.InputTokens,
 		OutputTokens:        s.OutputTokens,
-		CacheReadTokens:     s.CacheReadTokens,
-		CacheCreationTokens: s.CacheCreationTokens,
 		CostUSD:             s.CostUSD,
 		ProposedWrites:      fromWriteSnapshots(s.ProposedWrites),
 		Error:               s.Error,

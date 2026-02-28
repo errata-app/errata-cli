@@ -110,7 +110,7 @@ func (a *BedrockAdapter) RunAgent(
 
 	var textParts []string
 	var proposed []tools.FileWrite
-	var totalRegularInput, totalOutput, totalCacheRead int64
+	var totalInput, totalOutput int64
 
 	for {
 		input := &bedrockruntime.ConverseInput{
@@ -130,24 +130,18 @@ func (a *BedrockAdapter) RunAgent(
 		resp, err := client.Converse(ctx, input)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(a.modelID, qualifiedID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed, err), err
+				return BuildInterruptedResponse(a.modelID, qualifiedID, textParts, start, totalInput, totalOutput, proposed, err), err
 			}
-			return BuildErrorResponse(a.modelID, qualifiedID, start, totalRegularInput+totalCacheRead, totalOutput, err), err
+			return BuildErrorResponse(a.modelID, qualifiedID, start, totalInput, totalOutput, err), err
 		}
 
 		// Accumulate token usage (nil-checked *int32 → int64).
 		if resp.Usage != nil {
 			if resp.Usage.InputTokens != nil {
-				totalRegularInput += int64(*resp.Usage.InputTokens)
+				totalInput += int64(*resp.Usage.InputTokens)
 			}
 			if resp.Usage.OutputTokens != nil {
 				totalOutput += int64(*resp.Usage.OutputTokens)
-			}
-			if resp.Usage.CacheReadInputTokens != nil {
-				cr := int64(*resp.Usage.CacheReadInputTokens)
-				totalCacheRead += cr
-				// CacheReadInputTokens is a subset of InputTokens — subtract to get regular.
-				totalRegularInput -= cr
 			}
 		}
 
@@ -210,10 +204,10 @@ func (a *BedrockAdapter) RunAgent(
 			Role:    bedrocktypes.ConversationRoleUser,
 			Content: toolResults,
 		})
-		EmitSnapshot(onEvent, qualifiedID, textParts, start, totalRegularInput+totalCacheRead, totalOutput, proposed)
+		EmitSnapshot(onEvent, qualifiedID, textParts, start, totalInput, totalOutput, proposed)
 	}
 
-	return BuildSuccessResponse(a.modelID, qualifiedID, textParts, start, totalRegularInput, totalCacheRead, 0, totalOutput, proposed), nil
+	return BuildSuccessResponse(a.modelID, qualifiedID, textParts, start, totalInput, totalOutput, proposed), nil
 }
 
 // buildBedrockToolConfig translates active tool definitions into Bedrock's ToolConfiguration.

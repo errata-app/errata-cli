@@ -183,8 +183,6 @@ func TestFromModelResponse_ToModelResponse_RoundTrip(t *testing.T) {
 		LatencyMS:           999,
 		InputTokens:         200,
 		OutputTokens:        100,
-		CacheReadTokens:     50,
-		CacheCreationTokens: 25,
 		CostUSD:             0.01,
 		ProposedWrites: []tools.FileWrite{
 			{Path: "a.go", Content: "package a"},
@@ -211,12 +209,6 @@ func TestFromModelResponse_ToModelResponse_RoundTrip(t *testing.T) {
 	}
 	if restored.OutputTokens != orig.OutputTokens {
 		t.Errorf("OutputTokens: got %d, want %d", restored.OutputTokens, orig.OutputTokens)
-	}
-	if restored.CacheReadTokens != orig.CacheReadTokens {
-		t.Errorf("CacheReadTokens: got %d, want %d", restored.CacheReadTokens, orig.CacheReadTokens)
-	}
-	if restored.CacheCreationTokens != orig.CacheCreationTokens {
-		t.Errorf("CacheCreationTokens: got %d, want %d", restored.CacheCreationTokens, orig.CacheCreationTokens)
 	}
 	if restored.CostUSD != orig.CostUSD {
 		t.Errorf("CostUSD: got %f, want %f", restored.CostUSD, orig.CostUSD)

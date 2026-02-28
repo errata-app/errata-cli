@@ -76,22 +76,6 @@ func TestFormatDoneSummary_SingleToolUse(t *testing.T) {
 	}
 }
 
-func TestFormatDoneSummary_WithCachedTokens(t *testing.T) {
-	p := &panelState{
-		inputTokens:     8000,
-		outputTokens:    2000,
-		cacheReadTokens: 3000,
-		latencyMS:       1000,
-	}
-	got := formatDoneSummary(p)
-	if !strings.Contains(got, "10.0k tokens") {
-		t.Errorf("expected total token count, got: %s", got)
-	}
-	if !strings.Contains(got, "3.0k cached") {
-		t.Errorf("expected cached token indicator, got: %s", got)
-	}
-}
-
 func TestAddEvent_CountsToolUses(t *testing.T) {
 	p := newPanelState("test-model", 0)
 	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "foo.go"})
