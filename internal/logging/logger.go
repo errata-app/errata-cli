@@ -40,8 +40,8 @@ type Entry struct {
 
 // EventRecord captures a single tool event emitted during the run.
 type EventRecord struct {
-	Type string `json:"type"` // "reading" | "writing" | "text" | "error"
-	Data string `json:"data"`
+	Type models.EventType `json:"type"` // "reading" | "writing" | "text" | "error" | "bash" | "snapshot"
+	Data string           `json:"data"`
 }
 
 // ResponseRecord captures the final outcome of a RunAgent call.

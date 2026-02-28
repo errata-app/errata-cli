@@ -262,7 +262,7 @@ func TestCollector_ConcurrentEvents(t *testing.T) {
 				modelID = "model-b"
 			}
 			for range eventsEach {
-				wrapped(modelID, models.AgentEvent{Type: "reading", Data: "data"})
+				wrapped(modelID, models.AgentEvent{Type: models.EventReading, Data: "data"})
 			}
 		})
 	}
@@ -321,7 +321,7 @@ func TestBuildReport_AggregateStats(t *testing.T) {
 	collector := NewCollector()
 	// Simulate some events.
 	collector.WrapOnEvent(func(string, models.AgentEvent) {})(
-		"fast-model", models.AgentEvent{Type: "reading", Data: "read_file a.go"},
+		"fast-model", models.AgentEvent{Type: models.EventReading, Data: "read_file a.go"},
 	)
 
 	report := BuildReport("sess1", rec, "do stuff", responses, collector, []string{"read_file", "bash"})

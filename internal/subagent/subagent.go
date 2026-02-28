@@ -83,7 +83,7 @@ func NewDispatcher(
 			summary += fmt.Sprintf(" · $%.4f", resp.CostUSD)
 		}
 		summary += "]"
-		onEvent(adapter.ID(), models.AgentEvent{Type: "text", Data: summary})
+		onEvent(adapter.ID(), models.AgentEvent{Type: models.EventText, Data: summary})
 
 		if !resp.OK() {
 			return "", nil, fmt.Sprintf("[spawn_agent error: %s]", resp.Error)

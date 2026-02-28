@@ -94,7 +94,7 @@ func TestWrap_ForwardsEventsToOnEvent(t *testing.T) {
 
 	inner := &stubAdapter{
 		id:       "m",
-		events:   []models.AgentEvent{{Type: "reading", Data: "main.go"}},
+		events:   []models.AgentEvent{{Type: models.EventReading, Data: "main.go"}},
 		response: models.ModelResponse{ModelID: "m"},
 	}
 	wrapped := logging.Wrap(inner, "s", l)
@@ -105,7 +105,7 @@ func TestWrap_ForwardsEventsToOnEvent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, received, 1)
-	assert.Equal(t, "reading", received[0].Type)
+	assert.Equal(t, models.EventReading, received[0].Type)
 	assert.Equal(t, "main.go", received[0].Data)
 }
 
@@ -121,8 +121,8 @@ func TestWrap_LogsEntryWithAllFields(t *testing.T) {
 	inner := &stubAdapter{
 		id: "test-model",
 		events: []models.AgentEvent{
-			{Type: "reading", Data: "main.go"},
-			{Type: "writing", Data: "out.go"},
+			{Type: models.EventReading, Data: "main.go"},
+			{Type: models.EventWriting, Data: "out.go"},
 		},
 		response: models.ModelResponse{
 			ModelID:      "test-model",
@@ -152,9 +152,9 @@ func TestWrap_LogsEntryWithAllFields(t *testing.T) {
 	assert.Equal(t, "fix the bug", entry.Prompt)
 
 	require.Len(t, entry.Events, 2)
-	assert.Equal(t, "reading", entry.Events[0].Type)
+	assert.Equal(t, models.EventReading, entry.Events[0].Type)
 	assert.Equal(t, "main.go", entry.Events[0].Data)
-	assert.Equal(t, "writing", entry.Events[1].Type)
+	assert.Equal(t, models.EventWriting, entry.Events[1].Type)
 	assert.Equal(t, "out.go", entry.Events[1].Data)
 
 	assert.Equal(t, "all done", entry.Response.Text)

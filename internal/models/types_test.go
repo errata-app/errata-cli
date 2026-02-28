@@ -51,8 +51,8 @@ func TestModelResponse_ProposedWrites(t *testing.T) {
 }
 
 func TestAgentEvent(t *testing.T) {
-	e := models.AgentEvent{Type: "reading", Data: "foo.go"}
-	assert.Equal(t, "reading", e.Type)
+	e := models.AgentEvent{Type: models.EventReading, Data: "foo.go"}
+	assert.Equal(t, models.EventReading, e.Type)
 	assert.Equal(t, "foo.go", e.Data)
 }
 

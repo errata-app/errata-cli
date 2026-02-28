@@ -382,11 +382,15 @@ func readPricingCache(path string) *pricingCacheFile {
 
 func writePricingCache(path string, c *pricingCacheFile) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		log.Printf("warning: pricing cache mkdir failed: %v", err)
 		return
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
+		log.Printf("warning: pricing cache marshal failed: %v", err)
 		return
 	}
-	_ = os.WriteFile(path, data, 0o600)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		log.Printf("warning: pricing cache write failed: %v", err)
+	}
 }

@@ -384,6 +384,46 @@ func TestSearchCode_LineNumbers(t *testing.T) {
 		"expected line number or match content in output: %q", out)
 }
 
+// ─── JSONSchemaProps ─────────────────────────────────────────────────────────
+
+func TestJSONSchemaProps_RoundTrip(t *testing.T) {
+	def := tools.ToolDef{
+		Name:        "test_tool",
+		Description: "A test tool",
+		Properties: map[string]tools.ToolParam{
+			"path":    {Type: "string", Description: "File path"},
+			"content": {Type: "string", Description: "File content"},
+			"limit":   {Type: "integer", Description: "Max lines"},
+		},
+		Required: []string{"path", "content"},
+	}
+
+	props, required := def.JSONSchemaProps()
+
+	// Verify all properties are present with correct type and description.
+	assert.Len(t, props, 3)
+	for name, p := range def.Properties {
+		prop, ok := props[name]
+		require.True(t, ok, "property %q should be present", name)
+		m, mOK := prop.(map[string]any)
+		require.True(t, mOK, "property %q should be map[string]any", name)
+		assert.Equal(t, p.Type, m["type"])
+		assert.Equal(t, p.Description, m["description"])
+	}
+
+	// Verify required is a copy, not a reference.
+	assert.Equal(t, []string{"path", "content"}, required)
+	required[0] = "mutated"
+	assert.Equal(t, "path", def.Required[0], "JSONSchemaProps must return a copy of Required")
+}
+
+func TestJSONSchemaProps_Empty(t *testing.T) {
+	def := tools.ToolDef{Name: "empty"}
+	props, required := def.JSONSchemaProps()
+	assert.Empty(t, props)
+	assert.Empty(t, required)
+}
+
 // ─── ActiveDefinitions ───────────────────────────────────────────────────────
 
 func TestActiveDefinitions_NilDisabled_ReturnsAll(t *testing.T) {

@@ -4,6 +4,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -85,7 +86,7 @@ func RunAll(
 			// filtered suppresses "text" and "error" events when not verbose,
 			// and intercepts "snapshot" events for incremental checkpointing.
 			filtered := func(e models.AgentEvent) {
-				if e.Type == "snapshot" {
+				if e.Type == models.EventSnapshot {
 					if saver != nil {
 						var ps models.PartialSnapshot
 						if json.Unmarshal([]byte(e.Data), &ps) == nil {
@@ -94,7 +95,7 @@ func RunAll(
 					}
 					return // never forward snapshot events to UI
 				}
-				if !verbose && (e.Type == "text" || e.Type == "error") {
+				if !verbose && (e.Type == models.EventText || e.Type == models.EventError) {
 					return
 				}
 				onEvent(a.ID(), e)
@@ -114,7 +115,7 @@ func RunAll(
 					resp.Error = err.Error()
 				}
 				if !resp.Interrupted {
-					filtered(models.AgentEvent{Type: "error", Data: err.Error()})
+					filtered(models.AgentEvent{Type: models.EventError, Data: err.Error()})
 				}
 				results[i] = resp
 				if saver != nil {
@@ -133,7 +134,9 @@ func RunAll(
 
 	// Clean up checkpoint if all adapters completed without interruption.
 	if saver != nil && !HasInterrupted(results) {
-		_ = checkpoint.Clear(opts.CheckpointPath)
+		if err := checkpoint.Clear(opts.CheckpointPath); err != nil {
+			log.Printf("warning: failed to clear checkpoint: %v", err)
+		}
 	}
 
 	return results

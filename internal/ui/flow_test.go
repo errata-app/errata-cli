@@ -231,13 +231,13 @@ func TestEventStreaming_AgentEventUpdatesPanels(t *testing.T) {
 	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
 	setupRunState(&a, "prompt", []string{"m1"})
 
-	msg := agentEventMsg{modelID: "m1", event: models.AgentEvent{Type: "reading", Data: "foo.go"}}
+	msg := agentEventMsg{modelID: "m1", event: models.AgentEvent{Type: models.EventReading, Data: "foo.go"}}
 	result, _ := a.Update(msg)
 	a = appFrom(t, result)
 
 	require.Len(t, a.panels, 1)
 	assert.Len(t, a.panels[0].events, 1)
-	assert.Equal(t, "reading", a.panels[0].events[0].Type)
+	assert.Equal(t, models.EventReading, a.panels[0].events[0].Type)
 	assert.Equal(t, "foo.go", a.panels[0].events[0].Data)
 	assert.Equal(t, 1, a.panels[0].toolUseCount)
 }
@@ -250,11 +250,11 @@ func TestEventStreaming_MultiplePanelsIndependent(t *testing.T) {
 	setupRunState(&a, "prompt", []string{"m1", "m2"})
 
 	// Send events to different panels.
-	result, _ := a.Update(agentEventMsg{modelID: "m1", event: models.AgentEvent{Type: "reading", Data: "a.go"}})
+	result, _ := a.Update(agentEventMsg{modelID: "m1", event: models.AgentEvent{Type: models.EventReading, Data: "a.go"}})
 	a = appFrom(t, result)
-	result, _ = a.Update(agentEventMsg{modelID: "m2", event: models.AgentEvent{Type: "writing", Data: "b.go"}})
+	result, _ = a.Update(agentEventMsg{modelID: "m2", event: models.AgentEvent{Type: models.EventWriting, Data: "b.go"}})
 	a = appFrom(t, result)
-	result, _ = a.Update(agentEventMsg{modelID: "m1", event: models.AgentEvent{Type: "bash", Data: "go test"}})
+	result, _ = a.Update(agentEventMsg{modelID: "m1", event: models.AgentEvent{Type: models.EventBash, Data: "go test"}})
 	a = appFrom(t, result)
 
 	assert.Len(t, a.panels[0].events, 2) // m1 got 2 events
@@ -268,7 +268,7 @@ func TestEventStreaming_UnknownModelIDIgnored(t *testing.T) {
 	setupRunState(&a, "prompt", []string{"m1"})
 
 	// Should not panic.
-	result, _ := a.Update(agentEventMsg{modelID: "unknown", event: models.AgentEvent{Type: "reading", Data: "x"}})
+	result, _ := a.Update(agentEventMsg{modelID: "unknown", event: models.AgentEvent{Type: models.EventReading, Data: "x"}})
 	a = appFrom(t, result)
 
 	// m1 panel should be unaffected.

@@ -108,8 +108,8 @@ func TestRunAll_EventPropagation(t *testing.T) {
 	}, false)
 
 	assert.Len(t, received, 2)
-	assert.Equal(t, "reading", received[0].Type)
-	assert.Equal(t, "writing", received[1].Type)
+	assert.Equal(t, models.EventReading, received[0].Type)
+	assert.Equal(t, models.EventWriting, received[1].Type)
 }
 
 func TestRunAll_ProposedWritesPreserved(t *testing.T) {
@@ -161,7 +161,7 @@ func TestRunAll_ErrorSurfacesViaOnEventVerbose(t *testing.T) {
 	}, true)
 
 	assert.NotEmpty(t, received)
-	assert.Equal(t, "error", received[len(received)-1].Type)
+	assert.Equal(t, models.EventError, received[len(received)-1].Type)
 }
 
 func TestRunAll_ErrorEventSuppressedNonVerbose(t *testing.T) {
@@ -545,9 +545,9 @@ func (s *snapshotAdapter) RunAgent(
 	prompt string,
 	onEvent func(models.AgentEvent),
 ) (models.ModelResponse, error) {
-	onEvent(models.AgentEvent{Type: "reading", Data: "file.go"})
-	onEvent(models.AgentEvent{Type: "snapshot", Data: `{"text":"partial","input_tokens":10}`})
-	onEvent(models.AgentEvent{Type: "writing", Data: "out.go"})
+	onEvent(models.AgentEvent{Type: models.EventReading, Data: "file.go"})
+	onEvent(models.AgentEvent{Type: models.EventSnapshot, Data: `{"text":"partial","input_tokens":10}`})
+	onEvent(models.AgentEvent{Type: models.EventWriting, Data: "out.go"})
 	return models.ModelResponse{ModelID: s.id, Text: "done"}, nil
 }
 
@@ -564,13 +564,13 @@ func TestRunAll_SnapshotEventsNotForwarded(t *testing.T) {
 
 	// "reading" and "writing" should be forwarded; "snapshot" should NOT.
 	for _, e := range received {
-		if e.Type == "snapshot" {
+		if e.Type == models.EventSnapshot {
 			t.Error("snapshot event should not be forwarded to caller's onEvent")
 		}
 	}
 	assert.Len(t, received, 2)
-	assert.Equal(t, "reading", received[0].Type)
-	assert.Equal(t, "writing", received[1].Type)
+	assert.Equal(t, models.EventReading, received[0].Type)
+	assert.Equal(t, models.EventWriting, received[1].Type)
 }
 
 // ─── Summarization prompt ───────────────────────────────────────────────────

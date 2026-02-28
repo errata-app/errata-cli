@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"log"
 	"strings"
 	"time"
 
@@ -164,7 +165,7 @@ func (a *BedrockAdapter) RunAgent(
 			switch b := block.(type) {
 			case *bedrocktypes.ContentBlockMemberText:
 				textParts = append(textParts, b.Value)
-				onEvent(models.AgentEvent{Type: "text", Data: b.Value})
+				onEvent(models.AgentEvent{Type: models.EventText, Data: b.Value})
 
 			case *bedrocktypes.ContentBlockMemberToolUse:
 				toolUse := b.Value
@@ -172,7 +173,9 @@ func (a *BedrockAdapter) RunAgent(
 				// Unmarshal tool input from Smithy document.
 				var inputMap map[string]any
 				if toolUse.Input != nil {
-					_ = toolUse.Input.UnmarshalSmithyDocument(&inputMap)
+					if err := toolUse.Input.UnmarshalSmithyDocument(&inputMap); err != nil {
+						log.Printf("warning: failed to unmarshal Bedrock tool input for %s: %v", aws.ToString(toolUse.Name), err)
+					}
 				}
 				if inputMap == nil {
 					inputMap = map[string]any{}
@@ -222,15 +225,7 @@ func buildBedrockToolConfig(ctx context.Context) *bedrocktypes.ToolConfiguration
 
 	bedrockTools := make([]bedrocktypes.Tool, 0, len(defs))
 	for _, def := range defs {
-		props := map[string]any{}
-		for name, p := range def.Properties {
-			props[name] = map[string]any{
-				"type":        p.Type,
-				"description": p.Description,
-			}
-		}
-		required := make([]string, len(def.Required))
-		copy(required, def.Required)
+		props, required := def.JSONSchemaProps()
 
 		desc := def.Description
 

@@ -91,7 +91,7 @@ type WriteEntry struct {
 
 // EventEntry captures a single tool event during execution.
 type EventEntry struct {
-	Type string `json:"type"`
+	Type models.EventType `json:"type"`
 	Data string `json:"data"`
 }
 

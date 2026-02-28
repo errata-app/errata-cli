@@ -14,10 +14,21 @@ type ConversationTurn struct {
 	Content string `json:"content"`
 }
 
+// EventType is the kind of observable event emitted by an agent.
+type EventType string
+
+const (
+	EventText     EventType = "text"
+	EventReading  EventType = "reading"
+	EventWriting  EventType = "writing"
+	EventError    EventType = "error"
+	EventBash     EventType = "bash"
+	EventSnapshot EventType = "snapshot"
+)
+
 // AgentEvent is a single observable event emitted by an agent during its run.
-// Type is one of: "text", "reading", "writing", "error", "bash", "snapshot".
 type AgentEvent struct {
-	Type string
+	Type EventType
 	Data string
 }
 

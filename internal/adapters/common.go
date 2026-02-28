@@ -50,10 +50,10 @@ func DispatchTool(
 	// MCP-dispatched tools take priority over built-in tool names.
 	if dispatchers := tools.MCPDispatchersFromContext(ctx); len(dispatchers) > 0 {
 		if dispatcher, found := dispatchers[name]; found {
-			onEvent(models.AgentEvent{Type: "reading", Data: "[mcp] " + name})
+			onEvent(models.AgentEvent{Type: models.EventReading, Data: "[mcp] " + name})
 			result := dispatcher(args)
 			if strings.HasPrefix(result, "[mcp error:") {
-				onEvent(models.AgentEvent{Type: "error", Data: result})
+				onEvent(models.AgentEvent{Type: models.EventError, Data: result})
 			}
 			return result, true
 		}
@@ -73,18 +73,18 @@ func DispatchTool(
 				limit = n
 			}
 		}
-		onEvent(models.AgentEvent{Type: "reading", Data: path})
+		onEvent(models.AgentEvent{Type: models.EventReading, Data: path})
 		return applyOutputProcessing(ctx, name, tools.ExecuteRead(path, offset, limit)), true
 
 	case tools.WriteToolName:
 		path := args["path"]
-		onEvent(models.AgentEvent{Type: "writing", Data: path})
+		onEvent(models.AgentEvent{Type: models.EventWriting, Data: path})
 		*proposed = append(*proposed, tools.FileWrite{Path: path, Content: args["content"]})
 		return writeAck, true
 
 	case tools.EditToolName:
 		path := args["path"]
-		onEvent(models.AgentEvent{Type: "writing", Data: path})
+		onEvent(models.AgentEvent{Type: models.EventWriting, Data: path})
 		newContent, errMsg := tools.ExecuteEditFile(path, args["old_string"], args["new_string"])
 		if errMsg != "" {
 			return errMsg, true
@@ -100,13 +100,13 @@ func DispatchTool(
 				depth = n
 			}
 		}
-		onEvent(models.AgentEvent{Type: "reading", Data: path})
+		onEvent(models.AgentEvent{Type: models.EventReading, Data: path})
 		return applyOutputProcessing(ctx, name, tools.ExecuteListDirectory(path, depth)), true
 
 	case tools.SearchFilesName:
 		pattern := args["pattern"]
 		basePath := args["base_path"]
-		onEvent(models.AgentEvent{Type: "reading", Data: pattern})
+		onEvent(models.AgentEvent{Type: models.EventReading, Data: pattern})
 		return applyOutputProcessing(ctx, name, tools.ExecuteSearchFiles(pattern, basePath)), true
 
 	case tools.SearchCodeName:
@@ -119,7 +119,7 @@ func DispatchTool(
 				contextLines = n
 			}
 		}
-		onEvent(models.AgentEvent{Type: "reading", Data: pattern})
+		onEvent(models.AgentEvent{Type: models.EventReading, Data: pattern})
 		return applyOutputProcessing(ctx, name, tools.ExecuteSearchCode(pattern, path, fileGlob, contextLines)), true
 
 	case tools.BashToolName:
@@ -128,17 +128,17 @@ func DispatchTool(
 		if desc == "" {
 			desc = command
 		}
-		onEvent(models.AgentEvent{Type: "bash", Data: desc})
+		onEvent(models.AgentEvent{Type: models.EventBash, Data: desc})
 		return applyOutputProcessing(ctx, name, tools.ExecuteBash(ctx, command)), true
 
 	case tools.WebFetchToolName:
 		rawURL := args["url"]
-		onEvent(models.AgentEvent{Type: "reading", Data: rawURL})
+		onEvent(models.AgentEvent{Type: models.EventReading, Data: rawURL})
 		return applyOutputProcessing(ctx, name, tools.ExecuteWebFetch(rawURL)), true
 
 	case tools.WebSearchToolName:
 		query := args["query"]
-		onEvent(models.AgentEvent{Type: "reading", Data: "web_search: " + query})
+		onEvent(models.AgentEvent{Type: models.EventReading, Data: "web_search: " + query})
 		return applyOutputProcessing(ctx, name, tools.ExecuteWebSearch(query)), true
 
 	case tools.SpawnAgentToolName:
@@ -147,7 +147,7 @@ func DispatchTool(
 			return "[spawn_agent error: sub-agent spawning is not configured]", true
 		}
 		task := args["task"]
-		onEvent(models.AgentEvent{Type: "reading", Data: "spawn_agent: " + task})
+		onEvent(models.AgentEvent{Type: models.EventReading, Data: "spawn_agent: " + task})
 		text, writes, errMsg := dispatcher(ctx, args)
 		if errMsg != "" {
 			return errMsg, true
@@ -175,7 +175,7 @@ func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
 	if err != nil {
 		return
 	}
-	onEvent(models.AgentEvent{Type: "snapshot", Data: string(data)})
+	onEvent(models.AgentEvent{Type: models.EventSnapshot, Data: string(data)})
 }
 
 // applyOutputProcessing truncates tool output according to the rule for the

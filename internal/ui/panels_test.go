@@ -94,12 +94,12 @@ func TestFormatDoneSummary_WithCachedTokens(t *testing.T) {
 
 func TestAddEvent_CountsToolUses(t *testing.T) {
 	p := newPanelState("test-model", 0)
-	p.addEvent(models.AgentEvent{Type: "reading", Data: "foo.go"})
-	p.addEvent(models.AgentEvent{Type: "text", Data: "some text"})
-	p.addEvent(models.AgentEvent{Type: "writing", Data: "bar.go"})
-	p.addEvent(models.AgentEvent{Type: "bash", Data: "go test"})
-	p.addEvent(models.AgentEvent{Type: "error", Data: "something failed"})
-	p.addEvent(models.AgentEvent{Type: "text", Data: "more text"})
+	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "foo.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventText, Data: "some text"})
+	p.addEvent(models.AgentEvent{Type: models.EventWriting, Data: "bar.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventBash, Data: "go test"})
+	p.addEvent(models.AgentEvent{Type: models.EventError, Data: "something failed"})
+	p.addEvent(models.AgentEvent{Type: models.EventText, Data: "more text"})
 
 	if p.toolUseCount != 3 {
 		t.Errorf("expected toolUseCount=3 (reading+writing+bash), got %d", p.toolUseCount)
@@ -112,7 +112,7 @@ func TestAddEvent_CountsToolUses(t *testing.T) {
 func TestAddEvent_EventCapping(t *testing.T) {
 	p := newPanelState("test-model", 0)
 	for range 25 {
-		p.addEvent(models.AgentEvent{Type: "reading", Data: "file"})
+		p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "file"})
 	}
 	if len(p.events) != maxPanelEvents {
 		t.Errorf("expected %d events after capping, got %d", maxPanelEvents, len(p.events))
@@ -124,8 +124,8 @@ func TestAddEvent_EventCapping(t *testing.T) {
 
 func TestRenderInlinePanel_RunningShowsModelAndEvents(t *testing.T) {
 	p := newPanelState("claude-sonnet-4-6", 0)
-	p.addEvent(models.AgentEvent{Type: "reading", Data: "main.go"})
-	p.addEvent(models.AgentEvent{Type: "writing", Data: "utils.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "main.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventWriting, Data: "utils.go"})
 	out := renderInlinePanel(p, 80)
 	if !strings.Contains(out, "claude-sonnet-4-6") {
 		t.Errorf("expected model ID in output, got:\n%s", out)
@@ -147,11 +147,11 @@ func TestRenderInlinePanel_RunningShowsModelAndEvents(t *testing.T) {
 func TestRenderInlinePanel_RunningShowsLastEvents(t *testing.T) {
 	p := newPanelState("model", 0)
 	// Add more than maxInlineEvents
-	p.addEvent(models.AgentEvent{Type: "reading", Data: "first.go"})
-	p.addEvent(models.AgentEvent{Type: "reading", Data: "second.go"})
-	p.addEvent(models.AgentEvent{Type: "reading", Data: "third.go"})
-	p.addEvent(models.AgentEvent{Type: "reading", Data: "fourth.go"})
-	p.addEvent(models.AgentEvent{Type: "reading", Data: "fifth.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "first.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "second.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "third.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "fourth.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "fifth.go"})
 	out := renderInlinePanel(p, 80)
 	// first.go should be trimmed from display (only last 4 shown)
 	if strings.Contains(out, "first.go") {
@@ -183,8 +183,8 @@ func TestRenderInlinePanel_DoneCollapsedShowsSummary(t *testing.T) {
 
 func TestRenderInlinePanel_DoneExpandedShowsEvents(t *testing.T) {
 	p := newPanelState("gpt-4o", 1)
-	p.addEvent(models.AgentEvent{Type: "reading", Data: "foo.go"})
-	p.addEvent(models.AgentEvent{Type: "writing", Data: "bar.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "foo.go"})
+	p.addEvent(models.AgentEvent{Type: models.EventWriting, Data: "bar.go"})
 	p.done = true
 	p.expanded = true
 	p.toolUseCount = 2
@@ -297,18 +297,18 @@ func TestTruncateLine(t *testing.T) {
 
 func TestRenderInlineEvent_EventTypes(t *testing.T) {
 	types := []struct {
-		typ  string
+		typ  models.EventType
 		data string
 	}{
-		{"reading", "main.go"},
-		{"writing", "out.go"},
-		{"bash", "go test"},
-		{"error", "something failed"},
-		{"text", "some output"},
+		{models.EventReading, "main.go"},
+		{models.EventWriting, "out.go"},
+		{models.EventBash, "go test"},
+		{models.EventError, "something failed"},
+		{models.EventText, "some output"},
 		{"unknown", "fallback data"},
 	}
 	for _, tt := range types {
-		t.Run(tt.typ, func(t *testing.T) {
+		t.Run(string(tt.typ), func(t *testing.T) {
 			e := models.AgentEvent{Type: tt.typ, Data: tt.data}
 			result := renderInlineEvent(e)
 			if !strings.Contains(result, tt.data) {
@@ -320,7 +320,7 @@ func TestRenderInlineEvent_EventTypes(t *testing.T) {
 
 func TestRenderInlineEvent_LongDataTruncated(t *testing.T) {
 	longData := strings.Repeat("x", 100)
-	e := models.AgentEvent{Type: "reading", Data: longData}
+	e := models.AgentEvent{Type: models.EventReading, Data: longData}
 	result := renderInlineEvent(e)
 	if strings.Contains(result, longData) {
 		t.Error("long data should be truncated in renderInlineEvent")

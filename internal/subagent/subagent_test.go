@@ -198,7 +198,7 @@ func TestNewDispatcher_CostInSummary(t *testing.T) {
 	// Find the summary event.
 	var found bool
 	for _, e := range events {
-		if e.Type == "text" && strings.Contains(e.Data, "$0.0042") {
+		if e.Type == models.EventText && strings.Contains(e.Data, "$0.0042") {
 			found = true
 			break
 		}
@@ -228,7 +228,7 @@ func TestNewDispatcher_ZeroCostOmitted(t *testing.T) {
 	dispatcher(ctx, map[string]string{"task": "do work"})
 
 	for _, e := range events {
-		if e.Type == "text" {
+		if e.Type == models.EventText {
 			assert.NotContains(t, e.Data, "$", "zero cost should not show $ in summary")
 		}
 	}

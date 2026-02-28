@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"slices"
 	"sort"
@@ -300,7 +301,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			for _, ad := range ads {
 				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
-						Type: "text", Data: "[auto-compacting history…]",
+						Type: models.EventText, Data: "[auto-compacting history…]",
 					}})
 					effectiveHistories = runner.CompactHistories(
 						compactCtx, []models.ModelAdapter{ad},
@@ -355,7 +356,9 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 				panelIDs[i] = ad.ID()
 			}
 			if cp := checkpoint.Build(trimmed, panelIDs, responses, verbose); cp != nil {
-				_ = checkpoint.Save(checkpoint.DefaultPath, *cp)
+				if err := checkpoint.Save(checkpoint.DefaultPath, *cp); err != nil {
+					log.Printf("warning: failed to save checkpoint: %v", err)
+				}
 			}
 		}
 
@@ -392,7 +395,9 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 	}
 
 	if len(toRerunIDs) == 0 {
-		_ = checkpoint.Clear(checkpoint.DefaultPath)
+		if err := checkpoint.Clear(checkpoint.DefaultPath); err != nil {
+			log.Printf("warning: failed to clear checkpoint: %v", err)
+		}
 		return a.withMessage("All models from the last run completed. No resume needed."), nil
 	}
 
@@ -415,7 +420,9 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 		rerunAdapters = append(rerunAdapters, found)
 	}
 
-	_ = checkpoint.Clear(checkpoint.DefaultPath)
+	if err := checkpoint.Clear(checkpoint.DefaultPath); err != nil {
+		log.Printf("warning: failed to clear checkpoint: %v", err)
+	}
 	return a.launchResumeRun(cp.Prompt, rerunAdapters, completedResponses, cp.Verbose)
 }
 
@@ -501,7 +508,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 			for _, ad := range ads {
 				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
-						Type: "text", Data: "[auto-compacting history…]",
+						Type: models.EventText, Data: "[auto-compacting history…]",
 					}})
 					effectiveHistories = runner.CompactHistories(
 						compactCtx, []models.ModelAdapter{ad},
@@ -557,7 +564,9 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 				allIDs[i] = r.ModelID
 			}
 			if cp := checkpoint.Build(prompt, allIDs, allResp, verbose); cp != nil {
-				_ = checkpoint.Save(checkpoint.DefaultPath, *cp)
+				if err := checkpoint.Save(checkpoint.DefaultPath, *cp); err != nil {
+					log.Printf("warning: failed to save checkpoint: %v", err)
+				}
 			}
 		}
 

@@ -45,7 +45,7 @@ func newPanelState(modelID string, idx int) *panelState {
 
 func (p *panelState) addEvent(e models.AgentEvent) {
 	switch e.Type {
-	case "reading", "writing", "bash":
+	case models.EventReading, models.EventWriting, models.EventBash:
 		p.toolUseCount++
 	}
 	p.events = append(p.events, e)
@@ -134,15 +134,15 @@ func formatDoneSummary(p *panelState) string {
 func renderInlineEvent(e models.AgentEvent) string {
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	switch e.Type {
-	case "reading":
+	case models.EventReading:
 		return dimStyle.Render("reading ") + truncateLine(e.Data, 70)
-	case "writing":
+	case models.EventWriting:
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AFAF00")).Render("writing ") + truncateLine(e.Data, 70)
-	case "bash":
+	case models.EventBash:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF87")).Render("bash    ") + truncateLine(e.Data, 60)
-	case "error":
+	case models.EventError:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error   ") + truncateLine(e.Data, 60)
-	case "text":
+	case models.EventText:
 		return dimStyle.Render(truncateLine(e.Data, 70))
 	default:
 		return dimStyle.Render(truncateLine(e.Data, 70))

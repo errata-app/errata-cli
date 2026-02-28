@@ -236,7 +236,9 @@ func (s *IncrementalSaver) flush() {
 		Responses:  responses,
 		Verbose:    s.verbose,
 	}
-	_ = Save(s.path, cp) // best-effort; never crash the run
+	if err := Save(s.path, cp); err != nil { // best-effort; never crash the run
+		log.Printf("warning: incremental checkpoint save failed: %v", err)
+	}
 }
 
 // SnapshotFromPartial converts a PartialSnapshot (emitted by adapters via

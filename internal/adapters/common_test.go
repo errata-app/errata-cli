@@ -30,7 +30,7 @@ func TestDispatchTool_ReadEmitsEventAndReturnsContent(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "hello", result)
 	require.Len(t, events, 1)
-	assert.Equal(t, "reading", events[0].Type)
+	assert.Equal(t, models.EventReading, events[0].Type)
 	assert.Equal(t, relPath, events[0].Data)
 	assert.Empty(t, proposed)
 }
@@ -45,7 +45,7 @@ func TestDispatchTool_WriteEmitsEventAndQueues(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, writeAck, result)
 	require.Len(t, events, 1)
-	assert.Equal(t, "writing", events[0].Type)
+	assert.Equal(t, models.EventWriting, events[0].Type)
 	assert.Equal(t, "out.txt", events[0].Data)
 	require.Len(t, proposed, 1)
 	assert.Equal(t, "out.txt", proposed[0].Path)
@@ -89,7 +89,7 @@ func TestDispatchTool_ListDirectoryEmitsEventAndReturnsTree(t *testing.T) {
 	assert.True(t, ok)
 	assert.Contains(t, result, "file.txt")
 	require.Len(t, events, 1)
-	assert.Equal(t, "reading", events[0].Type)
+	assert.Equal(t, models.EventReading, events[0].Type)
 	assert.Empty(t, proposed)
 }
 
@@ -129,7 +129,7 @@ func TestDispatchTool_SearchFilesEmitsEventAndReturnsMatches(t *testing.T) {
 	assert.Contains(t, result, "main.go")
 	assert.NotContains(t, result, "readme.md")
 	require.Len(t, events, 1)
-	assert.Equal(t, "reading", events[0].Type)
+	assert.Equal(t, models.EventReading, events[0].Type)
 	assert.Empty(t, proposed)
 }
 
@@ -162,7 +162,7 @@ func TestDispatchTool_SearchCodeEmitsEventAndReturnsMatches(t *testing.T) {
 	assert.True(t, ok)
 	assert.Contains(t, result, "Hello")
 	require.Len(t, events, 1)
-	assert.Equal(t, "reading", events[0].Type)
+	assert.Equal(t, models.EventReading, events[0].Type)
 	assert.Empty(t, proposed)
 }
 
@@ -192,7 +192,7 @@ func TestDispatchTool_BashEmitsEventAndReturnsOutput(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "hi", result)
 	require.Len(t, events, 1)
-	assert.Equal(t, "bash", events[0].Type)
+	assert.Equal(t, models.EventBash, events[0].Type)
 	assert.Equal(t, "say hi", events[0].Data)
 	assert.Empty(t, proposed)
 }
@@ -231,7 +231,7 @@ func TestDispatchTool_MCPDispatcherTakesPriority(t *testing.T) {
 	assert.True(t, called)
 	assert.Equal(t, "mcp result: hello", result)
 	require.Len(t, events, 1)
-	assert.Equal(t, "reading", events[0].Type)
+	assert.Equal(t, models.EventReading, events[0].Type)
 	assert.Contains(t, events[0].Data, "my_mcp_tool")
 }
 
@@ -409,7 +409,7 @@ func TestEmitSnapshot_EmitsSnapshotEvent(t *testing.T) {
 	)
 
 	require.Len(t, events, 1)
-	assert.Equal(t, "snapshot", events[0].Type)
+	assert.Equal(t, models.EventSnapshot, events[0].Type)
 	assert.Contains(t, events[0].Data, `"text":"hello world"`)
 	assert.Contains(t, events[0].Data, `"input_tokens":500`)
 	assert.Contains(t, events[0].Data, `"output_tokens":100`)
@@ -422,7 +422,7 @@ func TestEmitSnapshot_NilWritesOK(t *testing.T) {
 		"m", nil, time.Now(), 0, 0, nil,
 	)
 	require.Len(t, events, 1)
-	assert.Equal(t, "snapshot", events[0].Type)
+	assert.Equal(t, models.EventSnapshot, events[0].Type)
 }
 
 // ─── applyOutputProcessing ──────────────────────────────────────────────────
@@ -452,8 +452,8 @@ func TestDispatchTool_MCPError_EmitsErrorEvent(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "[mcp error: connection lost]", result)
 	require.Len(t, events, 2)
-	assert.Equal(t, "reading", events[0].Type)
-	assert.Equal(t, "error", events[1].Type)
+	assert.Equal(t, models.EventReading, events[0].Type)
+	assert.Equal(t, models.EventError, events[1].Type)
 }
 
 // ─── spawn_agent dispatch ─────────────────────────────────────────────────────

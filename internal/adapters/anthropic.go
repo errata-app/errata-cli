@@ -100,13 +100,13 @@ func (a *AnthropicAdapter) RunAgent(
 			case "text":
 				text := block.AsText().Text
 				textParts = append(textParts, text)
-				onEvent(models.AgentEvent{Type: "text", Data: text})
+				onEvent(models.AgentEvent{Type: models.EventText, Data: text})
 
 			case "tool_use":
 				tu := block.AsToolUse()
 				var input map[string]any
 				if err := json.Unmarshal(tu.Input, &input); err != nil {
-					onEvent(models.AgentEvent{Type: "error", Data: fmt.Sprintf("bad tool args for %s: %v", tu.Name, err)})
+					onEvent(models.AgentEvent{Type: models.EventError, Data: fmt.Sprintf("bad tool args for %s: %v", tu.Name, err)})
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, fmt.Sprintf("error parsing arguments: %v", err), true))
 					continue
 				}
@@ -132,15 +132,7 @@ func buildAnthropicTools(ctx context.Context) []anthropic.ToolUnionParam {
 	active := tools.ActiveToolsFromContext(ctx)
 	out := make([]anthropic.ToolUnionParam, 0, len(active))
 	for _, def := range active {
-		props := map[string]any{}
-		for name, p := range def.Properties {
-			props[name] = map[string]any{
-				"type":        p.Type,
-				"description": p.Description,
-			}
-		}
-		required := make([]string, len(def.Required))
-		copy(required, def.Required)
+		props, required := def.JSONSchemaProps()
 
 		tp := anthropic.ToolParam{
 			Name:        def.Name,

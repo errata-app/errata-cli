@@ -117,6 +117,22 @@ type ToolDef struct {
 	Required    []string
 }
 
+// JSONSchemaProps returns a JSON-Schema-compatible properties map and required
+// list for this tool definition. Used by adapter tool-building functions to
+// avoid duplicating the property-extraction loop.
+func (d ToolDef) JSONSchemaProps() (props map[string]any, required []string) {
+	props = make(map[string]any, len(d.Properties))
+	for name, p := range d.Properties {
+		props[name] = map[string]any{
+			"type":        p.Type,
+			"description": p.Description,
+		}
+	}
+	required = make([]string, len(d.Required))
+	copy(required, d.Required)
+	return props, required
+}
+
 // Definitions is the canonical set of tools available to all agents.
 var Definitions = []ToolDef{
 	{

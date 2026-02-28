@@ -16,3 +16,15 @@ dist/
 .venv/
 .DS_Store
 .errata_history
+
+# Test/build artifacts
+coverage.out
+coverage.html
+test_environment/
+
+# Scratch files
+Scratchpad.md
+paragraph.txt
+new_recipe.md
+claude_recipe.md
+documentation.md

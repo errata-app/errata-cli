@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -39,9 +40,13 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 			// Find the single OK response and record it as the winner.
 			for _, resp := range a.responses {
 				if resp.OK() {
-					_ = preferences.Record(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses)
+					if err := preferences.Record(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses); err != nil {
+						log.Printf("warning: failed to record preference: %v", err)
+					}
 					if a.lastReport != nil {
-						_ = output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "good")
+						if err := output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "good"); err != nil {
+							log.Printf("warning: failed to record selection: %v", err)
+						}
 						a.lastReport = nil
 					}
 					setNote(fmt.Sprintf("Rated good: %s", resp.ModelID))
@@ -55,9 +60,13 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		case "n", "N":
 			for _, resp := range a.responses {
 				if resp.OK() {
-					_ = preferences.RecordBad(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses)
+					if err := preferences.RecordBad(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses); err != nil {
+						log.Printf("warning: failed to record preference: %v", err)
+					}
 					if a.lastReport != nil {
-						_ = output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "bad")
+						if err := output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "bad"); err != nil {
+							log.Printf("warning: failed to record selection: %v", err)
+						}
 						a.lastReport = nil
 					}
 					setNote(fmt.Sprintf("Rated bad: %s", resp.ModelID))
@@ -165,14 +174,18 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 		}
 	}
 
-	_ = preferences.Record(a.prefPath, a.lastPrompt, selected.ModelID, a.sessionID, a.responses)
+	if err := preferences.Record(a.prefPath, a.lastPrompt, selected.ModelID, a.sessionID, a.responses); err != nil {
+		log.Printf("warning: failed to record preference: %v", err)
+	}
 
 	if a.lastReport != nil {
 		var appliedPaths []string
 		for _, fw := range selected.ProposedWrites {
 			appliedPaths = append(appliedPaths, fw.Path)
 		}
-		_ = output.RecordSelection(output.DefaultDir, a.lastReport, selected.ModelID, appliedPaths, "")
+		if err := output.RecordSelection(output.DefaultDir, a.lastReport, selected.ModelID, appliedPaths, ""); err != nil {
+			log.Printf("warning: failed to record selection: %v", err)
+		}
 		a.lastReport = nil
 	}
 
