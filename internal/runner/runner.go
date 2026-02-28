@@ -56,12 +56,16 @@ func runOptsFromContext(ctx context.Context) RunOptions {
 // histories is a per-adapter map (keyed by adapter ID) of prior conversation turns;
 // nil or a missing key means a fresh conversation for that adapter.
 // onEvent is called from goroutines — callers must be safe for concurrent use.
+// onModelDone, if non-nil, is called from the adapter's goroutine as soon as it
+// finishes (before RunAll returns). This lets callers render incremental completion
+// (e.g. marking a TUI panel as "done") without waiting for the slowest adapter.
 func RunAll(
 	ctx      context.Context,
 	adapters []models.ModelAdapter,
 	histories map[string][]models.ConversationTurn,
 	userPrompt string,
 	onEvent  func(modelID string, event models.AgentEvent),
+	onModelDone func(idx int, resp models.ModelResponse),
 	verbose  bool,
 ) []models.ModelResponse {
 	opts := runOptsFromContext(ctx)
@@ -121,11 +125,17 @@ func RunAll(
 				if saver != nil {
 					saver.MarkCompleted(a.ID(), checkpoint.FromModelResponse(resp))
 				}
+				if onModelDone != nil {
+					onModelDone(i, resp)
+				}
 				return
 			}
 			results[i] = resp
 			if saver != nil {
 				saver.MarkCompleted(a.ID(), checkpoint.FromModelResponse(resp))
+			}
+			if onModelDone != nil {
+				onModelDone(i, resp)
 			}
 		})
 	}

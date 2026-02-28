@@ -106,7 +106,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			}
 		})
 
-		responses := runner.RunAll(runCtx, opts.Adapters, histories, taskPrompt, onEvent, opts.Verbose)
+		responses := runner.RunAll(runCtx, opts.Adapters, histories, taskPrompt, onEvent, nil, opts.Verbose)
 
 		// Check for context cancellation (SIGINT/SIGTERM).
 		if ctx.Err() != nil {

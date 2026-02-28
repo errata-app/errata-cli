@@ -42,6 +42,11 @@ type runCompleteMsg struct {
 	report             *output.Report                       // output report for selection recording
 }
 
+type modelDoneMsg struct {
+	idx      int
+	response models.ModelResponse
+}
+
 type compactCompleteMsg struct {
 	histories map[string][]models.ConversationTurn
 }
@@ -408,6 +413,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.feedVP.SetContent(a.renderFeedContent())
 		a.feedVP.GotoBottom()
 		return a, nil
+
+	case modelDoneMsg:
+		if msg.idx < len(a.panels) {
+			p := a.panels[msg.idx]
+			p.done = true
+			p.latencyMS = msg.response.LatencyMS
+			p.inputTokens = msg.response.InputTokens
+			p.outputTokens = msg.response.OutputTokens
+			p.costUSD = msg.response.CostUSD
+			if msg.response.Interrupted {
+				p.errMsg = "interrupted"
+			} else if msg.response.Error != "" {
+				p.errMsg = msg.response.Error
+				if runner.IsContextOverflowError(msg.response.Error) {
+					p.errMsg = "context limit reached — use /wipe or /compact to reset"
+				}
+			}
+		}
+		return a.withFeedRebuilt(true), nil
 
 	case escHintMsg:
 		a.escHintVisible = false

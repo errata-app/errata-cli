@@ -83,7 +83,7 @@ func TestRunAll_Order(t *testing.T) {
 	a1 := &stubAdapter{id: "m1", response: models.ModelResponse{ModelID: "m1", Text: "r1"}}
 	a2 := &stubAdapter{id: "m2", response: models.ModelResponse{ModelID: "m2", Text: "r2"}}
 
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a1, a2}, nil, "p", func(string, models.AgentEvent) {}, false)
+	results := runner.RunAll(context.Background(), []models.ModelAdapter{a1, a2}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results, 2)
 	assert.Equal(t, "m1", results[0].ModelID)
 	assert.Equal(t, "m2", results[1].ModelID)
@@ -105,7 +105,7 @@ func TestRunAll_EventPropagation(t *testing.T) {
 		mu.Lock()
 		received = append(received, e)
 		mu.Unlock()
-	}, false)
+	}, nil, false)
 
 	assert.Len(t, received, 2)
 	assert.Equal(t, models.EventReading, received[0].Type)
@@ -122,7 +122,7 @@ func TestRunAll_ProposedWritesPreserved(t *testing.T) {
 			},
 		},
 	}
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, false)
+	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results[0].ProposedWrites, 1)
 	assert.Equal(t, "x.txt", results[0].ProposedWrites[0].Path)
 }
@@ -131,7 +131,7 @@ func TestRunAll_ErrorAdapterDoesNotAffectOthers(t *testing.T) {
 	good := &stubAdapter{id: "good", response: models.ModelResponse{ModelID: "good", Text: "ok"}}
 	bad := &errorAdapter{id: "bad", msg: "bad failed"}
 
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{good, bad}, nil, "p", func(string, models.AgentEvent) {}, false)
+	results := runner.RunAll(context.Background(), []models.ModelAdapter{good, bad}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results, 2)
 
 	var goodRes, badRes models.ModelResponse
@@ -158,7 +158,7 @@ func TestRunAll_ErrorSurfacesViaOnEventVerbose(t *testing.T) {
 		mu.Lock()
 		received = append(received, e)
 		mu.Unlock()
-	}, true)
+	}, nil, true)
 
 	assert.NotEmpty(t, received)
 	assert.Equal(t, models.EventError, received[len(received)-1].Type)
@@ -173,14 +173,14 @@ func TestRunAll_ErrorEventSuppressedNonVerbose(t *testing.T) {
 		mu.Lock()
 		received = append(received, e)
 		mu.Unlock()
-	}, false)
+	}, nil, false)
 
 	assert.Empty(t, received)
 }
 
 func TestRunAll_LatencyRecorded(t *testing.T) {
 	a := &stubAdapter{id: "m", response: models.ModelResponse{ModelID: "m"}}
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, false)
+	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.GreaterOrEqual(t, results[0].LatencyMS, int64(0))
 }
 
@@ -191,13 +191,71 @@ func TestRunAll_NormalizesModelID(t *testing.T) {
 		id:       "gpt-4o",
 		response: models.ModelResponse{ModelID: "gpt-4o-2024-08-06", Text: "done"},
 	}
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, false)
+	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Equal(t, "gpt-4o", results[0].ModelID)
 }
 
 func TestRunAll_EmptyAdapters(t *testing.T) {
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{}, nil, "p", func(string, models.AgentEvent) {}, false)
+	results := runner.RunAll(context.Background(), []models.ModelAdapter{}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Empty(t, results)
+}
+
+func TestRunAll_OnModelDoneCalledPerAdapter(t *testing.T) {
+	a1 := &stubAdapter{id: "m1", response: models.ModelResponse{ModelID: "m1", Text: "r1"}}
+	a2 := &stubAdapter{id: "m2", response: models.ModelResponse{ModelID: "m2", Text: "r2"}}
+
+	var mu sync.Mutex
+	var doneEvents []struct {
+		idx     int
+		modelID string
+	}
+	runner.RunAll(context.Background(), []models.ModelAdapter{a1, a2}, nil, "p",
+		func(string, models.AgentEvent) {},
+		func(idx int, resp models.ModelResponse) {
+			mu.Lock()
+			doneEvents = append(doneEvents, struct {
+				idx     int
+				modelID string
+			}{idx, resp.ModelID})
+			mu.Unlock()
+		},
+		false,
+	)
+
+	assert.Len(t, doneEvents, 2)
+	// Both adapters should have fired, with correct indices and IDs.
+	idxSet := map[int]string{}
+	for _, e := range doneEvents {
+		idxSet[e.idx] = e.modelID
+	}
+	assert.Equal(t, "m1", idxSet[0])
+	assert.Equal(t, "m2", idxSet[1])
+}
+
+func TestRunAll_OnModelDoneNilDoesNotPanic(t *testing.T) {
+	a := &stubAdapter{id: "m", response: models.ModelResponse{ModelID: "m", Text: "ok"}}
+	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p",
+		func(string, models.AgentEvent) {}, nil, false)
+	assert.Len(t, results, 1)
+}
+
+func TestRunAll_OnModelDoneCalledOnError(t *testing.T) {
+	bad := &errorAdapter{id: "bad", msg: "failed"}
+
+	var mu sync.Mutex
+	var doneResp models.ModelResponse
+	runner.RunAll(context.Background(), []models.ModelAdapter{bad}, nil, "p",
+		func(string, models.AgentEvent) {},
+		func(idx int, resp models.ModelResponse) {
+			mu.Lock()
+			doneResp = resp
+			mu.Unlock()
+		},
+		true,
+	)
+
+	assert.Equal(t, "bad", doneResp.ModelID)
+	assert.Contains(t, doneResp.Error, "failed")
 }
 
 func TestRunAll_PassesHistoryToAdapter(t *testing.T) {
@@ -209,14 +267,14 @@ func TestRunAll_PassesHistoryToAdapter(t *testing.T) {
 			{Role: "assistant", Content: "prior answer"},
 		},
 	}
-	runner.RunAll(context.Background(), []models.ModelAdapter{a}, histories, "new prompt", func(string, models.AgentEvent) {}, false)
+	runner.RunAll(context.Background(), []models.ModelAdapter{a}, histories, "new prompt", func(string, models.AgentEvent) {}, nil, false)
 	assert.Equal(t, histories["m"], received)
 }
 
 func TestRunAll_NilHistoriesPassesNilToAdapter(t *testing.T) {
 	var received []models.ConversationTurn
 	a := &historyCapturingAdapter{id: "m", capture: &received}
-	runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, false)
+	runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Nil(t, received)
 }
 
@@ -226,7 +284,7 @@ func TestRunAll_UnknownAdapterIDReceivesNilHistory(t *testing.T) {
 	histories := map[string][]models.ConversationTurn{
 		"other": {{Role: "user", Content: "irrelevant"}},
 	}
-	runner.RunAll(context.Background(), []models.ModelAdapter{a}, histories, "p", func(string, models.AgentEvent) {}, false)
+	runner.RunAll(context.Background(), []models.ModelAdapter{a}, histories, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Nil(t, received)
 }
 
@@ -560,7 +618,7 @@ func TestRunAll_SnapshotEventsNotForwarded(t *testing.T) {
 		mu.Lock()
 		received = append(received, e)
 		mu.Unlock()
-	}, true) // verbose=true so all non-snapshot events pass through
+	}, nil, true) // verbose=true so all non-snapshot events pass through
 
 	// "reading" and "writing" should be forwarded; "snapshot" should NOT.
 	for _, e := range received {
@@ -645,7 +703,7 @@ func TestWithRunOptions_OverridesDefaults(t *testing.T) {
 	bigHistory := map[string][]models.ConversationTurn{
 		"m": turns(20), // 20 turns, but max is 5 → should be trimmed
 	}
-	results := runner.RunAll(ctx, []models.ModelAdapter{a}, bigHistory, "p", func(string, models.AgentEvent) {}, false)
+	results := runner.RunAll(ctx, []models.ModelAdapter{a}, bigHistory, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results, 1)
 	// The adapter should have received a trimmed history (4 turns: 5 rounded down to even).
 	assert.LessOrEqual(t, len(*a.capture), 5)
@@ -696,7 +754,7 @@ func TestRunAll_CheckpointCreatedAndCleanedUp(t *testing.T) {
 	})
 
 	results := runner.RunAll(ctx, []models.ModelAdapter{a}, nil, "test prompt",
-		func(string, models.AgentEvent) {}, false)
+		func(string, models.AgentEvent) {}, nil, false)
 
 	// Adapter completed successfully → checkpoint should be cleaned up.
 	assert.Len(t, results, 1)
@@ -723,7 +781,7 @@ func TestRunAll_CheckpointPreservedOnInterrupt(t *testing.T) {
 	})
 
 	results := runner.RunAll(ctx, []models.ModelAdapter{interrupted}, nil, "test prompt",
-		func(string, models.AgentEvent) {}, false)
+		func(string, models.AgentEvent) {}, nil, false)
 
 	assert.Len(t, results, 1)
 	assert.True(t, results[0].Interrupted)

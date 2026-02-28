@@ -355,6 +355,9 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
 			}),
+			func(idx int, resp models.ModelResponse) {
+				prog.Send(modelDoneMsg{idx: idx, response: resp})
+			},
 			verbose,
 		)
 
@@ -615,11 +618,15 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			runCtx = tools.WithSeed(runCtx, *seed)
 		}
 		collector := output.NewCollector()
+		completedCount := len(completedResponses)
 		responses := runner.RunAll(
 			runCtx, ads, effectiveHistories, userPrompt,
 			collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
 			}),
+			func(idx int, resp models.ModelResponse) {
+				prog.Send(modelDoneMsg{idx: completedCount + idx, response: resp})
+			},
 			verbose,
 		)
 
