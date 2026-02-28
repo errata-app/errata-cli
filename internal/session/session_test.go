@@ -13,8 +13,9 @@ import (
 
 func TestGenerateID_Format(t *testing.T) {
 	id := GenerateID()
-	// 16-character hex string (8 random bytes)
-	matched, err := regexp.MatchString(`^[0-9a-f]{16}$`, id)
+	// ses_ prefix + UUID v7
+	matched, err := regexp.MatchString(
+		`^ses_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`, id)
 	require.NoError(t, err)
 	assert.True(t, matched, "ID %q does not match expected format", id)
 }
@@ -42,13 +43,14 @@ func TestNew_ReturnsCorrectPaths(t *testing.T) {
 
 func TestPathsFor_ReturnsCorrectPaths(t *testing.T) {
 	base := "/tmp/sessions"
-	paths := PathsFor(base, "a3f2b1c9d4e5f607")
-	assert.Equal(t, "/tmp/sessions/a3f2b1c9d4e5f607", paths.Dir)
-	assert.Equal(t, "/tmp/sessions/a3f2b1c9d4e5f607/history.json", paths.HistoryPath)
-	assert.Equal(t, "/tmp/sessions/a3f2b1c9d4e5f607/checkpoint.json", paths.CheckpointPath)
-	assert.Equal(t, "/tmp/sessions/a3f2b1c9d4e5f607/meta.json", paths.MetaPath)
-	assert.Equal(t, "/tmp/sessions/a3f2b1c9d4e5f607/feed.json", paths.FeedPath)
-	assert.Equal(t, "/tmp/sessions/a3f2b1c9d4e5f607/recipe.md", paths.RecipePath)
+	id := "ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c"
+	paths := PathsFor(base, id)
+	assert.Equal(t, "/tmp/sessions/"+id, paths.Dir)
+	assert.Equal(t, "/tmp/sessions/"+id+"/history.json", paths.HistoryPath)
+	assert.Equal(t, "/tmp/sessions/"+id+"/checkpoint.json", paths.CheckpointPath)
+	assert.Equal(t, "/tmp/sessions/"+id+"/meta.json", paths.MetaPath)
+	assert.Equal(t, "/tmp/sessions/"+id+"/feed.json", paths.FeedPath)
+	assert.Equal(t, "/tmp/sessions/"+id+"/recipe.md", paths.RecipePath)
 }
 
 func TestSaveMeta_LoadMeta_RoundTrip(t *testing.T) {
@@ -57,7 +59,7 @@ func TestSaveMeta_LoadMeta_RoundTrip(t *testing.T) {
 
 	now := time.Now().Truncate(time.Second)
 	m := Meta{
-		ID:           "a3f2b1c9d4e5f607",
+		ID:           "ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c",
 		FirstPrompt:  "fix the bug",
 		LastPrompt:   "add tests",
 		CreatedAt:    now,
@@ -138,8 +140,11 @@ func TestList_NewestFirst(t *testing.T) {
 	base := t.TempDir()
 	now := time.Now()
 
-	// Create two sessions with different timestamps.
-	for i, id := range []string{"aaaa000000000001", "bbbb000000000002"} {
+	ids := []string{
+		"ses_01950000-0000-7000-8000-000000000001",
+		"ses_01950000-0000-7000-8000-000000000002",
+	}
+	for i, id := range ids {
 		paths := PathsFor(base, id)
 		require.NoError(t, os.MkdirAll(paths.Dir, 0o750))
 		require.NoError(t, SaveMeta(paths.MetaPath, Meta{
@@ -152,8 +157,8 @@ func TestList_NewestFirst(t *testing.T) {
 	metas, err := List(base)
 	require.NoError(t, err)
 	require.Len(t, metas, 2)
-	assert.Equal(t, "bbbb000000000002", metas[0].ID) // newer
-	assert.Equal(t, "aaaa000000000001", metas[1].ID) // older
+	assert.Equal(t, ids[1], metas[0].ID) // newer
+	assert.Equal(t, ids[0], metas[1].ID) // older
 }
 
 func TestList_SkipsCorrupt(t *testing.T) {
@@ -161,13 +166,13 @@ func TestList_SkipsCorrupt(t *testing.T) {
 	now := time.Now()
 
 	// Create one valid session.
-	goodID := "aaaa000000000001"
+	goodID := "ses_01950000-0000-7000-8000-000000000001"
 	goodPaths := PathsFor(base, goodID)
 	require.NoError(t, os.MkdirAll(goodPaths.Dir, 0o750))
 	require.NoError(t, SaveMeta(goodPaths.MetaPath, Meta{ID: goodID, CreatedAt: now, LastActiveAt: now}))
 
 	// Create a corrupt session.
-	badDir := filepath.Join(base, "bbbbcorruptbad01")
+	badDir := filepath.Join(base, "ses_01950000-0000-7000-8000-corrupt")
 	require.NoError(t, os.MkdirAll(badDir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(badDir, "meta.json"), []byte("bad"), 0o600))
 
@@ -194,7 +199,11 @@ func TestLatestID_ReturnsNewest(t *testing.T) {
 	base := t.TempDir()
 	now := time.Now()
 
-	for i, id := range []string{"aaaa000000000001", "bbbb000000000002"} {
+	ids := []string{
+		"ses_01950000-0000-7000-8000-000000000001",
+		"ses_01950000-0000-7000-8000-000000000002",
+	}
+	for i, id := range ids {
 		paths := PathsFor(base, id)
 		require.NoError(t, os.MkdirAll(paths.Dir, 0o750))
 		require.NoError(t, SaveMeta(paths.MetaPath, Meta{
@@ -206,7 +215,7 @@ func TestLatestID_ReturnsNewest(t *testing.T) {
 
 	id, err := LatestID(base)
 	require.NoError(t, err)
-	assert.Equal(t, "bbbb000000000002", id)
+	assert.Equal(t, ids[1], id)
 }
 
 func TestLatestID_NoSessions(t *testing.T) {
@@ -218,7 +227,7 @@ func TestLatestID_NoSessions(t *testing.T) {
 
 func TestResolve_ExactMatch(t *testing.T) {
 	base := t.TempDir()
-	id := "a3f2b1c9d4e5f607"
+	id := "ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c"
 	require.NoError(t, os.MkdirAll(filepath.Join(base, id), 0o750))
 
 	resolved, err := Resolve(base, id)
@@ -228,20 +237,20 @@ func TestResolve_ExactMatch(t *testing.T) {
 
 func TestResolve_PrefixMatch(t *testing.T) {
 	base := t.TempDir()
-	id := "a3f2b1c9d4e5f607"
+	id := "ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c"
 	require.NoError(t, os.MkdirAll(filepath.Join(base, id), 0o750))
 
-	resolved, err := Resolve(base, "a3f2")
+	resolved, err := Resolve(base, "ses_0195")
 	require.NoError(t, err)
 	assert.Equal(t, id, resolved)
 }
 
 func TestResolve_Ambiguous(t *testing.T) {
 	base := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(base, "abcd000000000001"), 0o750))
-	require.NoError(t, os.MkdirAll(filepath.Join(base, "abcd000000000002"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "ses_019505e2-aaaa-7000-8000-000000000001"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "ses_019505e2-aaaa-7000-8000-000000000002"), 0o750))
 
-	_, err := Resolve(base, "abcd")
+	_, err := Resolve(base, "ses_019505e2-aaaa")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous")
 }

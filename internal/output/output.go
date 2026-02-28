@@ -10,8 +10,6 @@
 package output
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,6 +21,7 @@ import (
 
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/internal/uid"
 )
 
 // DefaultDir is the default output directory for reports.
@@ -166,7 +165,7 @@ func BuildReport(
 	collector *Collector,
 	activeToolNames []string,
 ) *Report {
-	id := randomHex(8)
+	id := uid.New("rpt_")
 
 	recipeName := "default"
 	if rec != nil && rec.Name != "" {
@@ -340,10 +339,3 @@ func RecordSelection(dir string, report *Report, selectedModel string, appliedFi
 	return err
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}

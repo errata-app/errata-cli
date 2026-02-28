@@ -13,8 +13,6 @@ package logging
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -22,6 +20,7 @@ import (
 	"time"
 
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/uid"
 )
 
 // ─── Log entry types ─────────────────────────────────────────────────────────
@@ -195,12 +194,5 @@ func (a *loggingAdapter) RunAgent(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// RandomHex returns a random n-byte hex-encoded string.
-func RandomHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
-func newRunID() string { return RandomHex(8) }
+func newRunID() string { return uid.New("run_") }
 

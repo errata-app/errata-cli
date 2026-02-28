@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/suarezc/errata/internal/criteria"
-	"github.com/suarezc/errata/internal/logging"
 	"github.com/suarezc/errata/internal/output"
+	"github.com/suarezc/errata/internal/uid"
 )
 
 // RunReport is the top-level JSON report produced by `errata run`.
@@ -100,7 +100,7 @@ func Load(path string) (*RunReport, error) {
 	return &r, nil
 }
 
-// newReportID generates a random hex ID for reports.
+// newReportID generates a type-prefixed UUID v7 report ID.
 func newReportID() string {
-	return logging.RandomHex(8)
+	return uid.New("rpt_")
 }

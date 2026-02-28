@@ -23,6 +23,7 @@ import (
 	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/tools"
 	"github.com/suarezc/errata/internal/ui"
+	"github.com/suarezc/errata/internal/uid"
 )
 
 var (
@@ -262,7 +263,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	applyProjectRoot(rec)
 	applyRecipeToolSettings(rec)
 
-	sessionID := logging.RandomHex(16)
+	sessionID := uid.New("ses_")
 	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath, sessionID)
 	defer cleanup()
 

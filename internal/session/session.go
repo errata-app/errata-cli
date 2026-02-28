@@ -3,8 +3,6 @@
 package session
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,15 +11,13 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/suarezc/errata/internal/uid"
 )
 
-// GenerateID returns a random 16-character hex session ID (8 bytes).
+// GenerateID returns a type-prefixed UUID v7 session ID (e.g. "ses_019505e2-...").
 func GenerateID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("session: crypto/rand failed: %v", err))
-	}
-	return hex.EncodeToString(b)
+	return uid.New("ses_")
 }
 
 // Paths holds the per-session file paths.

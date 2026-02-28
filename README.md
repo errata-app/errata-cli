@@ -530,7 +530,7 @@ Every selection is appended to `data/preferences.jsonl` (never overwritten):
   "models": ["claude-sonnet-4-6", "gpt-4o"],
   "selected": "claude-sonnet-4-6",
   "latencies_ms": {"claude-sonnet-4-6": 891, "gpt-4o": 1243},
-  "session_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+  "session_id": "ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c"
 }
 ```
 
@@ -629,6 +629,8 @@ errata/
 │   │   └── process.go           # tool output processing (truncation rules)
 │   ├── tools/
 │   │   └── tools.go             # ToolDef, Definitions, Execute* functions, MCP helpers
+│   ├── uid/
+│   │   └── uid.go               # New(prefix) — type-prefixed UUID v7 ID generation
 │   ├── ui/
 │   │   ├── app.go               # bubbletea program, mode state machine
 │   │   ├── cmd_handlers.go      # slash command dispatch + export/import handlers

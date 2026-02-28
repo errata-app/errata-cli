@@ -98,6 +98,8 @@ errata/
 │   │   └── manager.go       # MCP server subprocess lifecycle, tool discovery, dispatcher registry
 │   ├── tools/
 │   │   └── tools.go         # FileWrite, ToolDef, ExecuteRead(), ApplyWrites(), FilterDefs(), ApplyDescriptions()
+│   ├── uid/
+│   │   └── uid.go           # New(prefix) — type-prefixed UUID v7 ID generation
 │   ├── prompt/
 │   │   └── assembler.go     # DefaultSummarizationPrompt, WithSummarizationPrompt(), ResolveSummarizationPrompt()
 │   ├── recipe/
@@ -204,8 +206,9 @@ The canonical command list is defined in `internal/commands/commands.go` (`comma
 
 ## Core Workflow
 
-**Ephemeral sessions:** Each `./errata` invocation starts a fresh session with a random
-hex ID (e.g. `a3f2b1c9d4e5f607`). Per-session state (history, feed, checkpoint, recipe)
+**Ephemeral sessions:** Each `./errata` invocation starts a fresh session with a
+type-prefixed UUID v7 ID (e.g. `ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c`).
+Per-session state (history, feed, checkpoint, recipe)
 is stored in `data/sessions/<id>/`. Use `--continue` to resume the most recent session or
 `--resume <id>` to resume by ID/prefix. On resume, the session recipe is loaded (capturing
 tool config, system prompt, etc. from the last run), and the conversation feed is replayed.
@@ -352,7 +355,8 @@ adapters       ← models, pricing, tools, config, capabilities, provider SDKs
 runner         ← models, pricing, prompt, checkpoint
 diff           ← os, strings, sergi/go-diff
 history        ← models, encoding/json, os
-logging        ← models (ModelAdapter, ModelResponse), stdlib
+uid            ← github.com/google/uuid
+logging        ← models (ModelAdapter, ModelResponse), uid
 preferences    ← models (for ModelResponse latency/ID), encoding/json, os
 recipe         ← config
 tooloutput     ← stdlib only
@@ -360,12 +364,12 @@ criteria       ← models
 sandbox        ← stdlib only (context)
 hooks          ← stdlib only
 reminders      ← stdlib only
-headless       ← models, tools, prompt, recipe, runner, adapters, config, criteria, output, sandbox, subagent, checkpoint
-output         ← models, recipe, criteria
-session        ← stdlib only (crypto/rand, encoding/json, os, path/filepath)
+headless       ← models, tools, prompt, recipe, runner, adapters, config, criteria, output, sandbox, subagent, checkpoint, uid
+output         ← models, recipe, criteria, uid
+session        ← uid, encoding/json, os, path/filepath
 subagent       ← models, config, tools
 ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, commands, prompthistory, checkpoint, recipe, output, sandbox, subagent, session, bubbletea, lipgloss
-cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, recipe, session
+cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, recipe, session, uid
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -576,7 +580,7 @@ The prefix is stripped before the API call; it remains in the display name.
   "models": ["claude-sonnet-4-6", "gpt-4o"],
   "selected": "claude-sonnet-4-6",
   "latencies_ms": {"claude-sonnet-4-6": 891, "gpt-4o": 1243},
-  "session_id": "hex-encoded-random-16-bytes"
+  "session_id": "ses_019505e2-c38a-7b1e-8b3c-4d5e6f7a8b9c"
 }
 ```
 

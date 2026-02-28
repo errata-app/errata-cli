@@ -235,10 +235,20 @@ func TestLoggingAdapter_Capabilities(t *testing.T) {
 	assert.Equal(t, models.ModelCapabilities{}, caps)
 }
 
-// TestRandomHex_Length verifies that RandomHex returns the expected length string.
-func TestRandomHex_Length(t *testing.T) {
-	h := logging.RandomHex(8)
-	assert.Len(t, h, 16, "8 bytes → 16 hex chars")
+// TestRunID_Format verifies that logged RunIDs use the run_ UUID v7 format.
+func TestRunID_Format(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.jsonl")
+	l, err := logging.NewLogger(path)
+	require.NoError(t, err)
+
+	inner := &stubAdapter{id: "m", response: models.ModelResponse{ModelID: "m"}}
+	wrapped := logging.Wrap(inner, "s", l)
+	_, err = wrapped.RunAgent(context.Background(), nil, "p", func(models.AgentEvent) {})
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+
+	entry := readEntry(t, path)
+	assert.Regexp(t, `^run_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`, entry.RunID)
 }
 
 // TestWrap_AppendsTwoEntries verifies that successive runs append new JSONL
