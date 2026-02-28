@@ -52,6 +52,8 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 		return a.handleCompactCmd()
 	case "/resume":
 		return a.handleResumeCmd()
+	case "/rewind":
+		return a.handleRewindCmd()
 	case "/stats":
 		return a.handleStatsCmd()
 	case "/help":
@@ -100,6 +102,7 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
+	a.rewindStack = nil
 	a.feedVP.Width = a.width
 	a.feedVP.Height = a.feedVPHeight()
 	a.feedVP.SetContent("")
@@ -108,6 +111,7 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 
 func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
+	a.rewindStack = nil
 	a.conversationHistories = nil
 	if err := history.Clear(a.histPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
@@ -424,6 +428,56 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 		log.Printf("warning: failed to clear checkpoint: %v", err)
 	}
 	return a.launchResumeRun(cp.Prompt, rerunAdapters, completedResponses, cp.Verbose)
+}
+
+func (a App) handleRewindCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if len(a.rewindStack) == 0 {
+		return a.withMessage("Nothing to rewind."), nil
+	}
+
+	// Pop entry.
+	entry := a.rewindStack[len(a.rewindStack)-1]
+	a.rewindStack = a.rewindStack[:len(a.rewindStack)-1]
+
+	// Restore files.
+	var fileMsg string
+	if len(entry.fileSnapshots) > 0 {
+		if err := tools.RestoreSnapshots(entry.fileSnapshots); err != nil {
+			log.Printf("warning: rewind file restore error: %v", err)
+			fileMsg = fmt.Sprintf(" (file restore warning: %v)", err)
+		}
+	}
+
+	// Truncate conversation histories to pre-run lengths.
+	for adapterID, prevLen := range entry.historyLengths {
+		h := a.conversationHistories[adapterID]
+		if prevLen < len(h) {
+			a.conversationHistories[adapterID] = h[:prevLen]
+		}
+		if len(a.conversationHistories[adapterID]) == 0 {
+			delete(a.conversationHistories, adapterID)
+		}
+	}
+	if err := history.Save(a.histPath, a.conversationHistories); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
+	}
+
+	// Record rewind marker in preferences.
+	if err := preferences.RecordRewind(a.prefPath, entry.prompt, a.sessionID); err != nil {
+		log.Printf("warning: failed to record rewind preference: %v", err)
+	}
+
+	// Annotate feed item.
+	if entry.feedIndex >= 0 && entry.feedIndex < len(a.feed) {
+		item := &a.feed[entry.feedIndex]
+		if item.note != "" {
+			item.note = "[rewound] " + item.note
+		} else {
+			item.note = "[rewound]"
+		}
+	}
+
+	return a.withMessage("Rewound last run." + fileMsg), nil
 }
 
 func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver

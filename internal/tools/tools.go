@@ -672,6 +672,66 @@ func ExecuteEditFile(path, oldString, newString string) (string, string) {
 	}
 }
 
+// FileSnapshot captures the on-disk state of a file before a write operation.
+// Used by /rewind to restore files to their previous state.
+type FileSnapshot struct {
+	Path        string // absolute path
+	Content     string // original content (empty for new files)
+	DidNotExist bool   // true = file was created by write; rewind should delete it
+}
+
+// SnapshotFiles reads the current on-disk content for each path in writes.
+// Files that don't exist get DidNotExist: true. Paths are validated against
+// the current working directory.
+func SnapshotFiles(writes []FileWrite) ([]FileSnapshot, error) {
+	var snaps []FileSnapshot
+	for _, fw := range writes {
+		abs, _, errMsg := validatePath(fw.Path)
+		if errMsg != "" {
+			return nil, fmt.Errorf("%s", errMsg)
+		}
+		data, err := os.ReadFile(abs)
+		if os.IsNotExist(err) {
+			snaps = append(snaps, FileSnapshot{Path: abs, DidNotExist: true})
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read %q: %w", fw.Path, err)
+		}
+		snaps = append(snaps, FileSnapshot{Path: abs, Content: string(data)})
+	}
+	return snaps, nil
+}
+
+// RestoreSnapshots restores files to their snapshotted state.
+// DidNotExist entries are removed. Best-effort: continues on individual errors
+// and returns the first error encountered.
+func RestoreSnapshots(snaps []FileSnapshot) error {
+	var firstErr error
+	for _, s := range snaps {
+		if s.DidNotExist {
+			if err := os.Remove(s.Path); err != nil && !os.IsNotExist(err) {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("remove %q: %w", s.Path, err)
+				}
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(s.Path), 0o750); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("mkdir for %q: %w", s.Path, err)
+			}
+			continue
+		}
+		if err := os.WriteFile(s.Path, []byte(s.Content), 0o600); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("write %q: %w", s.Path, err)
+			}
+		}
+	}
+	return firstErr
+}
+
 // ApplyWrites writes each FileWrite to disk, creating parent directories as needed.
 // All paths are validated against the current working directory; writes that
 // would escape it via ".." sequences are rejected with an error.

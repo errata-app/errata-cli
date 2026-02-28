@@ -982,3 +982,256 @@ func TestSelectionMenu_UsesComparisonWording(t *testing.T) {
 	assert.Contains(t, menu, "Vote for a response:")
 	assert.NotContains(t, menu, "Rate")
 }
+
+// ── Group: /rewind ──────────────────────────────────────────────────────────
+
+func TestRewind_EmptyStack(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, cmd := a.handleRewindCmd()
+	a = appFrom(t, result)
+	assert.Nil(t, cmd)
+	// Should show "Nothing to rewind." in the feed.
+	found := false
+	for _, item := range a.feed {
+		if item.kind == "message" && item.text == "Nothing to rewind." {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected 'Nothing to rewind.' in feed")
+}
+
+func TestRewind_RevertsConversationHistory(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a, "question", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+
+	// History should have 2 turns (user + assistant).
+	require.Len(t, a.conversationHistories["m1"], 2)
+	require.Len(t, a.rewindStack, 1)
+
+	// Rewind.
+	result, _ = a.handleRewindCmd()
+	a = appFrom(t, result)
+
+	// History should be empty.
+	assert.Empty(t, a.conversationHistories["m1"])
+	assert.Empty(t, a.rewindStack)
+}
+
+func TestRewind_AnnotatesFeedItem(t *testing.T) {
+	tmpDir := cwdTempDir(t)
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a, "prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{
+			ModelID:   "m1",
+			Text:      "done",
+			LatencyMS: 100,
+			ProposedWrites: []tools.FileWrite{
+				{Path: filepath.Join(tmpDir, "f.go"), Content: "package f"},
+			},
+		},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	assert.Equal(t, modeSelecting, a.mode)
+
+	// Select response 1.
+	result, _ = a.handleSelectKey(keyRunes("1"))
+	a = appFrom(t, result)
+	result, _ = a.handleSelectKey(keyType(tea.KeyEnter))
+	a = appFrom(t, result)
+	assert.Contains(t, lastFeedNote(&a), "Applied:")
+
+	// Rewind.
+	result, _ = a.handleRewindCmd()
+	a = appFrom(t, result)
+
+	// The run feed item should be annotated.
+	var runNote string
+	for _, item := range a.feed {
+		if item.kind == "run" {
+			runNote = item.note
+		}
+	}
+	assert.Contains(t, runNote, "[rewound]")
+	assert.Contains(t, runNote, "Applied:")
+}
+
+func TestRewind_RestoresFiles(t *testing.T) {
+	tmpDir := cwdTempDir(t)
+	origPath := filepath.Join(tmpDir, "existing.go")
+	require.NoError(t, os.WriteFile(origPath, []byte("original"), 0o644))
+
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a, "prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{
+			ModelID:   "m1",
+			Text:      "done",
+			LatencyMS: 100,
+			ProposedWrites: []tools.FileWrite{
+				{Path: origPath, Content: "changed"},
+			},
+		},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+
+	// Apply writes.
+	result, _ = a.handleSelectKey(keyRunes("1"))
+	a = appFrom(t, result)
+	result, _ = a.handleSelectKey(keyType(tea.KeyEnter))
+	a = appFrom(t, result)
+
+	// Verify file was written.
+	got, _ := os.ReadFile(origPath)
+	assert.Equal(t, "changed", string(got))
+
+	// Rewind.
+	result, _ = a.handleRewindCmd()
+	a = appFrom(t, result)
+
+	// File should be restored.
+	got, err := os.ReadFile(origPath)
+	require.NoError(t, err)
+	assert.Equal(t, "original", string(got))
+}
+
+func TestRewind_DeletesNewlyCreatedFiles(t *testing.T) {
+	tmpDir := cwdTempDir(t)
+	newPath := filepath.Join(tmpDir, "new.go")
+
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a, "prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{
+			ModelID:   "m1",
+			Text:      "done",
+			LatencyMS: 100,
+			ProposedWrites: []tools.FileWrite{
+				{Path: newPath, Content: "package new"},
+			},
+		},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+
+	result, _ = a.handleSelectKey(keyRunes("1"))
+	a = appFrom(t, result)
+	result, _ = a.handleSelectKey(keyType(tea.KeyEnter))
+	a = appFrom(t, result)
+
+	// Verify file was created.
+	_, statErr := os.Stat(newPath)
+	require.NoError(t, statErr)
+
+	// Rewind.
+	result, _ = a.handleRewindCmd()
+	a = appFrom(t, result)
+
+	// File should be gone.
+	_, statErr = os.Stat(newPath)
+	assert.True(t, os.IsNotExist(statErr), "newly created file should be removed on rewind")
+}
+
+func TestRewind_MultipleRewinds(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+
+	// First run.
+	setupRunState(&a, "prompt1", []string{"m1"})
+	msg1 := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer1", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg1)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+
+	// Second run.
+	setupRunState(&a, "prompt2", []string{"m1"})
+	msg2 := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer2", LatencyMS: 200},
+	}}
+	result, _ = a.Update(msg2)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+
+	require.Len(t, a.conversationHistories["m1"], 4) // 2 turns per run
+	require.Len(t, a.rewindStack, 2)
+
+	// First rewind — removes second run.
+	result, _ = a.handleRewindCmd()
+	a = appFrom(t, result)
+	assert.Len(t, a.conversationHistories["m1"], 2)
+	assert.Len(t, a.rewindStack, 1)
+
+	// Second rewind — removes first run.
+	result, _ = a.handleRewindCmd()
+	a = appFrom(t, result)
+	assert.Empty(t, a.conversationHistories["m1"])
+	assert.Empty(t, a.rewindStack)
+}
+
+func TestRewind_TextOnlyRun(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a, "question", []string{"m1"})
+
+	// Single text-only response (no writes).
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "just text", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	// Goes to modeRating; skip it.
+	result, _ = a.handleRatingKey(keyRunes("s"))
+	a = appFrom(t, result)
+
+	require.Len(t, a.conversationHistories["m1"], 2)
+	require.Len(t, a.rewindStack, 1)
+
+	// Rewind — no files, just history.
+	result, _ = a.handleRewindCmd()
+	a = appFrom(t, result)
+	assert.Empty(t, a.conversationHistories["m1"])
+	assert.Empty(t, a.rewindStack)
+}
+
+func TestRewind_ClearClearsStack(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a, "question", []string{"m1"})
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	require.Len(t, a.rewindStack, 1)
+
+	result, _ = a.handleClearCmd()
+	a = appFrom(t, result)
+	assert.Nil(t, a.rewindStack)
+}
+
+func TestRewind_WipeClearsStack(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a, "question", []string{"m1"})
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	require.Len(t, a.rewindStack, 1)
+
+	result, _ = a.handleWipeCmd()
+	a = appFrom(t, result)
+	assert.Nil(t, a.rewindStack)
+}
