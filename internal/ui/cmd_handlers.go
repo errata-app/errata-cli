@@ -104,6 +104,8 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
 	a.rewindStack = nil
+	a.pastedText = ""
+	a.pastedLineCount = 0
 	a.feedVP.Width = a.width
 	a.feedVP.Height = a.feedVPHeight()
 	a.feedVP.SetContent("")
@@ -113,6 +115,8 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
 	a.rewindStack = nil
+	a.pastedText = ""
+	a.pastedLineCount = 0
 	a.conversationHistories = nil
 	if err := history.Clear(a.histPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)

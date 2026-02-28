@@ -53,7 +53,20 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		if msg.Alt {
 			break
 		}
-		prompt := strings.TrimSpace(a.input.Value())
+		typed := strings.TrimSpace(a.input.Value())
+		var prompt string
+		if a.pastedText != "" {
+			if typed != "" {
+				prompt = typed + "\n" + a.pastedText
+			} else {
+				prompt = a.pastedText
+			}
+			prompt = strings.TrimSpace(prompt)
+			a.pastedText = ""
+			a.pastedLineCount = 0
+		} else {
+			prompt = typed
+		}
 		a.input.Reset()
 		a.historyIdx = -1
 		a.historyInputBuf = ""
@@ -87,6 +100,24 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 			a.input.CursorEnd()
 			return a, nil
 		}
+	}
+
+	// Detect multi-line paste — show a compact badge instead of flooding the textarea.
+	if msg.Type == tea.KeyRunes && msg.Paste {
+		text := string(msg.Runes)
+		lineCount := strings.Count(text, "\n") + 1
+		if lineCount >= 3 {
+			a.pastedText = text
+			a.pastedLineCount = lineCount
+			return a, nil
+		}
+	}
+
+	// Backspace clears pasted text when textarea is empty.
+	if msg.Type == tea.KeyBackspace && a.pastedText != "" && a.input.Value() == "" {
+		a.pastedText = ""
+		a.pastedLineCount = 0
+		return a, nil
 	}
 
 	// For any other key: if currently navigating history, exit navigation

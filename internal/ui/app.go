@@ -143,6 +143,10 @@ type App struct {
 	searchQuery     string
 	searchResultIdx int
 
+	// multi-line paste badge (like Claude Code's "[pasted N lines]")
+	pastedText      string // full text from a bracketed paste
+	pastedLineCount int    // line count for badge display
+
 	// cumulative cost across all runs this session
 	totalCostUSD        float64
 	sessionCostPerModel map[string]float64 // per-model cumulative cost this session
@@ -635,6 +639,15 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 			searchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AFAF"))
 			sb.WriteString(searchStyle.Render(
 				fmt.Sprintf("  (reverse-i-search: %q): %s", query, preview)))
+			sb.WriteByte('\n')
+		}
+		if a.pastedText != "" {
+			pasteStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#888888")).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#555555")).
+				Padding(0, 1)
+			sb.WriteString(pasteStyle.Render(fmt.Sprintf("pasted %d lines", a.pastedLineCount)))
 			sb.WriteByte('\n')
 		}
 		sb.WriteString(a.input.View())

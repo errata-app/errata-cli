@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/config"
@@ -305,4 +306,122 @@ func TestHandlePrompt_MentionDoesNotChangeActiveAdapters(t *testing.T) {
 	// activeAdapters should still be the original subset (m2), not changed by @mention.
 	require.Len(t, app.activeAdapters, 1)
 	assert.Equal(t, "m2", app.activeAdapters[0].ID())
+}
+
+// ─── paste badge ─────────────────────────────────────────────────────────────
+
+func pasteMsg(text string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text), Paste: true}
+}
+
+func TestPaste_MultiLineStoresBadge(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, cmd := a.handleIdleKey(pasteMsg("line1\nline2\nline3"))
+	assert.Nil(t, cmd)
+	app := result.(App)
+	assert.Equal(t, "line1\nline2\nline3", app.pastedText)
+	assert.Equal(t, 3, app.pastedLineCount)
+}
+
+func TestPaste_TwoLinesPassesToTextarea(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, _ := a.handleIdleKey(pasteMsg("line1\nline2"))
+	app := result.(App)
+	// 2-line paste should NOT be intercepted — goes to textarea.
+	assert.Empty(t, app.pastedText)
+	assert.Equal(t, 0, app.pastedLineCount)
+}
+
+func TestPaste_EnterSubmitsPastedText(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	result, _ := a.handleIdleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	app := result.(App)
+	// Paste state should be cleared after submit.
+	assert.Empty(t, app.pastedText)
+	assert.Equal(t, 0, app.pastedLineCount)
+}
+
+func TestPaste_EnterCombinesTypedAndPasted(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("fix this:")
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	result, _ := a.handleIdleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	app := result.(App)
+	// After submission, paste state should be cleared.
+	assert.Empty(t, app.pastedText)
+	// The prompt should have been combined (typed + pasted).
+	// We can't check the actual prompt value since handlePrompt dispatches,
+	// but we verify the state was reset correctly.
+	assert.Empty(t, app.input.Value())
+}
+
+func TestPaste_BackspaceClearsPasteWhenEmpty(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	result, cmd := a.handleIdleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	assert.Nil(t, cmd)
+	app := result.(App)
+	assert.Empty(t, app.pastedText)
+	assert.Equal(t, 0, app.pastedLineCount)
+}
+
+func TestPaste_BackspaceDoesNotClearWhenTextareaHasContent(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("some text")
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	result, _ := a.handleIdleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	app := result.(App)
+	// Paste should NOT be cleared because textarea has content.
+	assert.Equal(t, "line1\nline2\nline3", app.pastedText)
+}
+
+func TestPaste_BadgeShownInView(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.pastedText = "a\nb\nc\nd\ne"
+	a.pastedLineCount = 5
+
+	view := a.View()
+	assert.Contains(t, view, "pasted 5 lines")
+}
+
+func TestPaste_BadgeNotShownWhenNoPaste(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+
+	view := a.View()
+	assert.NotContains(t, view, "pasted")
+}
+
+func TestPaste_ClearCmdResetsPaste(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	result, _ := a.handleClearCmd()
+	app := result.(App)
+	assert.Empty(t, app.pastedText)
+	assert.Equal(t, 0, app.pastedLineCount)
+}
+
+func TestPaste_WipeCmdResetsPaste(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	result, _ := a.handleWipeCmd()
+	app := result.(App)
+	assert.Empty(t, app.pastedText)
+	assert.Equal(t, 0, app.pastedLineCount)
 }
