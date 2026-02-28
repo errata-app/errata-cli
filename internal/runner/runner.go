@@ -60,7 +60,7 @@ func RunAll(
 	ctx      context.Context,
 	adapters []models.ModelAdapter,
 	histories map[string][]models.ConversationTurn,
-	prompt   string,
+	userPrompt string,
 	onEvent  func(modelID string, event models.AgentEvent),
 	verbose  bool,
 ) []models.ModelResponse {
@@ -75,7 +75,7 @@ func RunAll(
 		for i, a := range adapters {
 			adapterIDs[i] = a.ID()
 		}
-		saver = checkpoint.NewIncrementalSaver(opts.CheckpointPath, prompt, adapterIDs, verbose)
+		saver = checkpoint.NewIncrementalSaver(opts.CheckpointPath, userPrompt, adapterIDs, verbose)
 	}
 
 	for i, a := range adapters {
@@ -103,7 +103,7 @@ func RunAll(
 
 			start := time.Now()
 			h := TrimHistory(histories[a.ID()], opts.MaxHistoryTurns)
-			resp, err := a.RunAgent(tctx, h, prompt, filtered)
+			resp, err := a.RunAgent(tctx, h, userPrompt, filtered)
 			resp.ModelID = a.ID() // enforce: ModelID always matches the configured adapter ID
 
 			if err != nil {
@@ -151,7 +151,7 @@ func AppendHistory(
 	histories  map[string][]models.ConversationTurn,
 	adapterIDs []string,
 	responses  []models.ModelResponse,
-	prompt     string,
+	userPrompt string,
 ) map[string][]models.ConversationTurn {
 	for i, resp := range responses {
 		if i >= len(adapterIDs) {
@@ -165,7 +165,7 @@ func AppendHistory(
 		}
 		id := adapterIDs[i]
 		histories[id] = append(histories[id],
-			models.ConversationTurn{Role: "user", Content: prompt},
+			models.ConversationTurn{Role: "user", Content: userPrompt},
 			models.ConversationTurn{Role: "assistant", Content: resp.Text},
 		)
 	}

@@ -12,6 +12,45 @@ This is a Go-primary project. Default to Go idioms, conventions, and tooling (`g
 
 ---
 
+## Build & Test Workflow
+
+After implementing changes, always run `go build ./...`, `go vet ./...`, and `go test ./...`
+before committing. Fix any issues before proceeding.
+
+---
+
+## Git Workflow
+
+- When working with git branches: always check current branch with `git branch` before creating
+  new branches or committing. Never create a feature branch if commits are already on main without
+  first confirming the user's branching strategy.
+- When the user asks to commit and push, verify `gh` CLI availability before attempting to create
+  PRs. If unavailable, provide the manual GitHub PR URL instead of failing.
+
+---
+
+## Go Conventions
+
+- Use `context.Background()` (not `context.TODO()`) for top-level contexts.
+- Avoid naming variables that shadow package imports (e.g., don't name a variable `prompt` when
+  importing a `prompt` package).
+
+---
+
+## General Rules
+
+- Do not add documentation or configuration for features that are disabled at compile time or
+  behind feature flags that are turned off. Check feature gating before suggesting additions.
+
+---
+
+## Tool Usage Notes
+
+- The Edit tool may fail on tab-indented Go files. If an edit fails to match, fall back to `sed`
+  via Bash rather than retrying the same edit.
+
+---
+
 ## Stack
 
 - **Language:** Go 1.23+

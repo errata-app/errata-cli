@@ -18,7 +18,7 @@ import (
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/recipe"
-	promptpkg "github.com/suarezc/errata/internal/prompt"
+	"github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
@@ -26,8 +26,8 @@ import (
 	"github.com/suarezc/errata/internal/tools"
 )
 
-func (a App) handlePrompt(prompt string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
-	trimmed := strings.TrimSpace(prompt)
+func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	trimmed := strings.TrimSpace(userPrompt)
 	lower := strings.ToLower(trimmed)
 
 	if lower == "/config" || strings.HasPrefix(lower, "/config ") {
@@ -134,7 +134,7 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 		compactSumPrompt = compactRecipe.SummarizationPrompt
 	}
 	return a.withMessage("Compacting conversation history…"), func() tea.Msg {
-		ctx := promptpkg.WithSummarizationPrompt(context.Background(), compactSumPrompt)
+		ctx := prompt.WithSummarizationPrompt(context.Background(), compactSumPrompt)
 		updated := runner.CompactHistories(
 			ctx, toCompact, histories,
 			func(modelID string, e models.AgentEvent) {
@@ -297,7 +297,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		var compacted map[string][]models.ConversationTurn
 		// Skip auto-compact when context strategy is "manual" or "off".
 		if contextStrategy != "manual" && contextStrategy != "off" {
-			compactCtx := promptpkg.WithSummarizationPrompt(baseCtx, sumPrompt)
+			compactCtx := prompt.WithSummarizationPrompt(baseCtx, sumPrompt)
 			for _, ad := range ads {
 				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
@@ -426,8 +426,8 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 	return a.launchResumeRun(cp.Prompt, rerunAdapters, completedResponses, cp.Verbose)
 }
 
-func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	a.lastPrompt = prompt
+func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	a.lastPrompt = userPrompt
 	a.mode = modeRunning
 	a.panels = nil
 	a.panelIdx = make(map[string]int)
@@ -454,7 +454,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 
 	a.feed = append(a.feed, feedItem{
 		kind:   "run",
-		prompt: "[resume] " + prompt,
+		prompt: "[resume] " + userPrompt,
 		panels: a.panels,
 	})
 	a = a.withFeedRebuilt(true)
@@ -504,7 +504,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		if contextStrategy != "manual" && contextStrategy != "off" {
-			compactCtx := promptpkg.WithSummarizationPrompt(baseCtx, resumeSumPrompt)
+			compactCtx := prompt.WithSummarizationPrompt(baseCtx, resumeSumPrompt)
 			for _, ad := range ads {
 				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
@@ -548,7 +548,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 		}
 		collector := output.NewCollector()
 		responses := runner.RunAll(
-			runCtx, ads, effectiveHistories, prompt,
+			runCtx, ads, effectiveHistories, userPrompt,
 			collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
 			}),
@@ -563,7 +563,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 			for i, r := range allResp {
 				allIDs[i] = r.ModelID
 			}
-			if cp := checkpoint.Build(prompt, allIDs, allResp, verbose); cp != nil {
+			if cp := checkpoint.Build(userPrompt, allIDs, allResp, verbose); cp != nil {
 				if err := checkpoint.Save(checkpoint.DefaultPath, *cp); err != nil {
 					log.Printf("warning: failed to save checkpoint: %v", err)
 				}
@@ -577,7 +577,7 @@ func (a App) launchResumeRun(prompt string, rerunAdapters []models.ModelAdapter,
 		for i, d := range activeDefs {
 			toolNames[i] = d.Name
 		}
-		report := output.BuildReport(sessionID, rec, prompt, allResponses, collector, toolNames)
+		report := output.BuildReport(sessionID, rec, userPrompt, allResponses, collector, toolNames)
 		if _, err := output.Save(output.DefaultDir, report); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
 		}
