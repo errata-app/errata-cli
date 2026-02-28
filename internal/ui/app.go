@@ -69,6 +69,16 @@ type feedItem struct {
 	note      string                 // outcome: "Applied: foo.go" / "Skipped." / error
 }
 
+// ---- rewind ----
+
+// rewindEntry captures enough state to undo one run.
+type rewindEntry struct {
+	fileSnapshots  []tools.FileSnapshot // nil if no writes were applied
+	historyLengths map[string]int       // per-adapter history len BEFORE AppendHistory
+	feedIndex      int                  // index into a.feed for annotation
+	prompt         string               // original prompt (for RecordRewind)
+}
+
 // ---- model ----
 
 // App is the bubbletea model.
@@ -149,6 +159,9 @@ type App struct {
 	// lastReport is the most recent output report; used by selection/rating
 	// handlers to call RecordSelection after the user picks a winner.
 	lastReport *output.Report
+
+	// rewind stack — each entry captures state for one undo step
+	rewindStack []rewindEntry
 
 	// config overlay state
 	configOverlayActive bool
@@ -395,6 +408,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactCompleteMsg:
 		a.conversationHistories = msg.histories
+		a.rewindStack = nil // compaction invalidates stored history lengths
 		if err := history.Save(a.histPath, a.conversationHistories); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
 		}
@@ -436,10 +450,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.compactedHistories != nil {
 			a.conversationHistories = msg.compactedHistories
 		}
+
+		// Capture pre-history lengths for rewind before AppendHistory mutates them.
+		preHistLengths := make(map[string]int, len(panelIDs))
+		for _, id := range panelIDs {
+			preHistLengths[id] = len(a.conversationHistories[id])
+		}
+
 		a.conversationHistories = runner.AppendHistory(a.conversationHistories, panelIDs, msg.responses, a.lastPrompt)
 		if err := history.Save(a.histPath, a.conversationHistories); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
 		}
+
+		// Push rewind entry (fileSnapshots populated later by applySelection if writes happen).
+		a.rewindStack = append(a.rewindStack, rewindEntry{
+			historyLengths: preHistLengths,
+			feedIndex:      len(a.feed) - 1,
+			prompt:         a.lastPrompt,
+		})
 
 		// Sort by latency ascending (fastest first) for display. Must happen after
 		// panel-stat assignment and AppendHistory, which rely on the original index order.

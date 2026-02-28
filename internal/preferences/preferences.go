@@ -17,6 +17,7 @@ import (
 // Entry is one recorded preference decision.
 type Entry struct {
 	TS            string             `json:"ts"`
+	Type          string             `json:"type,omitempty"` // "" for normal entries, "rewind" for rewind markers
 	PromptHash    string             `json:"prompt_hash"`
 	PromptPreview string             `json:"prompt_preview"`
 	Models        []string           `json:"models"`
@@ -92,6 +93,75 @@ func recordEntry(path, prompt, selected, rating, sessionID string, responses []m
 	return err
 }
 
+// RecordRewind appends a rewind marker entry to the JSONL log.
+// The marker matches the most recent normal entry with the same prompt_hash and session_id
+// so that Summarize/SummarizeDetailed can exclude the rewound preference.
+func RecordRewind(path, prompt, sessionID string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
+	hash := sha256.Sum256([]byte(prompt))
+
+	entry := Entry{
+		TS:         time.Now().UTC().Format(time.RFC3339),
+		Type:       "rewind",
+		PromptHash: fmt.Sprintf("sha256:%x", hash),
+		SessionID:  sessionID,
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+	defer f.Close()
+
+	_, err = fmt.Fprintln(f, string(data))
+	return err
+}
+
+// filterRewound removes normal entries that have been rewound.
+// Each "rewind" entry increments a skip counter for its (prompt_hash, session_id) key;
+// processing newest-to-oldest, each normal entry with an active skip counter is excluded.
+func filterRewound(entries []Entry) []Entry {
+	type key struct{ hash, session string }
+	skipCount := map[key]int{}
+
+	// Walk newest-to-oldest to count rewind markers.
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Type == "rewind" {
+			skipCount[key{e.PromptHash, e.SessionID}]++
+		}
+	}
+
+	// Walk newest-to-oldest to filter.
+	result := make([]Entry, 0, len(entries))
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Type == "rewind" {
+			continue
+		}
+		k := key{e.PromptHash, e.SessionID}
+		if skipCount[k] > 0 {
+			skipCount[k]--
+			continue
+		}
+		result = append(result, e)
+	}
+
+	// Reverse to restore chronological order.
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	return result
+}
+
 // LoadAll reads all valid entries from the JSONL log.
 // Corrupt lines are skipped with a log warning.
 func LoadAll(path string) []Entry {
@@ -116,9 +186,10 @@ func LoadAll(path string) []Entry {
 }
 
 // Summarize returns a model_id → win_count tally.
+// Rewound entries are excluded from the tally.
 func Summarize(path string) map[string]int {
 	tally := map[string]int{}
-	for _, e := range LoadAll(path) {
+	for _, e := range filterRewound(LoadAll(path)) {
 		if e.Selected != "" {
 			tally[e.Selected]++
 		}
@@ -140,7 +211,8 @@ type ModelStats struct {
 }
 
 // SummarizeDetailed computes per-model analytics from all preference entries.
-// Entries recorded before cost tracking was added have zero cost contribution.
+// Rewound entries are excluded. Entries recorded before cost tracking was added
+// have zero cost contribution.
 func SummarizeDetailed(path string) map[string]ModelStats {
 	type accumulator struct {
 		wins           int
@@ -152,7 +224,7 @@ func SummarizeDetailed(path string) map[string]ModelStats {
 	}
 
 	acc := map[string]*accumulator{}
-	for _, e := range LoadAll(path) {
+	for _, e := range filterRewound(LoadAll(path)) {
 		for _, m := range e.Models {
 			if _, ok := acc[m]; !ok {
 				acc[m] = &accumulator{}

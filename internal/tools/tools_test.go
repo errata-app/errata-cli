@@ -1177,3 +1177,99 @@ func TestSystemPromptGuidance_ReflectsOverride(t *testing.T) {
 	assert.Contains(t, g, "Overridden guidance.")
 	assert.NotContains(t, g, "list_directory")
 }
+
+// ─── SnapshotFiles / RestoreSnapshots ────────────────────────────────────────
+
+func TestSnapshotFiles_ExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("original"), 0o644))
+
+	snaps, err := tools.SnapshotFiles([]tools.FileWrite{{Path: "a.txt", Content: "new"}})
+	require.NoError(t, err)
+	require.Len(t, snaps, 1)
+	assert.Equal(t, "original", snaps[0].Content)
+	assert.False(t, snaps[0].DidNotExist)
+}
+
+func TestSnapshotFiles_NonexistentFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	snaps, err := tools.SnapshotFiles([]tools.FileWrite{{Path: "new.txt", Content: "content"}})
+	require.NoError(t, err)
+	require.Len(t, snaps, 1)
+	assert.True(t, snaps[0].DidNotExist)
+}
+
+func TestRestoreSnapshots_OverwriteFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "f.txt")
+	require.NoError(t, os.WriteFile(path, []byte("original"), 0o644))
+
+	// Overwrite.
+	require.NoError(t, os.WriteFile(path, []byte("changed"), 0o644))
+
+	err := tools.RestoreSnapshots([]tools.FileSnapshot{{Path: path, Content: "original"}})
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "original", string(got))
+}
+
+func TestRestoreSnapshots_DeleteNewFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "created.txt")
+	require.NoError(t, os.WriteFile(path, []byte("new"), 0o644))
+
+	err := tools.RestoreSnapshots([]tools.FileSnapshot{{Path: path, DidNotExist: true}})
+	require.NoError(t, err)
+
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr), "file should be removed")
+}
+
+func TestSnapshotRestoreRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a"), 0o644))
+
+	writes := []tools.FileWrite{
+		{Path: "a.go", Content: "package a_new"},
+		{Path: "b.go", Content: "package b"},
+	}
+
+	snaps, err := tools.SnapshotFiles(writes)
+	require.NoError(t, err)
+	require.NoError(t, tools.ApplyWrites(writes))
+
+	// Verify writes took effect.
+	got, _ := os.ReadFile(filepath.Join(dir, "a.go"))
+	assert.Equal(t, "package a_new", string(got))
+	got, _ = os.ReadFile(filepath.Join(dir, "b.go"))
+	assert.Equal(t, "package b", string(got))
+
+	// Restore.
+	require.NoError(t, tools.RestoreSnapshots(snaps))
+
+	// a.go should be original.
+	got, err = os.ReadFile(filepath.Join(dir, "a.go"))
+	require.NoError(t, err)
+	assert.Equal(t, "package a", string(got))
+
+	// b.go should be gone.
+	_, statErr := os.Stat(filepath.Join(dir, "b.go"))
+	assert.True(t, os.IsNotExist(statErr), "b.go should be removed on restore")
+}
+
+func TestSnapshotFiles_PathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	_, err := tools.SnapshotFiles([]tools.FileWrite{{Path: "../../etc/passwd", Content: "x"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside the working directory")
+}

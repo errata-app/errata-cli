@@ -163,6 +163,12 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 	if len(selected.ProposedWrites) == 0 {
 		setNote(fmt.Sprintf("Voted for: %s", selected.ModelID))
 	} else {
+		// Snapshot files before overwriting for /rewind support.
+		snaps, snapErr := tools.SnapshotFiles(selected.ProposedWrites)
+		if snapErr != nil {
+			log.Printf("warning: could not snapshot files for rewind: %v", snapErr)
+		}
+
 		if err := tools.ApplyWrites(selected.ProposedWrites); err != nil {
 			setNote(fmt.Sprintf("Error applying writes: %v", err))
 		} else {
@@ -171,6 +177,11 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 				paths = append(paths, fw.Path)
 			}
 			setNote(fmt.Sprintf("Applied: %s", strings.Join(paths, ", ")))
+
+			// Store snapshots on the top rewind entry.
+			if len(a.rewindStack) > 0 && snaps != nil {
+				a.rewindStack[len(a.rewindStack)-1].fileSnapshots = snaps
+			}
 		}
 	}
 

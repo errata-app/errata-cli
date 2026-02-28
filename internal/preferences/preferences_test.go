@@ -356,3 +356,80 @@ func TestRecord_StoresCostUSD(t *testing.T) {
 	_, hasB := entries[0].CostsUSD["b"]
 	assert.False(t, hasB, "zero-cost model should not be stored in CostsUSD")
 }
+
+// ─── RecordRewind & filterRewound ────────────────────────────────────────────
+
+func TestRecordRewind_AppendsMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	require.NoError(t, preferences.RecordRewind(path, "test prompt", "s1"))
+
+	entries := preferences.LoadAll(path)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "rewind", entries[0].Type)
+	assert.Contains(t, entries[0].PromptHash, "sha256:")
+	assert.Equal(t, "s1", entries[0].SessionID)
+	assert.Empty(t, entries[0].Models)
+	assert.Empty(t, entries[0].Selected)
+}
+
+func TestFilterRewound_SingleRewind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}
+	require.NoError(t, preferences.Record(path, "prompt1", "a", "s1", responses))
+	require.NoError(t, preferences.RecordRewind(path, "prompt1", "s1"))
+
+	// Summarize should exclude the rewound entry.
+	tally := preferences.Summarize(path)
+	assert.Empty(t, tally, "rewound entry should be excluded from tally")
+}
+
+func TestFilterRewound_MultipleRewinds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}
+	// Two normal entries with same prompt, one rewind → only most recent excluded.
+	require.NoError(t, preferences.Record(path, "prompt1", "a", "s1", responses))
+	require.NoError(t, preferences.Record(path, "prompt1", "a", "s1", responses))
+	require.NoError(t, preferences.RecordRewind(path, "prompt1", "s1"))
+
+	tally := preferences.Summarize(path)
+	assert.Equal(t, 1, tally["a"], "only one of two entries should be excluded")
+}
+
+func TestFilterRewound_CrossSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}
+	// Entry in session A.
+	require.NoError(t, preferences.Record(path, "prompt1", "a", "sA", responses))
+	// Rewind in session B with same prompt — should not affect session A.
+	require.NoError(t, preferences.RecordRewind(path, "prompt1", "sB"))
+
+	tally := preferences.Summarize(path)
+	assert.Equal(t, 1, tally["a"], "rewind in different session should not affect other sessions")
+}
+
+func TestSummarize_ExcludesRewound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}
+	// a wins once, then that win is rewound.
+	require.NoError(t, preferences.Record(path, "p1", "a", "s1", responses))
+	require.NoError(t, preferences.RecordRewind(path, "p1", "s1"))
+	// b wins once (not rewound).
+	require.NoError(t, preferences.Record(path, "p2", "b", "s1", []models.ModelResponse{{ModelID: "b", LatencyMS: 100}}))
+
+	tally := preferences.Summarize(path)
+	assert.Equal(t, 0, tally["a"])
+	assert.Equal(t, 1, tally["b"])
+}
+
+func TestSummarizeDetailed_ExcludesRewound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100},
+		{ModelID: "b", LatencyMS: 200},
+	}
+	require.NoError(t, preferences.Record(path, "p1", "a", "s1", responses))
+	require.NoError(t, preferences.RecordRewind(path, "p1", "s1"))
+
+	stats := preferences.SummarizeDetailed(path)
+	assert.Empty(t, stats, "all entries rewound → no stats")
+}
