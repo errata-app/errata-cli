@@ -227,6 +227,9 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath, sessionID)
 	defer cleanup()
 
+	// Fetch available models from all configured providers (best-effort).
+	availableModels := flattenAvailableModels(ads, adapters.ListAvailableModels(context.Background(), cfg))
+
 	// Build initial session metadata.
 	now := time.Now()
 	modelIDs := make([]string, len(ads))
@@ -247,9 +250,29 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming)
+	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming, availableModels)
 	fmt.Fprintf(os.Stderr, "To continue this session: errata --resume %s\n", sessionID)
 	return err
+}
+
+// flattenAvailableModels collects all model IDs from provider listings into a
+// deduplicated sorted slice. Configured adapter IDs are always included.
+func flattenAvailableModels(ads []models.ModelAdapter, providerModels []adapters.ProviderModels) []string {
+	seen := make(map[string]bool)
+	for _, ad := range ads {
+		seen[ad.ID()] = true
+	}
+	for _, pm := range providerModels {
+		for _, id := range pm.Models {
+			seen[id] = true
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for id := range seen {
+		result = append(result, id)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func runHeadless(cmd *cobra.Command, args []string) error {

@@ -99,8 +99,13 @@ func lastWord(s string) string {
 	return words[len(words)-1]
 }
 
-// modelIDCandidates returns the IDs of all configured adapters.
+// modelIDCandidates returns model IDs for @mention autocomplete.
+// When availableModels is populated (full provider catalogues), it is used;
+// otherwise falls back to the configured adapter IDs.
 func (a App) modelIDCandidates() []string { //nolint:gocritic // called from bubbletea value-receiver methods
+	if len(a.availableModels) > 0 {
+		return a.availableModels
+	}
 	ids := make([]string, len(a.adapters))
 	for i, ad := range a.adapters {
 		ids[i] = ad.ID()
