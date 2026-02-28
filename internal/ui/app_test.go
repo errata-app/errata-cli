@@ -323,6 +323,25 @@ func TestPaste_MultiLineStoresBadge(t *testing.T) {
 	assert.Equal(t, 3, app.pastedLineCount)
 }
 
+func TestPaste_MultiLineWithCarriageReturns(t *testing.T) {
+	a := newAppForTest(t, nil)
+	// Terminals send \r instead of \n inside bracket paste.
+	result, cmd := a.handleIdleKey(pasteMsg("line1\rline2\rline3"))
+	assert.Nil(t, cmd)
+	app := result.(App)
+	assert.Equal(t, "line1\nline2\nline3", app.pastedText)
+	assert.Equal(t, 3, app.pastedLineCount)
+}
+
+func TestPaste_MultiLineWithCRLF(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, cmd := a.handleIdleKey(pasteMsg("line1\r\nline2\r\nline3"))
+	assert.Nil(t, cmd)
+	app := result.(App)
+	assert.Equal(t, "line1\nline2\nline3", app.pastedText)
+	assert.Equal(t, 3, app.pastedLineCount)
+}
+
 func TestPaste_TwoLinesPassesToTextarea(t *testing.T) {
 	a := newAppForTest(t, nil)
 	result, _ := a.handleIdleKey(pasteMsg("line1\nline2"))

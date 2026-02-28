@@ -103,8 +103,11 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 	}
 
 	// Detect multi-line paste — show a compact badge instead of flooding the textarea.
+	// Terminals send \r (not \n) for newlines inside bracket paste, so normalise first.
 	if msg.Type == tea.KeyRunes && msg.Paste {
 		text := string(msg.Runes)
+		text = strings.ReplaceAll(text, "\r\n", "\n")
+		text = strings.ReplaceAll(text, "\r", "\n")
 		lineCount := strings.Count(text, "\n") + 1
 		if lineCount >= 3 {
 			a.pastedText = text
