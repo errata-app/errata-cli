@@ -165,6 +165,10 @@ type App struct {
 	// seed for reproducible model sampling; nil = not set
 	seed *int64
 
+	// availableModels is the full list of model IDs available from enabled
+	// providers (fetched at startup). Used by @mention autocomplete.
+	availableModels []string
+
 	// recipe holds the full recipe configuration; used for output reports.
 	recipe *recipe.Recipe
 
@@ -204,7 +208,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta) *App {
+func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, availableModels []string) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -247,6 +251,7 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 		cfg:                   cfg,
 		mcpDefs:               mcpDefs,
 		mcpDispatchers:        mcpDispatchers,
+		availableModels:       availableModels,
 		seed:                  cfg.Seed,
 		checkpointPath:        sp.CheckpointPath,
 		feedPath:              sp.FeedPath,
@@ -287,7 +292,7 @@ func (a *App) SetProgram(p *tea.Program) { a.prog = p }
 
 // feedVPHeight returns the number of lines the feed viewport should occupy.
 func (a *App) feedVPHeight() int {
-	const headerLines = 2 // header text + blank line
+	const headerLines = 3 // header text + pinned models line + blank line
 	const sepLine = 1     // blank line between viewport and footer
 	var footerLines int
 	switch a.mode {
@@ -590,7 +595,10 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	sb.WriteString(headerStyle.Render("  Errata  A/B testing tool for agentic AI models"))
-	sb.WriteString("\n\n")
+	sb.WriteByte('\n')
+	modelLineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	sb.WriteString(modelLineStyle.Render("  " + strings.Join(a.activeModelIDs(), " · ")))
+	sb.WriteByte('\n')
 
 	sb.WriteString(a.feedVP.View())
 	sb.WriteByte('\n')
@@ -643,15 +651,6 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 		if a.recipeModified {
 			modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
 			sb.WriteString(modStyle.Render("  [modified]"))
-			sb.WriteByte('\n')
-		}
-		if a.activeAdapters != nil {
-			subIDs := make([]string, 0, len(a.activeAdapters))
-			for _, ad := range a.activeAdapters {
-				subIDs = append(subIDs, ad.ID())
-			}
-			filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
-			sb.WriteString(filterStyle.Render("  [subset: " + strings.Join(subIDs, ", ") + "]"))
 			sb.WriteByte('\n')
 		}
 		if !a.feedVP.AtBottom() {
@@ -759,8 +758,8 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool) error {
-	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta)
+func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string) error {
+	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels)
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	app.SetProgram(p)
@@ -859,6 +858,19 @@ func (a *App) updateLastFeedNote(note string) {
 // of checkpoint.Clear to avoid importing the checkpoint package for a single call.
 func clearCheckpoint(path string) {
 	_ = os.Remove(path)
+}
+
+// activeModelIDs returns the IDs of the adapters that will run on the next prompt.
+func (a App) activeModelIDs() []string { //nolint:gocritic // called from bubbletea value-receiver methods
+	adapters := a.adapters
+	if a.activeAdapters != nil {
+		adapters = a.activeAdapters
+	}
+	ids := make([]string, len(adapters))
+	for i, ad := range adapters {
+		ids[i] = ad.ID()
+	}
+	return ids
 }
 
 // truncateStr truncates s to at most maxLen runes.

@@ -39,7 +39,7 @@ func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 		RecipePath:     filepath.Join(tmp, "session", "recipe.md"),
 	}
 	meta := session.Meta{ID: "test-session"}
-	a := New(ads, filepath.Join(tmp, "pref.jsonl"), filepath.Join(tmp, "prompt_hist.jsonl"), "session", config.Config{}, nil, nil, nil, sp, meta)
+	a := New(ads, filepath.Join(tmp, "pref.jsonl"), filepath.Join(tmp, "prompt_hist.jsonl"), "session", config.Config{}, nil, nil, nil, sp, meta, nil)
 	return *a
 }
 
@@ -257,21 +257,43 @@ func TestHandleStatsCmd_WithSessionCost(t *testing.T) {
 	}
 }
 
-func TestSubsetIndicator_ShownInView(t *testing.T) {
+func TestPinnedModels_ShownInHeader(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
 	a := newAppForTest(t, ads)
 	a.activeAdapters = []models.ModelAdapter{uiStub{"m1"}}
 
 	view := a.View()
-	assert.Contains(t, view, "[subset: m1]")
+	// Pinned models line shows only the active adapter.
+	assert.Contains(t, view, "m1")
+	// The old subset badge should be gone.
+	assert.NotContains(t, view, "[subset:")
 }
 
-func TestSubsetIndicator_NotShownWhenAllModels(t *testing.T) {
+func TestPinnedModels_AllModelsShown(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
 	a := newAppForTest(t, ads)
 
 	view := a.View()
-	assert.NotContains(t, view, "[subset:")
+	assert.Contains(t, view, "m1")
+	assert.Contains(t, view, "m2")
+}
+
+func TestModelIDCandidates_UsesAvailableModels(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+	a.availableModels = []string{"alpha", "beta", "m1"}
+
+	got := a.modelIDCandidates()
+	assert.Equal(t, []string{"alpha", "beta", "m1"}, got)
+}
+
+func TestModelIDCandidates_FallsBackToAdapters(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+	// availableModels is nil (default from newAppForTest).
+
+	got := a.modelIDCandidates()
+	assert.Equal(t, []string{"m1", "m2"}, got)
 }
 
 // ─── @mention integration ───────────────────────────────────────────────────
