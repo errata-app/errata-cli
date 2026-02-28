@@ -369,14 +369,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		atBottom := a.feedVP.AtBottom()
 		return a.withFeedRebuilt(atBottom), nil
 
-	case tea.MouseMsg:
-		if msg.Action == tea.MouseActionPress &&
-			(msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
-			var cmd tea.Cmd
-			a.feedVP, cmd = a.feedVP.Update(msg)
-			return a, cmd
-		}
-
 	case tea.KeyMsg:
 		switch a.mode {
 		case modeIdle:
@@ -718,7 +710,7 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool) error {
 	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta)
 
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(app, tea.WithAltScreen())
 	app.SetProgram(p)
 
 	// Handle SIGTERM for graceful shutdown. Bubbletea already handles SIGINT
