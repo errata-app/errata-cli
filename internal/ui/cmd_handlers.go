@@ -43,8 +43,6 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 	switch lower {
 	case "/exit", "/quit":
 		return a, tea.Quit
-	case "/config-pin":
-		return a.handleConfigPinCmd()
 	case "/verbose":
 		return a.handleVerboseCmd()
 	case "/clear":
@@ -103,23 +101,10 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	return a.withMessage(fmt.Sprintf("Verbose mode %s.", state)), nil
 }
 
-func (a App) handleConfigPinCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	a.sidebarPinned = !a.sidebarPinned
-	if a.sidebarPinned {
-		a.sidebarExpandedSet = make(map[int]bool)
-		a.sidebarScrollY = 0
-		a.rebuildSidebar()
-		a.input.SetWidth(a.feedVPWidth() - 4)
-		return a.withMessage("Config sidebar pinned."), nil
-	}
-	a.input.SetWidth(a.feedVPWidth() - 4)
-	return a.withMessage("Config sidebar unpinned."), nil
-}
-
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
 	a.rewindStack = nil
-	a.feedVP.Width = a.feedVPWidth()
+	a.feedVP.Width = a.width
 	a.feedVP.Height = a.feedVPHeight()
 	a.feedVP.SetContent("")
 	return a, nil
@@ -132,7 +117,7 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubblet
 	if err := history.Clear(a.histPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
 	}
-	a.feedVP.Width = a.feedVPWidth()
+	a.feedVP.Width = a.width
 	a.feedVP.Height = a.feedVPHeight()
 	a.feedVP.SetContent("")
 	return a, nil
@@ -681,9 +666,6 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 			a.recipeModified = false
 			a.applySessionRecipe()
 			a.configOverlayActive = false
-			if a.sidebarPinned {
-				a.rebuildSidebar()
-			}
 			return a.withMessage("Configuration reset to recipe defaults."), nil
 		}
 		for i, sec := range a.configSections {
@@ -816,9 +798,6 @@ func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:goc
 	a.sessionRecipe = cloneRecipe(rec)
 	a.recipeModified = true
 	a.applySessionRecipe()
-	if a.sidebarPinned {
-		a.rebuildSidebar()
-	}
 
 	name := rec.Name
 	if name == "" {

@@ -962,7 +962,7 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 		sb.WriteByte('\n')
 	}
 	sb.WriteByte('\n')
-	sb.WriteString(dimStyle.Render("  Enter = edit section  r = reset  Escape = close  /config-pin = pin sidebar"))
+	sb.WriteString(dimStyle.Render("  Enter = edit section  r = reset  Escape = close"))
 	sb.WriteByte('\n')
 
 	return sb.String()
@@ -990,9 +990,6 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:
 	switch msg.Type {
 	case tea.KeyEsc:
 		a.configOverlayActive = false
-		if a.sidebarPinned {
-			a.rebuildSidebar()
-		}
 		return a, nil
 	case tea.KeyUp:
 		if a.configSelectedIdx > 0 {
@@ -1108,9 +1105,6 @@ func (a App) handleConfigListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint
 				// Sync the effective tool set back to the session recipe allowlist.
 				a.syncToolAllowlist()
 			}
-			if a.sidebarPinned {
-				a.rebuildSidebar()
-			}
 		}
 		return a, nil
 	}
@@ -1146,9 +1140,6 @@ func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //noli
 			a.configEditBuf = ""
 			a.recipeModified = true
 			a.applySessionRecipe()
-			if a.sidebarPinned {
-				a.rebuildSidebar()
-			}
 			return a, nil
 		case tea.KeyBackspace, tea.KeyDelete:
 			if len(a.configEditBuf) > 0 {
@@ -1209,9 +1200,6 @@ func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint
 		a.configTextArea.Blur()
 		a.applySessionRecipe()
 		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
-		if a.sidebarPinned {
-			a.rebuildSidebar()
-		}
 		return a, nil
 	}
 

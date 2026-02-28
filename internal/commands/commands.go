@@ -16,7 +16,6 @@ var All = []Command{
 	{"/compact", "Summarise conversation history to free up context"},
 	{"/verbose", "Toggle verbose mode"},
 	{"/config", "View/edit configuration; /config <section> jumps to section"},
-	{"/config-pin", "Toggle pinned config sidebar"},
 	{"/resume", "Resume interrupted run — re-runs only interrupted models"},
 	{"/rewind", "Undo last run — revert writes and remove from context"},
 	{"/export", "Export: /export recipe [path]; /export output [path]"},
