@@ -1243,16 +1243,15 @@ func (a App) handleConfigScalarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { /
 
 func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if !a.configTextEditing {
-		// Not actively editing — Enter starts, Escape goes back.
-		if msg.Code == tea.KeyEscape {
-			a.configExpandedIdx = -1
-			a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
-			return a, nil
-		}
+		// Dead-end state — should not normally be reached since save/cancel
+		// now return to section navigation. Handle defensively: Escape or
+		// any key goes back.
+		a.configExpandedIdx = -1
+		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
 	}
 
-	// Ctrl+S or Ctrl+D saves the text.
+	// Ctrl+S or Ctrl+D saves the text and returns to section navigation.
 	if msg.Mod.Contains(tea.ModCtrl) && (msg.Code == 's' || msg.Code == 'd') {
 		sec := a.configSections[a.configExpandedIdx]
 		val := a.configTextArea.Value()
@@ -1261,14 +1260,17 @@ func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 		a.configTextEditing = false
 		a.configTextArea.Blur()
 		a.applySessionRecipe()
+		a.configExpandedIdx = -1
 		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
 	}
 
-	// Escape cancels editing.
+	// Escape cancels editing and returns to section navigation.
 	if msg.Code == tea.KeyEscape {
 		a.configTextEditing = false
 		a.configTextArea.Blur()
+		a.configExpandedIdx = -1
+		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
 	}
 

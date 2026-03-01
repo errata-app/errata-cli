@@ -665,6 +665,7 @@ func TestHandleConfigTextKey_CtrlSSavesSystemPrompt(t *testing.T) {
 	assert.Equal(t, "New system prompt content", app.sessionRecipe.SystemPrompt)
 	assert.True(t, app.recipeModified)
 	assert.False(t, app.configTextEditing)
+	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after save")
 }
 
 func TestHandleConfigTextKey_EscapeCancelsEditing(t *testing.T) {
@@ -681,6 +682,7 @@ func TestHandleConfigTextKey_EscapeCancelsEditing(t *testing.T) {
 	assert.False(t, app.configTextEditing)
 	// Original prompt should be unchanged.
 	assert.Equal(t, a.sessionRecipe.SystemPrompt, app.sessionRecipe.SystemPrompt)
+	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after cancel")
 }
 
 func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
@@ -705,6 +707,7 @@ func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
 	app := result.(App)
 	assert.Equal(t, "Custom summarization prompt", app.sessionRecipe.SummarizationPrompt)
 	assert.True(t, app.recipeModified)
+	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after save")
 }
 
 func TestTextSections_HavePaths(t *testing.T) {
