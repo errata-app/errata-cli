@@ -31,7 +31,7 @@ func runGeminiAgentLoop(
 ) (models.ModelResponse, error) {
 	start := time.Now()
 
-	systemMsg := tools.SystemPromptSuffix()
+	systemMsg := tools.SystemPromptSuffix(ctx)
 
 	config := &genai.GenerateContentConfig{
 		Tools:             buildGeminiTools(ctx),

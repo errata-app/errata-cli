@@ -473,9 +473,16 @@ func TestWithActiveTools_RoundTrip(t *testing.T) {
 	assert.Equal(t, subset, got)
 }
 
-func TestActiveToolsFromContext_EmptySliceFallsBackToAll(t *testing.T) {
-	// A context carrying an empty slice should fall back to all Definitions.
+func TestActiveToolsFromContext_EmptySliceReturnsEmpty(t *testing.T) {
+	// A context carrying an empty slice means zero active tools.
 	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	got := tools.ActiveToolsFromContext(ctx)
+	assert.Empty(t, got)
+}
+
+func TestActiveToolsFromContext_NilDoesNotStore(t *testing.T) {
+	// WithActiveTools(ctx, nil) is a no-op — ActiveToolsFromContext returns Definitions.
+	ctx := tools.WithActiveTools(context.Background(), nil)
 	got := tools.ActiveToolsFromContext(ctx)
 	assert.Equal(t, tools.Definitions, got)
 }
@@ -483,12 +490,12 @@ func TestActiveToolsFromContext_EmptySliceFallsBackToAll(t *testing.T) {
 // ─── SystemPromptSuffix ───────────────────────────────────────────────────────
 
 func TestSystemPromptSuffix_NonEmpty(t *testing.T) {
-	s := tools.SystemPromptSuffix()
+	s := tools.SystemPromptSuffix(context.Background())
 	assert.NotEmpty(t, s)
 }
 
 func TestSystemPromptSuffix_ContainsKeyGuidance(t *testing.T) {
-	s := tools.SystemPromptSuffix()
+	s := tools.SystemPromptSuffix(context.Background())
 	assert.Contains(t, s, "write_file")
 	assert.Contains(t, s, "list_directory")
 	assert.Contains(t, s, "search_code")
@@ -1090,9 +1097,9 @@ func TestFilterDefs_NilDisabled(t *testing.T) {
 // ─── SystemPrompt ───────────────────────────────────────────────────────────
 
 func TestSetSystemPromptExtra_AffectsSuffix(t *testing.T) {
-	original := tools.SystemPromptSuffix()
+	original := tools.SystemPromptSuffix(context.Background())
 	tools.SetSystemPromptExtra("TEST_EXTRA_CONTENT")
-	modified := tools.SystemPromptSuffix()
+	modified := tools.SystemPromptSuffix(context.Background())
 	assert.Contains(t, modified, "TEST_EXTRA_CONTENT")
 	assert.NotEqual(t, original, modified)
 	// Cleanup
@@ -1101,7 +1108,7 @@ func TestSetSystemPromptExtra_AffectsSuffix(t *testing.T) {
 
 func TestSystemPromptGuidance_IsSubsetOfSuffix(t *testing.T) {
 	guidance := tools.SystemPromptGuidance()
-	suffix := tools.SystemPromptSuffix()
+	suffix := tools.SystemPromptSuffix(context.Background())
 	assert.True(t, strings.HasPrefix(suffix, guidance),
 		"SystemPromptSuffix should start with SystemPromptGuidance")
 }
@@ -1136,22 +1143,22 @@ func TestDefaultToolGuidance_ContainsKeyTools(t *testing.T) {
 }
 
 func TestSetToolGuidance_OverridesEffectiveGuidance(t *testing.T) {
-	original := tools.SystemPromptSuffix()
+	original := tools.SystemPromptSuffix(context.Background())
 	tools.SetToolGuidance("Custom guidance: use tools wisely.")
 	defer tools.SetToolGuidance("")
 
-	modified := tools.SystemPromptSuffix()
+	modified := tools.SystemPromptSuffix(context.Background())
 	assert.Contains(t, modified, "Custom guidance: use tools wisely.")
 	assert.NotContains(t, modified, "list_directory")
 	assert.NotEqual(t, original, modified)
 }
 
 func TestSetToolGuidance_ClearRestoresDefault(t *testing.T) {
-	original := tools.SystemPromptSuffix()
+	original := tools.SystemPromptSuffix(context.Background())
 	tools.SetToolGuidance("temporary override")
 	tools.SetToolGuidance("")
 
-	restored := tools.SystemPromptSuffix()
+	restored := tools.SystemPromptSuffix(context.Background())
 	assert.Equal(t, original, restored)
 }
 
@@ -1163,7 +1170,7 @@ func TestSetToolGuidance_WithSystemPromptExtra(t *testing.T) {
 		tools.SetSystemPromptExtra("")
 	}()
 
-	s := tools.SystemPromptSuffix()
+	s := tools.SystemPromptSuffix(context.Background())
 	assert.Contains(t, s, "Custom guidance.")
 	assert.Contains(t, s, "Extra context.")
 	assert.NotContains(t, s, "list_directory")
@@ -1176,6 +1183,108 @@ func TestSystemPromptGuidance_ReflectsOverride(t *testing.T) {
 	g := tools.SystemPromptGuidance()
 	assert.Contains(t, g, "Overridden guidance.")
 	assert.NotContains(t, g, "list_directory")
+}
+
+// ─── Guidance Filtering (context-aware SystemPromptSuffix) ──────────────────
+
+func TestSystemPromptSuffix_AllToolsActive_MatchesFullGuidance(t *testing.T) {
+	// When all tools are active, the output should match the unfiltered guidance.
+	allDefs := tools.Definitions
+	ctx := tools.WithActiveTools(context.Background(), allDefs)
+	filtered := tools.SystemPromptSuffix(ctx)
+	unfiltered := tools.SystemPromptSuffix(context.Background())
+	assert.Equal(t, unfiltered, filtered)
+}
+
+func TestSystemPromptSuffix_SingleToolBash(t *testing.T) {
+	// Only bash active → only bash guidance line present.
+	bashDef := tools.ToolDef{Name: "bash"}
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{bashDef})
+	s := tools.SystemPromptSuffix(ctx)
+	assert.Contains(t, s, "bash")
+	assert.NotContains(t, s, "list_directory")
+	assert.NotContains(t, s, "read_file")
+	assert.NotContains(t, s, "write_file")
+	assert.NotContains(t, s, "search_code")
+}
+
+func TestSystemPromptSuffix_NoActiveTools_ReturnsFullGuidance(t *testing.T) {
+	// WithActiveTools(nil) is a no-op — no value stored → full guidance.
+	ctx := tools.WithActiveTools(context.Background(), nil)
+	s := tools.SystemPromptSuffix(ctx)
+	unfiltered := tools.SystemPromptSuffix(context.Background())
+	assert.Equal(t, unfiltered, s)
+}
+
+func TestSystemPromptSuffix_ExplicitlyEmptyTools_ReturnsNoGuidance(t *testing.T) {
+	// Explicitly setting an empty tool slice (all tools disabled) should return
+	// no tool guidance at all — distinct from "no tools in context" (nil).
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	s := tools.SystemPromptSuffix(ctx)
+	assert.NotContains(t, s, "list_directory")
+	assert.NotContains(t, s, "read_file")
+	assert.NotContains(t, s, "bash")
+	assert.NotContains(t, s, "Tool use guidance")
+}
+
+func TestSystemPromptSuffix_AllToolsDisabledViaDefinitionsAllowed(t *testing.T) {
+	// Mirrors the exact TUI code path: DefinitionsAllowed with every built-in
+	// tool disabled → non-nil empty slice → WithActiveTools → no guidance.
+	disabled := map[string]bool{
+		tools.ReadToolName: true, tools.WriteToolName: true, tools.EditToolName: true,
+		tools.ListDirToolName: true, tools.SearchFilesName: true, tools.SearchCodeName: true,
+		tools.BashToolName: true, tools.WebFetchToolName: true, tools.WebSearchToolName: true,
+	}
+	activeDefs := tools.DefinitionsAllowed(nil, disabled)
+	require.NotNil(t, activeDefs, "DefinitionsAllowed should return non-nil empty slice")
+	assert.Empty(t, activeDefs)
+
+	ctx := tools.WithActiveTools(context.Background(), activeDefs)
+	s := tools.SystemPromptSuffix(ctx)
+	assert.NotContains(t, s, "Tool use guidance")
+	assert.NotContains(t, s, "list_directory")
+	assert.NotContains(t, s, "bash")
+}
+
+func TestSystemPromptSuffix_PartialOverlap_EditWithoutWrite(t *testing.T) {
+	// edit_file active but not write_file → lines mentioning edit_file are included
+	// (any tagged tool matching suffices).
+	editDef := tools.ToolDef{Name: "edit_file"}
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{editDef})
+	s := tools.SystemPromptSuffix(ctx)
+	assert.Contains(t, s, "edit_file")
+	// The edit/write combo line should be included because edit_file matches.
+	assert.Contains(t, s, "edit_file for targeted changes")
+	// Lines for unrelated tools should not appear.
+	assert.NotContains(t, s, "list_directory")
+	assert.NotContains(t, s, "search_code")
+	assert.NotContains(t, s, "bash")
+}
+
+func TestSystemPromptSuffix_CustomGuidance_NotFiltered(t *testing.T) {
+	// Custom guidance override is never filtered — user wrote it intentionally.
+	tools.SetToolGuidance("Custom: always use all the things.")
+	defer tools.SetToolGuidance("")
+
+	bashDef := tools.ToolDef{Name: "bash"}
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{bashDef})
+	s := tools.SystemPromptSuffix(ctx)
+	assert.Contains(t, s, "Custom: always use all the things.")
+	// Should NOT contain built-in guidance since it's overridden.
+	assert.NotContains(t, s, "list_directory")
+}
+
+func TestSystemPromptSuffix_WithContextAndExtra(t *testing.T) {
+	// Filtered guidance + systemPromptExtra both present.
+	tools.SetSystemPromptExtra("Extra project context.")
+	defer tools.SetSystemPromptExtra("")
+
+	bashDef := tools.ToolDef{Name: "bash"}
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{bashDef})
+	s := tools.SystemPromptSuffix(ctx)
+	assert.Contains(t, s, "bash")
+	assert.Contains(t, s, "Extra project context.")
+	assert.NotContains(t, s, "list_directory")
 }
 
 // ─── SnapshotFiles / RestoreSnapshots ────────────────────────────────────────

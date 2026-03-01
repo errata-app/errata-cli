@@ -74,7 +74,7 @@ func (a *BedrockAdapter) RunAgent(
 	}
 	client := bedrockruntime.NewFromConfig(awsCfg)
 
-	systemMsg := tools.SystemPromptSuffix()
+	systemMsg := tools.SystemPromptSuffix(ctx)
 
 	toolConfig := buildBedrockToolConfig(ctx)
 

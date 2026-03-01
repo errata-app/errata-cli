@@ -38,7 +38,7 @@ func (a *AnthropicAdapter) RunAgent(
 ) (models.ModelResponse, error) {
 	client := anthropic.NewClient(option.WithAPIKey(a.apiKey))
 
-	systemMsg := tools.SystemPromptSuffix()
+	systemMsg := tools.SystemPromptSuffix(ctx)
 
 	toolParams := buildAnthropicTools(ctx)
 	messages := make([]anthropic.MessageParam, 0, len(history)+1)
