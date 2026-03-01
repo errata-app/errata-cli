@@ -224,6 +224,12 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 	ta.MaxHeight = 8
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
+	// Extend InsertNewline binding so Shift+Enter and Alt+Enter insert
+	// newlines via the textarea's native splitLine path. Without this,
+	// the textarea only matches bare "enter".
+	ta.KeyMap.InsertNewline.SetKeys(append(
+		ta.KeyMap.InsertNewline.Keys(), "shift+enter", "alt+enter",
+	)...)
 
 	h, err := history.Load(sp.HistoryPath)
 	if err != nil {

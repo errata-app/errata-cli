@@ -82,10 +82,15 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 		a.feedVP, cmd = a.feedVP.Update(msg)
 		return a, cmd
 
+	case 'j': // Shift+Enter sends Ctrl+J (linefeed) in many terminals.
+		if msg.Mod.Contains(tea.ModCtrl) {
+			a.input.InsertString("\n")
+			a.resizeInput()
+			return a, nil
+		}
+
 	case tea.KeyEnter:
 		if msg.Mod.Contains(tea.ModShift) || msg.Mod.Contains(tea.ModAlt) {
-			// The textarea's InsertNewline binding only matches bare "enter",
-			// not "shift+enter" or "alt+enter", so insert the newline manually.
 			a.input.InsertString("\n")
 			a.resizeInput()
 			return a, nil

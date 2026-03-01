@@ -559,7 +559,9 @@ func TestShiftEnter_InsertsNewline(t *testing.T) {
 	app := result.(App)
 	// Shift+Enter should NOT submit — should stay idle and insert a newline.
 	assert.Equal(t, modeIdle, app.mode)
-	assert.Contains(t, app.input.Value(), "\n", "Shift+Enter should insert a newline")
+	// The textarea uses splitLine (not InsertString), so LineCount reflects
+	// the new row even though Value() trims the trailing empty line.
+	assert.Equal(t, 2, app.input.LineCount(), "Shift+Enter should create a second line")
 }
 
 func TestAltEnter_StillInsertsNewline(t *testing.T) {
@@ -572,7 +574,45 @@ func TestAltEnter_StillInsertsNewline(t *testing.T) {
 	app := result.(App)
 	// Alt+Enter should NOT submit — should stay idle and insert a newline.
 	assert.Equal(t, modeIdle, app.mode)
-	assert.Contains(t, app.input.Value(), "\n", "Alt+Enter should insert a newline")
+	assert.Equal(t, 2, app.input.LineCount(), "Alt+Enter should create a second line")
+}
+
+func TestCtrlJ_InsertsNewline(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("hello")
+	a.input.CursorEnd()
+
+	// Terminals send Ctrl+J (linefeed) for Shift+Enter.
+	msg := tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
+	result, cmd := a.handleIdleKey(msg)
+	assert.Nil(t, cmd)
+	app := result.(App)
+	assert.Equal(t, modeIdle, app.mode, "Ctrl+J should not submit")
+	assert.Equal(t, 2, app.input.LineCount(), "Ctrl+J should insert a newline")
+}
+
+func TestPlainJ_DoesNotInsertNewline(t *testing.T) {
+	a := newAppForTest(t, nil)
+
+	// Plain 'j' with no modifier should type the character, not insert a newline.
+	msg := tea.KeyPressMsg{Code: 'j', Mod: 0, Text: "j"}
+	result, _ := a.handleIdleKey(msg)
+	app := result.(App)
+	assert.Equal(t, "j", app.input.Value(), "plain 'j' should type the character")
+	assert.Equal(t, 1, app.input.LineCount(), "plain 'j' should not insert a newline")
+}
+
+func TestPlainEnter_Submits(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+	a.input.SetValue("do something")
+
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter}
+	result, _ := a.handleIdleKey(msg)
+	app := result.(App)
+	// Plain Enter should submit — mode transitions to running and input is cleared.
+	assert.Equal(t, modeRunning, app.mode)
+	assert.Empty(t, app.input.Value())
 }
 
 // ─── feedVPHeight hint accounting ────────────────────────────────────────────
