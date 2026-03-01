@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rivo/uniseg"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
@@ -213,7 +214,8 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
 	ta.SetWidth(80)
-	ta.SetHeight(3)
+	ta.SetHeight(1)
+	ta.MaxHeight = 8
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
 
@@ -297,7 +299,7 @@ func (a *App) feedVPHeight() int {
 	var footerLines int
 	switch a.mode {
 	case modeIdle:
-		footerLines = 3 // textarea SetHeight(3)
+		footerLines = a.input.Height()
 		if a.searchActive {
 			footerLines++ // search bar line
 		}
@@ -311,6 +313,39 @@ func (a *App) feedVPHeight() int {
 	}
 	h := max(a.height-headerLines-sepLine-footerLines, 3)
 	return h
+}
+
+// inputLines computes the visual line count of the textarea (accounting for
+// soft-wrap at the textarea width), capped at MaxHeight.
+func (a *App) inputLines() int {
+	val := a.input.Value()
+	if val == "" {
+		return 1
+	}
+	w := a.input.Width()
+	if w <= 0 {
+		w = 1
+	}
+	lines := 0
+	for line := range strings.SplitSeq(val, "\n") {
+		r := uniseg.StringWidth(line)
+		if r == 0 {
+			lines++
+		} else {
+			lines += (r + w - 1) / w
+		}
+	}
+	return max(1, min(lines, a.input.MaxHeight))
+}
+
+// resizeInput updates the textarea height to match its content and rebuilds
+// the feed viewport if the height changed.
+func (a *App) resizeInput() {
+	h := a.inputLines()
+	if h != a.input.Height() {
+		a.input.SetHeight(h)
+		*a = a.withFeedRebuilt(true)
+	}
 }
 
 // renderFeedContent builds the viewport content string from all feed items.
@@ -386,6 +421,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.input.SetWidth(msg.Width - 4)
+		a.resizeInput()
 		atBottom := a.feedVP.AtBottom()
 		return a.withFeedRebuilt(atBottom), nil
 
@@ -583,6 +619,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.mode == modeIdle {
 		var cmd tea.Cmd
 		a.input, cmd = a.input.Update(msg)
+		a.resizeInput()
 		return a, cmd
 	}
 	return a, nil
