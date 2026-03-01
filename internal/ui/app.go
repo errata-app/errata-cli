@@ -194,6 +194,9 @@ type App struct {
 	sessionMeta       session.Meta  // in-memory metadata, updated after each run
 	sessionFeed       []session.FeedEntry // serialized feed for persistence
 
+	// hint line tracking (for feed viewport height budget)
+	lastHintLines int
+
 	// config overlay state
 	configOverlayActive bool
 	configSections      []configSection
@@ -201,6 +204,7 @@ type App struct {
 	configExpandedIdx   int // -1 = none expanded
 	configListItems     []listItem
 	configListCursor    int
+	configListOffset    int // first visible item index in windowed list
 	configScalarFields  []scalarField
 	configScalarCursor  int
 	configEditBuf       string
@@ -220,6 +224,12 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 	ta.MaxHeight = 8
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
+	// Extend InsertNewline binding so Shift+Enter and Alt+Enter insert
+	// newlines via the textarea's native splitLine path. Without this,
+	// the textarea only matches bare "enter".
+	ta.KeyMap.InsertNewline.SetKeys(append(
+		ta.KeyMap.InsertNewline.Keys(), "shift+enter", "alt+enter",
+	)...)
 
 	h, err := history.Load(sp.HistoryPath)
 	if err != nil {
@@ -302,9 +312,22 @@ func (a *App) feedVPHeight() int {
 	var footerLines int
 	switch a.mode {
 	case modeIdle:
-		footerLines = a.input.Height()
-		if a.searchActive {
-			footerLines++ // search bar line
+		if a.configOverlayActive {
+			footerLines = 0 // config overlay replaces feed VP entirely (see View)
+		} else {
+			footerLines = a.input.Height() + a.lastHintLines
+			if a.searchActive {
+				footerLines++ // search bar line
+			}
+			if a.recipeModified {
+				footerLines++ // [modified] badge
+			}
+			if a.pastedText != "" {
+				footerLines += 3 // border + content + border
+			}
+			if a.escHintVisible {
+				footerLines++ // "ESC again to clear" hint
+			}
 		}
 	case modeRunning:
 		footerLines = 1 // "  running…"
@@ -342,11 +365,21 @@ func (a *App) inputLines() int {
 }
 
 // resizeInput updates the textarea height to match its content and rebuilds
-// the feed viewport if the height changed.
+// the feed viewport if the height changed. Also recomputes hint lines so the
+// viewport shrinks/grows as completion suggestions appear or disappear.
 func (a *App) resizeInput() {
 	h := a.inputLines()
+	hints := a.computeHintLines()
+	changed := false
 	if h != a.input.Height() {
 		a.input.SetHeight(h)
+		changed = true
+	}
+	if hints != a.lastHintLines {
+		a.lastHintLines = hints
+		changed = true
+	}
+	if changed {
 		*a = a.withFeedRebuilt(true)
 	}
 }
@@ -646,8 +679,13 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 	sb.WriteString(wrapText(strings.Join(a.activeModelIDs(), " · "), a.width, 2, modelLineStyle))
 	sb.WriteByte('\n')
 
-	sb.WriteString(a.feedVP.View())
-	sb.WriteByte('\n')
+	// When config overlay is active, skip the feed viewport entirely to give
+	// the overlay the full terminal height below the header.
+	configFullScreen := a.mode == modeIdle && a.configOverlayActive
+	if !configFullScreen {
+		sb.WriteString(a.feedVP.View())
+		sb.WriteByte('\n')
+	}
 
 	switch a.mode {
 	case modeSelecting:
@@ -684,10 +722,12 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 
 	case modeIdle:
 		if a.configOverlayActive {
+			const configHeaderLines = 3 // Errata header + pinned models + blank
+			overlayHeight := max(a.height-configHeaderLines, 5)
 			sb.WriteString(renderConfigOverlay(
 				a.configSections, a.configSelectedIdx, a.configExpandedIdx,
-				a.recipeModified, a.width,
-				a.configListItems, a.configListCursor,
+				a.recipeModified, a.width, overlayHeight,
+				a.configListItems, a.configListCursor, a.configListOffset,
 				a.configScalarFields, a.configScalarCursor,
 				a.configEditBuf,
 				a.configTextEditing, a.configTextArea.View(),

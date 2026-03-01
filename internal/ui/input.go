@@ -82,9 +82,18 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 		a.feedVP, cmd = a.feedVP.Update(msg)
 		return a, cmd
 
+	case 'j': // Shift+Enter sends Ctrl+J (linefeed) in many terminals.
+		if msg.Mod.Contains(tea.ModCtrl) {
+			a.input.InsertString("\n")
+			a.resizeInput()
+			return a, nil
+		}
+
 	case tea.KeyEnter:
 		if msg.Mod.Contains(tea.ModShift) || msg.Mod.Contains(tea.ModAlt) {
-			break // fall through to textarea → inserts newline
+			a.input.InsertString("\n")
+			a.resizeInput()
+			return a, nil
 		}
 		typed := strings.TrimSpace(a.input.Value())
 		var prompt string
@@ -143,7 +152,7 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 		if a.pastedText != "" && a.input.Value() == "" {
 			a.pastedText = ""
 			a.pastedLineCount = 0
-			return a, nil
+			return a.withFeedRebuilt(true), nil
 		}
 	}
 
@@ -168,7 +177,7 @@ func (a App) handlePaste(text string) (tea.Model, tea.Cmd) { //nolint:gocritic /
 	if lineCount >= 3 {
 		a.pastedText = text
 		a.pastedLineCount = lineCount
-		return a, nil
+		return a.withFeedRebuilt(true), nil
 	}
 	// Short paste — insert into textarea as typed text.
 	a.input.InsertString(text)

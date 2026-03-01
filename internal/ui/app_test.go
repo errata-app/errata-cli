@@ -552,21 +552,127 @@ func TestDoubleEsc_NoopWhenEmpty(t *testing.T) {
 func TestShiftEnter_InsertsNewline(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.input.SetValue("hello")
+	a.input.CursorEnd()
 
 	msg := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}
 	result, _ := a.handleIdleKey(msg)
 	app := result.(App)
-	// Shift+Enter should NOT submit — should stay idle (textarea processes it).
+	// Shift+Enter should NOT submit — should stay idle and insert a newline.
 	assert.Equal(t, modeIdle, app.mode)
+	// The textarea uses splitLine (not InsertString), so LineCount reflects
+	// the new row even though Value() trims the trailing empty line.
+	assert.Equal(t, 2, app.input.LineCount(), "Shift+Enter should create a second line")
 }
 
 func TestAltEnter_StillInsertsNewline(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.input.SetValue("hello")
+	a.input.CursorEnd()
 
 	msg := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}
 	result, _ := a.handleIdleKey(msg)
 	app := result.(App)
-	// Alt+Enter should NOT submit — should stay idle.
+	// Alt+Enter should NOT submit — should stay idle and insert a newline.
 	assert.Equal(t, modeIdle, app.mode)
+	assert.Equal(t, 2, app.input.LineCount(), "Alt+Enter should create a second line")
+}
+
+func TestCtrlJ_InsertsNewline(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("hello")
+	a.input.CursorEnd()
+
+	// Terminals send Ctrl+J (linefeed) for Shift+Enter.
+	msg := tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
+	result, cmd := a.handleIdleKey(msg)
+	assert.Nil(t, cmd)
+	app := result.(App)
+	assert.Equal(t, modeIdle, app.mode, "Ctrl+J should not submit")
+	assert.Equal(t, 2, app.input.LineCount(), "Ctrl+J should insert a newline")
+}
+
+func TestPlainJ_DoesNotInsertNewline(t *testing.T) {
+	a := newAppForTest(t, nil)
+
+	// Plain 'j' with no modifier should type the character, not insert a newline.
+	msg := tea.KeyPressMsg{Code: 'j', Mod: 0, Text: "j"}
+	result, _ := a.handleIdleKey(msg)
+	app := result.(App)
+	assert.Equal(t, "j", app.input.Value(), "plain 'j' should type the character")
+	assert.Equal(t, 1, app.input.LineCount(), "plain 'j' should not insert a newline")
+}
+
+func TestPlainEnter_Submits(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+	a.input.SetValue("do something")
+
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter}
+	result, _ := a.handleIdleKey(msg)
+	app := result.(App)
+	// Plain Enter should submit — mode transitions to running and input is cleared.
+	assert.Equal(t, modeRunning, app.mode)
+	assert.Empty(t, app.input.Value())
+}
+
+// ─── feedVPHeight hint accounting ────────────────────────────────────────────
+
+func TestFeedVPHeight_AccountsForHints(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.mode = modeIdle
+
+	// Baseline: no input → no hints.
+	baseHeight := a.feedVPHeight()
+
+	// Type "/" to trigger slash command hints.
+	a.input.SetValue("/")
+	a.lastHintLines = a.computeHintLines()
+	require.Positive(t, a.lastHintLines, "typing '/' should produce hint lines")
+
+	withHints := a.feedVPHeight()
+	assert.Less(t, withHints, baseHeight, "viewport should shrink when hints are shown")
+	assert.Equal(t, baseHeight-withHints, a.lastHintLines)
+}
+
+func TestFeedVPHeight_AccountsForPasteBadge(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.mode = modeIdle
+
+	baseHeight := a.feedVPHeight()
+
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	withBadge := a.feedVPHeight()
+	assert.Less(t, withBadge, baseHeight, "viewport should shrink for paste badge")
+}
+
+func TestFeedVPHeight_AccountsForModifiedBadge(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.mode = modeIdle
+
+	baseHeight := a.feedVPHeight()
+
+	a.recipeModified = true
+	withBadge := a.feedVPHeight()
+	assert.Equal(t, baseHeight-1, withBadge, "viewport should shrink by 1 for [modified] badge")
+}
+
+func TestFeedVPHeight_AccountsForEscHint(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.mode = modeIdle
+
+	baseHeight := a.feedVPHeight()
+
+	a.escHintVisible = true
+	withHint := a.feedVPHeight()
+	assert.Equal(t, baseHeight-1, withHint, "viewport should shrink by 1 for ESC hint")
 }

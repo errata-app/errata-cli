@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/suarezc/errata/internal/commands"
 )
 
 // maxHintLines is the maximum number of completion hint lines shown below the
@@ -145,6 +146,91 @@ func (a App) tryArgComplete(val string) (string, bool) { //nolint:gocritic // ca
 		}
 	}
 	return "", false
+}
+
+// countCappedHints returns the number of visual lines that hint output will
+// occupy for total matching items. It accounts for the maxHintLines cap and
+// the extra "... and N more" line when items exceed the cap.
+func countCappedHints(total int) int {
+	if total <= 0 {
+		return 0
+	}
+	if total <= maxHintLines {
+		return total
+	}
+	return maxHintLines + 1 // capped items + "... and N more"
+}
+
+// computeHintLines returns the number of visual lines that completion hints
+// will occupy below the textarea, mirroring the matching logic in View().
+func (a App) computeHintLines() int { //nolint:gocritic // called from bubbletea value-receiver methods
+	val := a.input.Value()
+	if len(val) == 0 {
+		return 0
+	}
+
+	if val[0] == '/' {
+		lower := strings.ToLower(val)
+		switch {
+		case strings.HasPrefix(lower, "/config "):
+			partial := lastWord(val[len("/config "):])
+			lp := strings.ToLower(partial)
+			count := 0
+			for _, name := range interactiveSections {
+				if strings.HasPrefix(name, lp) {
+					count++
+				}
+			}
+			return countCappedHints(count)
+
+		case strings.HasPrefix(lower, "/export "):
+			partial := lastWord(val[len("/export "):])
+			lp := strings.ToLower(partial)
+			count := 0
+			for _, sub := range []string{"recipe", "output"} {
+				if strings.HasPrefix(sub, lp) {
+					count++
+				}
+			}
+			return count
+
+		case strings.HasPrefix(lower, "/import "):
+			partial := lastWord(val[len("/import "):])
+			lp := strings.ToLower(partial)
+			count := 0
+			for _, sub := range []string{"recipe"} {
+				if strings.HasPrefix(sub, lp) {
+					count++
+				}
+			}
+			return count
+
+		default:
+			prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
+			count := 0
+			for _, c := range commands.All {
+				if strings.HasPrefix(c.Name, prefix) {
+					count++
+				}
+			}
+			return countCappedHints(count)
+		}
+	}
+
+	// @mention hints.
+	lw := lastWord(val)
+	if strings.HasPrefix(lw, "@") && len(lw) >= 2 {
+		partial := strings.ToLower(lw[1:])
+		count := 0
+		for _, id := range a.modelIDCandidates() {
+			if strings.HasPrefix(strings.ToLower(id), partial) {
+				count++
+			}
+		}
+		return countCappedHints(count)
+	}
+
+	return 0
 }
 
 // tryMentionComplete attempts tab-completion when the last word starts with @.

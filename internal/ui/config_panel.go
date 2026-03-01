@@ -860,7 +860,7 @@ func (a *App) syncToolAllowlist() {
 
 // ── rendering ───────────────────────────────────────────────────────────────
 
-func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width int, listItems []listItem, listCursor int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string) string {
+func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width, maxHeight int, listItems []listItem, listCursor, listOffset int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string) string {
 	var sb strings.Builder
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
@@ -889,7 +889,25 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 
 		switch sec.Kind {
 		case "list":
-			for i, item := range listItems {
+			// Compute visible window. Overhead: title + breadcrumb + desc + blank + footer hint + trailing newline.
+			overhead := 5 // title, breadcrumb, blank after desc, footer hint, trailing newline
+			if sec.DetailDesc != "" {
+				overhead++ // description line
+			}
+			windowSize := max(len(listItems), 1)
+			if maxHeight > 0 {
+				windowSize = max(maxHeight-overhead, 3)
+			}
+
+			start := listOffset
+			end := min(start+windowSize, len(listItems))
+
+			if start > 0 {
+				sb.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
+				sb.WriteByte('\n')
+			}
+			for i := start; i < end; i++ {
+				item := listItems[i]
 				cursor := "  "
 				if i == listCursor {
 					cursor = "> "
@@ -901,6 +919,10 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 					style = inactiveStyle
 				}
 				sb.WriteString(style.Render(fmt.Sprintf("  %s%s %s", cursor, check, item.Label)))
+				sb.WriteByte('\n')
+			}
+			if end < len(listItems) {
+				sb.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(listItems)-end)))
 				sb.WriteByte('\n')
 			}
 			sb.WriteByte('\n')
@@ -981,6 +1003,21 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 	return sb.String()
 }
 
+// configListWindowHeight returns the number of list items visible in the
+// windowed list view, given the current terminal height.
+func (a App) configListWindowHeight() int { //nolint:gocritic // called from bubbletea value-receiver methods
+	const configHeaderLines = 3 // Errata header + pinned models + blank
+	overlayHeight := max(a.height-configHeaderLines, 5)
+	// Overhead: title + breadcrumb + desc + blank + footer hint + trailing newline.
+	overhead := 5
+	if a.configExpandedIdx >= 0 && a.configExpandedIdx < len(a.configSections) {
+		if a.configSections[a.configExpandedIdx].DetailDesc != "" {
+			overhead++
+		}
+	}
+	return max(overlayHeight-overhead, 3)
+}
+
 // ── key handling ────────────────────────────────────────────────────────────
 
 func (a App) handleConfigKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -1037,6 +1074,7 @@ func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //no
 				a.configListItems = buildHooksList(a.sessionRecipe)
 			}
 			a.configListCursor = 0
+			a.configListOffset = 0
 		case "scalar":
 			a.configScalarFields = buildScalarFields(sec.Name, a.sessionRecipe)
 			a.configScalarCursor = 0
@@ -1070,16 +1108,24 @@ func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 	switch msg.Code {
 	case tea.KeyEscape:
 		a.configExpandedIdx = -1
+		a.configListOffset = 0
 		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
 	case tea.KeyUp:
 		if a.configListCursor > 0 {
 			a.configListCursor--
+			if a.configListCursor < a.configListOffset {
+				a.configListOffset = a.configListCursor
+			}
 		}
 		return a, nil
 	case tea.KeyDown:
 		if a.configListCursor < len(a.configListItems)-1 {
 			a.configListCursor++
+			wh := a.configListWindowHeight()
+			if a.configListCursor >= a.configListOffset+wh {
+				a.configListOffset = a.configListCursor - wh + 1
+			}
 		}
 		return a, nil
 	case tea.KeyEnter, ' ':
@@ -1197,16 +1243,15 @@ func (a App) handleConfigScalarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { /
 
 func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if !a.configTextEditing {
-		// Not actively editing — Enter starts, Escape goes back.
-		if msg.Code == tea.KeyEscape {
-			a.configExpandedIdx = -1
-			a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
-			return a, nil
-		}
+		// Dead-end state — should not normally be reached since save/cancel
+		// now return to section navigation. Handle defensively: Escape or
+		// any key goes back.
+		a.configExpandedIdx = -1
+		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
 	}
 
-	// Ctrl+S or Ctrl+D saves the text.
+	// Ctrl+S or Ctrl+D saves the text and returns to section navigation.
 	if msg.Mod.Contains(tea.ModCtrl) && (msg.Code == 's' || msg.Code == 'd') {
 		sec := a.configSections[a.configExpandedIdx]
 		val := a.configTextArea.Value()
@@ -1215,14 +1260,17 @@ func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 		a.configTextEditing = false
 		a.configTextArea.Blur()
 		a.applySessionRecipe()
+		a.configExpandedIdx = -1
 		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
 	}
 
-	// Escape cancels editing.
+	// Escape cancels editing and returns to section navigation.
 	if msg.Code == tea.KeyEscape {
 		a.configTextEditing = false
 		a.configTextArea.Blur()
+		a.configExpandedIdx = -1
+		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
 	}
 
