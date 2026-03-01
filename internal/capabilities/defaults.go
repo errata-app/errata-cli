@@ -140,6 +140,14 @@ var modelDefaults = map[string]models.ModelCapabilities{
 		SupportedInputMedia: []string{"text"},
 	},
 	// Google
+	"google/gemini-2.5-flash": {
+		Provider:            "google",
+		ContextWindow:       1_000_000,
+		MaxOutputTokens:     65_536,
+		ToolFormat:          models.ToolFormatFunctionCall,
+		SystemRole:          true,
+		SupportedInputMedia: []string{"text", "image", "pdf", "video", "audio"},
+	},
 	"google/gemini-2.0-flash": {
 		Provider:            "google",
 		ContextWindow:       1_000_000,

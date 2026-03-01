@@ -116,10 +116,10 @@ func Load() Config {
 	cfg := Config{
 		DefaultAnthropicModel: "claude-sonnet-4-6",
 		DefaultOpenAIModel:    "gpt-4o",
-		DefaultGeminiModel:    "gemini-2.0-flash",
+		DefaultGeminiModel:    "gemini-2.5-flash",
 		DefaultBedrockModel:   "anthropic.claude-sonnet-4-20250514-v1:0",
 		DefaultAzureModel:     "gpt-4o",
-		DefaultVertexModel:    "gemini-2.0-flash",
+		DefaultVertexModel:    "gemini-2.5-flash",
 		PreferencesPath:       "data/preferences.jsonl",
 		PricingCachePath:      "data/pricing_cache.json",
 		HistoryPath:           "data/history.json",
@@ -198,11 +198,11 @@ func ProviderEnvInfo() []ProviderEnv {
 	return []ProviderEnv{
 		{"anthropic", []string{"ANTHROPIC_API_KEY"}, "claude-sonnet-4-6"},
 		{"openai", []string{"OPENAI_API_KEY"}, "gpt-4o"},
-		{"google", []string{"GOOGLE_API_KEY"}, "gemini-2.0-flash"},
+		{"google", []string{"GOOGLE_API_KEY"}, "gemini-2.5-flash"},
 		{"openrouter", []string{"OPENROUTER_API_KEY"}, ""},
 		{"bedrock", []string{"AWS_REGION"}, ""},
 		{"azure", []string{"AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"}, "gpt-4o"},
-		{"vertex", []string{"VERTEX_AI_PROJECT", "VERTEX_AI_LOCATION"}, "gemini-2.0-flash"},
+		{"vertex", []string{"VERTEX_AI_PROJECT", "VERTEX_AI_LOCATION"}, "gemini-2.5-flash"},
 		{"litellm", []string{"LITELLM_BASE_URL"}, ""},
 	}
 }
