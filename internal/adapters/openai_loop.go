@@ -29,7 +29,7 @@ func runOpenAIAgentLoop(
 	prompt string,
 	onEvent func(models.AgentEvent),
 ) (models.ModelResponse, error) {
-	systemMsg := tools.SystemPromptSuffix()
+	systemMsg := tools.SystemPromptSuffix(ctx)
 
 	toolParams := buildOpenAITools(ctx)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
