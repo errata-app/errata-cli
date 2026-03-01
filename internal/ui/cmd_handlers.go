@@ -314,6 +314,9 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
+	if a.debugLog {
+		baseCtx = adapters.WithDebugRequests(baseCtx)
+	}
 
 	return a, func() tea.Msg {
 		effectiveHistories := histories
@@ -583,6 +586,9 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
+	if a.debugLog {
+		baseCtx = adapters.WithDebugRequests(baseCtx)
+	}
 
 	return a, func() tea.Msg {
 		effectiveHistories := histories

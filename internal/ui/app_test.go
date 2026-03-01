@@ -39,7 +39,7 @@ func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 		RecipePath:     filepath.Join(tmp, "session", "recipe.md"),
 	}
 	meta := session.Meta{ID: "test-session"}
-	a := New(ads, filepath.Join(tmp, "pref.jsonl"), filepath.Join(tmp, "prompt_hist.jsonl"), "session", config.Config{}, nil, nil, nil, sp, meta, nil, nil)
+	a := New(ads, filepath.Join(tmp, "pref.jsonl"), filepath.Join(tmp, "prompt_hist.jsonl"), "session", config.Config{}, nil, nil, nil, sp, meta, nil, nil, false)
 	return *a
 }
 

@@ -58,6 +58,11 @@ func runGeminiAgentLoop(
 	var totalInput, totalOutput int64
 
 	for {
+		EmitRequest(ctx, onEvent, struct {
+			Model    string                       `json:"model"`
+			Contents []*genai.Content              `json:"contents"`
+			Config   *genai.GenerateContentConfig  `json:"config"`
+		}{cfg.apiModelID, contents, config})
 		resp, err := cfg.client.Models.GenerateContent(ctx, cfg.apiModelID, contents, config)
 		if err != nil {
 			if ctx.Err() != nil {

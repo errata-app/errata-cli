@@ -631,6 +631,51 @@ func TestRunAll_SnapshotEventsNotForwarded(t *testing.T) {
 	assert.Equal(t, models.EventWriting, received[1].Type)
 }
 
+// ─── Request event suppression ───────────────────────────────────────────────
+
+// requestAdapter emits a mix of regular events and a "request" event.
+type requestAdapter struct {
+	id string
+}
+
+func (r *requestAdapter) ID() string { return r.id }
+func (r *requestAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
+func (r *requestAdapter) RunAgent(
+	ctx context.Context,
+	history []models.ConversationTurn,
+	prompt string,
+	onEvent func(models.AgentEvent),
+) (models.ModelResponse, error) {
+	onEvent(models.AgentEvent{Type: models.EventReading, Data: "file.go"})
+	onEvent(models.AgentEvent{Type: models.EventRequest, Data: `{"model":"test","messages":[]}`})
+	onEvent(models.AgentEvent{Type: models.EventWriting, Data: "out.go"})
+	return models.ModelResponse{ModelID: r.id, Text: "done"}, nil
+}
+
+func TestRunAll_RequestEventsNotForwarded(t *testing.T) {
+	a := &requestAdapter{id: "m"}
+
+	var mu sync.Mutex
+	var received []models.AgentEvent
+	runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(_ string, e models.AgentEvent) {
+		mu.Lock()
+		received = append(received, e)
+		mu.Unlock()
+	}, nil, true) // verbose=true so all non-filtered events pass through
+
+	// "reading" and "writing" should be forwarded; "request" should NOT.
+	for _, e := range received {
+		if e.Type == models.EventRequest {
+			t.Error("request event should not be forwarded to caller's onEvent")
+		}
+	}
+	assert.Len(t, received, 2)
+	assert.Equal(t, models.EventReading, received[0].Type)
+	assert.Equal(t, models.EventWriting, received[1].Type)
+}
+
 // ─── Summarization prompt ───────────────────────────────────────────────────
 
 // promptCapturingStub captures the prompt passed to RunAgent for verification.

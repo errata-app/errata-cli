@@ -76,6 +76,7 @@ func (a *AnthropicAdapter) RunAgent(
 		if temperature != nil {
 			params.Temperature = anthropic.Float(*temperature)
 		}
+		EmitRequest(ctx, onEvent, params)
 		resp, err := client.Messages.New(ctx, params)
 		if err != nil {
 			if ctx.Err() != nil {

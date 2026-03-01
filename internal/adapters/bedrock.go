@@ -127,6 +127,7 @@ func (a *BedrockAdapter) RunAgent(
 			}
 		}
 
+		EmitRequest(ctx, onEvent, input)
 		resp, err := client.Converse(ctx, input)
 		if err != nil {
 			if ctx.Err() != nil {

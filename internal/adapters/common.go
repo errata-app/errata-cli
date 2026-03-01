@@ -178,6 +178,35 @@ func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
 	onEvent(models.AgentEvent{Type: models.EventSnapshot, Data: string(data)})
 }
 
+// ─── Debug request logging ────────────────────────────────────────────────────
+
+type debugRequestsKey struct{}
+
+// WithDebugRequests returns a context that enables raw API request logging.
+func WithDebugRequests(ctx context.Context) context.Context {
+	return context.WithValue(ctx, debugRequestsKey{}, true)
+}
+
+// DebugRequestsFromContext reports whether raw API request logging is enabled.
+func DebugRequestsFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(debugRequestsKey{}).(bool)
+	return v
+}
+
+// EmitRequest JSON-marshals params and emits it as an EventRequest event.
+// Only emits when debug request logging is enabled in the context, avoiding
+// serialization overhead in production.
+func EmitRequest(ctx context.Context, onEvent func(models.AgentEvent), params any) {
+	if !DebugRequestsFromContext(ctx) {
+		return
+	}
+	b, err := json.Marshal(params)
+	if err != nil {
+		return
+	}
+	onEvent(models.AgentEvent{Type: models.EventRequest, Data: string(b)})
+}
+
 // applyOutputProcessing truncates tool output according to the rule for the
 // named tool, if one exists in the context. Returns the output unchanged
 // when no rule applies.
