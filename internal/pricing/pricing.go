@@ -38,6 +38,7 @@ var pricingTable = map[string]modelPricing{
 	"o1":          {InputPMT: 15.00, OutputPMT: 60.00, ContextWindow: 200_000},
 	"o3-mini":     {InputPMT: 1.10, OutputPMT: 4.40, ContextWindow: 200_000},
 	// Google
+	"gemini-2.5-flash": {InputPMT: 0.15, OutputPMT: 0.60, ContextWindow: 1_000_000},
 	"gemini-2.0-flash": {InputPMT: 0.075, OutputPMT: 0.30, ContextWindow: 1_000_000},
 	"gemini-1.5-pro":   {InputPMT: 1.25, OutputPMT: 5.00, ContextWindow: 2_000_000},
 	"gemini-1.5-flash": {InputPMT: 0.075, OutputPMT: 0.30, ContextWindow: 1_000_000},

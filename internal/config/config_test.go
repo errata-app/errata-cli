@@ -19,7 +19,7 @@ func TestLoad_Defaults(t *testing.T) {
 	cfg := config.Load()
 	assert.Equal(t, "claude-sonnet-4-6", cfg.DefaultAnthropicModel)
 	assert.Equal(t, "gpt-4o", cfg.DefaultOpenAIModel)
-	assert.Equal(t, "gemini-2.0-flash", cfg.DefaultGeminiModel)
+	assert.Equal(t, "gemini-2.5-flash", cfg.DefaultGeminiModel)
 	assert.Equal(t, "data/preferences.jsonl", cfg.PreferencesPath)
 	assert.Equal(t, 0, cfg.SubagentMaxDepth, "default is 0 (disabled) when SubagentEnabled=false; comes from recipe when enabled")
 	assert.Equal(t, 20, cfg.MaxHistoryTurns)
@@ -64,7 +64,7 @@ func TestResolvedActiveModels_AllProviders(t *testing.T) {
 	resolved := cfg.ResolvedActiveModels()
 	assert.Contains(t, resolved, "claude-sonnet-4-6")
 	assert.Contains(t, resolved, "gpt-4o")
-	assert.Contains(t, resolved, "gemini-2.0-flash")
+	assert.Contains(t, resolved, "gemini-2.5-flash")
 }
 
 func TestResolvedActiveModels_ExplicitModels(t *testing.T) {
@@ -78,7 +78,7 @@ func TestLoad_DefaultModelNames(t *testing.T) {
 	cfg := config.Load()
 	assert.Equal(t, "claude-sonnet-4-6", cfg.DefaultAnthropicModel)
 	assert.Equal(t, "gpt-4o", cfg.DefaultOpenAIModel)
-	assert.Equal(t, "gemini-2.0-flash", cfg.DefaultGeminiModel)
+	assert.Equal(t, "gemini-2.5-flash", cfg.DefaultGeminiModel)
 }
 
 func TestLoad_OpenRouterAPIKey(t *testing.T) {
@@ -156,7 +156,7 @@ func TestLoad_VertexAI(t *testing.T) {
 
 func TestLoad_VertexDefaultModel(t *testing.T) {
 	cfg := config.Load()
-	assert.Equal(t, "gemini-2.0-flash", cfg.DefaultVertexModel)
+	assert.Equal(t, "gemini-2.5-flash", cfg.DefaultVertexModel)
 }
 
 // ─── ResolvedActiveModels with new providers ─────────────────────────────────
