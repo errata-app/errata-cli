@@ -49,7 +49,14 @@ var interactiveSections = func() []string {
 	if tools.SubagentEnabled {
 		s = append(s, "sub-agent")
 	}
-	s = append(s, "sandbox", "tool-guidance", "reminders", "hooks", "output-processing", "context-summarization")
+	s = append(s, "sandbox", "tool-guidance")
+	if tools.RemindersEnabled {
+		s = append(s, "reminders")
+	}
+	if tools.HooksEnabled {
+		s = append(s, "hooks")
+	}
+	s = append(s, "output-processing", "context-summarization")
 	return s
 }()
 
@@ -141,8 +148,14 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 	sections = append(sections,
 		configSection{Name: "sandbox", Summary: summarizeSandbox(rec), Kind: "scalar"},
 		configSection{Name: "tool-guidance", Summary: summarizeToolGuidance(rec), Kind: "text", Path: "tool_guidance"},
-		configSection{Name: "reminders", Summary: summarizeReminders(rec), Kind: "list"},
-		configSection{Name: "hooks", Summary: summarizeHooks(rec), Kind: "list"},
+	)
+	if tools.RemindersEnabled {
+		sections = append(sections, configSection{Name: "reminders", Summary: summarizeReminders(rec), Kind: "list"})
+	}
+	if tools.HooksEnabled {
+		sections = append(sections, configSection{Name: "hooks", Summary: summarizeHooks(rec), Kind: "list"})
+	}
+	sections = append(sections,
 		configSection{Name: "output-processing", Summary: summarizeOutputProcessing(rec), Kind: "scalar"},
 		configSection{Name: "context-summarization", Summary: summarizeContextSummarization(rec), Kind: "text", Path: "context_summarization.prompt"},
 	)
