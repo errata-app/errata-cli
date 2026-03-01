@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/rivo/uniseg"
@@ -123,8 +122,7 @@ type App struct {
 	input textarea.Model
 
 	// persistent conversation feed
-	feed   []feedItem
-	feedVP viewport.Model
+	feed []feedItem
 
 	// current run
 	panels    []*panelState
@@ -261,7 +259,6 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 		sessionID:             sessionID,
 		input:                 ta,
 		configTextArea:        cta,
-		feedVP:                viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		panelIdx:              make(map[string]int),
 		conversationHistories: h,
 		sessionCostPerModel:   make(map[string]float64),
@@ -309,42 +306,6 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 // SetProgram wires up the tea.Program reference so goroutines can send messages.
 func (a *App) SetProgram(p *tea.Program) { a.prog = p }
 
-// feedVPHeight returns the number of lines the feed viewport should occupy.
-func (a *App) feedVPHeight() int {
-	const headerLines = 3 // header text + pinned models line + blank line
-	const sepLine = 1     // blank line between viewport and footer
-	var footerLines int
-	switch a.mode {
-	case modeIdle:
-		if a.configOverlayActive {
-			footerLines = 0 // config overlay replaces feed VP entirely (see View)
-		} else {
-			footerLines = a.input.Height() + a.lastHintLines
-			if a.searchActive {
-				footerLines++ // search bar line
-			}
-			if a.recipeModified {
-				footerLines++ // [modified] badge
-			}
-			if a.pastedText != "" {
-				footerLines += 3 // border + content + border
-			}
-			if a.escHintVisible {
-				footerLines++ // "ESC again to clear" hint
-			}
-		}
-	case modeRunning:
-		footerLines = 1 // "  running…"
-	case modeSelecting:
-		// "Select a response to apply:\n" + N entries + "  s  Skip\n" + "\nchoice> sel"
-		footerLines = max(len(a.responses)+4, 4)
-	case modeRating:
-		footerLines = 2 // rating prompt line + blank
-	}
-	h := max(a.height-headerLines-sepLine-footerLines, 3)
-	return h
-}
-
 // inputLines computes the visual line count of the textarea (accounting for
 // soft-wrap at the textarea width), capped at MaxHeight.
 func (a *App) inputLines() int {
@@ -368,28 +329,19 @@ func (a *App) inputLines() int {
 	return max(1, min(lines, a.input.MaxHeight))
 }
 
-// resizeInput updates the textarea height to match its content and rebuilds
-// the feed viewport if the height changed. Also recomputes hint lines so the
-// viewport shrinks/grows as completion suggestions appear or disappear.
+// resizeInput updates the textarea height to match its content and recomputes
+// hint lines for the View layout.
 func (a *App) resizeInput() {
 	h := a.inputLines()
-	hints := a.computeHintLines()
-	changed := false
 	if h != a.input.Height() {
 		a.input.SetHeight(h)
-		changed = true
 	}
-	if hints != a.lastHintLines {
-		a.lastHintLines = hints
-		changed = true
-	}
-	if changed {
-		*a = a.withFeedRebuilt(true)
-	}
+	a.lastHintLines = a.computeHintLines()
 }
 
-// renderFeedContent builds the viewport content string from all feed items.
-func (a *App) renderFeedContent() string {
+// renderInitialFeed builds a printable string from all current feed items.
+// Used by Init to print startup content (warnings, resume messages) to scrollback.
+func (a *App) renderInitialFeed() string {
 	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
@@ -426,29 +378,42 @@ func (a *App) renderFeedContent() string {
 	return sb.String()
 }
 
-// withFeedRebuilt resizes and refreshes the feed viewport. Returns updated App.
-func (a *App) withFeedRebuilt(gotoBottom bool) App {
-	a.feedVP.SetWidth(a.width)
-	a.feedVP.SetHeight(a.feedVPHeight())
-	a.feedVP.SetContent(a.renderFeedContent())
-	if gotoBottom {
-		a.feedVP.GotoBottom()
-	}
-	return *a
-}
-
-// withMessage appends a system message to the feed and rebuilds the viewport.
-func (a *App) withMessage(text string) App {
+// withMessage appends a system message to the feed and prints it to terminal
+// scrollback via tea.Println.
+func (a *App) withMessage(text string) (App, tea.Cmd) {
 	a.feed = append(a.feed, feedItem{kind: "message", text: text})
-	return a.withFeedRebuilt(true)
+	msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	w := max(a.width, 40)
+	var sb strings.Builder
+	for line := range strings.SplitSeq(text, "\n") {
+		sb.WriteString(wrapText(line, w, 2, msgStyle))
+		sb.WriteByte('\n')
+	}
+	return *a, tea.Println(strings.TrimRight(sb.String(), "\n"))
 }
 
 //nolint:gocritic // bubbletea requires value receiver for tea.Model interface
 func (a App) Init() tea.Cmd {
-	if len(a.adapters) == 0 {
-		return tea.Batch(textarea.Blink, func() tea.Msg { return welcomeMsg{} })
+	cmds := []tea.Cmd{textarea.Blink}
+
+	// Print header to scrollback.
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
+	modelLineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	header := headerStyle.Render("  Errata  A/B testing tool for agentic AI models") + "\n" +
+		wrapText(strings.Join(a.activeModelIDs(), " · "), max(a.width, 40), 2, modelLineStyle)
+	cmds = append(cmds, tea.Println(header))
+
+	// Print initial feed items (warnings, resume messages).
+	if len(a.feed) > 0 {
+		if content := a.renderInitialFeed(); content != "" {
+			cmds = append(cmds, tea.Println(strings.TrimRight(content, "\n")))
+		}
 	}
-	return textarea.Blink
+
+	if len(a.adapters) == 0 {
+		cmds = append(cmds, func() tea.Msg { return welcomeMsg{} })
+	}
+	return tea.Batch(cmds...)
 }
 
 // ---- update ----
@@ -462,8 +427,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.input.SetWidth(msg.Width - 4)
 		a.resizeInput()
-		atBottom := a.feedVP.AtBottom()
-		return a.withFeedRebuilt(atBottom), nil
+		return a, nil
 
 	case tea.PasteMsg:
 		if a.mode == modeIdle {
@@ -495,10 +459,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if idx, ok := a.panelIdx[msg.modelID]; ok {
 			a.panels[idx].addEvent(msg.event)
 		}
-		a.feedVP.SetWidth(a.width)
-		a.feedVP.SetHeight(a.feedVPHeight())
-		a.feedVP.SetContent(a.renderFeedContent())
-		a.feedVP.GotoBottom()
 		return a, nil
 
 	case modelDoneMsg:
@@ -518,17 +478,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return a.withFeedRebuilt(true), nil
+		return a, nil
 
 	case escHintMsg:
 		a.escHintVisible = false
-		return a.withFeedRebuilt(false), nil
+		return a, nil
 
 	case welcomeMsg:
 		return a.withMessage(
 			"Welcome to Errata! No API keys are configured.\n" +
 				"Set API keys in .env and restart, or use /config to view settings.",
-		), nil
+		)
 
 	case compactCompleteMsg:
 		a.conversationHistories = msg.histories
@@ -536,7 +496,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err := history.Save(a.histPath, a.conversationHistories); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
 		}
-		return a.withMessage("History compacted."), nil
+		return a.withMessage("History compacted.")
 
 	case runCompleteMsg:
 		a.cancelRun = nil
@@ -605,6 +565,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.feed[len(a.feed)-1].responses = msg.responses
 		}
 
+		// Build scrollback output: panel summaries + diffs.
+		var out strings.Builder
+		out.WriteString(renderInlinePanels(a.panels, a.width))
+		if d := RenderDiffs(msg.responses, a.width); d != "" {
+			out.WriteString(d)
+		}
+
 		// If any models were interrupted, show a message and return to idle.
 		if runner.HasInterrupted(msg.responses) {
 			var names []string
@@ -613,14 +580,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					names = append(names, r.ModelID)
 				}
 			}
+			note := fmt.Sprintf(
+				"Interrupted (%s). /resume to continue.",
+				strings.Join(names, ", "),
+			)
 			if len(a.feed) > 0 {
-				a.feed[len(a.feed)-1].note = fmt.Sprintf(
-					"Interrupted (%s). /resume to continue.",
-					strings.Join(names, ", "),
-				)
+				a.feed[len(a.feed)-1].note = note
 			}
+			noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
+			out.WriteString(wrapText(note, a.width, 2, noteStyle))
+			out.WriteByte('\n')
 			a.mode = modeIdle
-			return a.withFeedRebuilt(true), nil
+			return a, tea.Println(strings.TrimRight(out.String(), "\n"))
 		}
 
 		// Successful completion — clear any stale checkpoint.
@@ -634,6 +605,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		printCmd := tea.Cmd(nil)
+		if s := strings.TrimRight(out.String(), "\n"); s != "" {
+			printCmd = tea.Println(s)
+		}
+
 		if !hasWrites {
 			okWithText := 0
 			for _, resp := range msg.responses {
@@ -643,13 +619,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if okWithText == 0 {
 				a.mode = modeIdle
-				return a.withFeedRebuilt(true), nil
+				return a, printCmd
 			}
 			if okWithText == 1 {
 				// Single usable response — offer thumbs-up/down rating.
 				a.responses = msg.responses
 				a.mode = modeRating
-				return a.withFeedRebuilt(true), nil
+				return a, printCmd
 			}
 			// okWithText >= 2: fall through to modeSelecting for text voting.
 		}
@@ -658,7 +634,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.mode = modeSelecting
 		a.selection = ""
 		a.selectionErr = ""
-		return a.withFeedRebuilt(true), nil
+		return a, printCmd
 	}
 
 	// Pass remaining events to textarea in idle mode.
@@ -676,29 +652,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value receiver for tea.Model interface
 	var sb strings.Builder
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
-	sb.WriteString(headerStyle.Render("  Errata  A/B testing tool for agentic AI models"))
-	sb.WriteByte('\n')
-	modelLineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	sb.WriteString(wrapText(strings.Join(a.activeModelIDs(), " · "), a.width, 2, modelLineStyle))
-	sb.WriteByte('\n')
-
-	// When config overlay is active, skip the feed viewport entirely to give
-	// the overlay the full terminal height below the header.
-	configFullScreen := a.mode == modeIdle && a.configOverlayActive
-	if !configFullScreen {
-		sb.WriteString(a.feedVP.View())
-		sb.WriteByte('\n')
-	}
-
 	switch a.mode {
+	case modeRunning:
+		sb.WriteString(renderInlinePanels(a.panels, a.width))
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).
+			Render("  running… (ESC to cancel)"))
+
 	case modeSelecting:
-		if !a.feedVP.AtBottom() {
-			hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).
-				Render(fmt.Sprintf("  scroll/↑↓/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
-			sb.WriteString(hint)
-			sb.WriteByte('\n')
-		}
 		sb.WriteString(RenderSelectionMenu(a.responses))
 		if a.selectionErr != "" {
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).
@@ -720,14 +680,9 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 		sb.WriteString(ratingStyle.Render(fmt.Sprintf("  Rate %s's response:", ratingModelName)))
 		sb.WriteString("  y = good  n = bad  s = skip\n")
 
-	case modeRunning:
-		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).
-			Render("  running… (ESC to cancel)"))
-
 	case modeIdle:
 		if a.configOverlayActive {
-			const configHeaderLines = 3 // Errata header + pinned models + blank
-			overlayHeight := max(a.height-configHeaderLines, 5)
+			overlayHeight := max(a.height-1, 5)
 			sb.WriteString(renderConfigOverlay(
 				a.configSections, a.configSelectedIdx, a.configExpandedIdx,
 				a.recipeModified, a.width, overlayHeight,
@@ -736,17 +691,13 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 				a.configEditBuf,
 				a.configTextEditing, a.configTextArea.View(),
 			))
-			break
+			v := tea.NewView(sb.String())
+			v.AltScreen = true
+			return v
 		}
 		if a.recipeModified {
 			modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
 			sb.WriteString(modStyle.Render("  [modified]"))
-			sb.WriteByte('\n')
-		}
-		if !a.feedVP.AtBottom() {
-			hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).
-				Render(fmt.Sprintf("  scroll/pgup/pgdn  %.0f%%", a.feedVP.ScrollPercent()*100))
-			sb.WriteString(hint)
 			sb.WriteByte('\n')
 		}
 		if a.searchActive {
@@ -844,7 +795,9 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 		}
 	}
 
-	v := tea.NewView(sb.String()); v.AltScreen = true; return v
+	v := tea.NewView(sb.String())
+	v.AltScreen = false
+	return v
 }
 
 // Run starts the bubbletea program and blocks until exit.

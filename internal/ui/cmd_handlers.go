@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
@@ -58,16 +59,16 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 	case "/stats":
 		return a.handleStatsCmd()
 	case "/help":
-		return a.withMessage(helpText()), nil
+		return a.withMessage(helpText())
 	}
 	// Parse @mentions for transient per-message model targeting.
 	mention := ParseMentions(trimmed, a.modelIDCandidates())
 	if len(mention.Errors) > 0 {
-		return a.withMessage(fmt.Sprintf("No model matching %q in current recipe.", mention.Errors[0])), nil
+		return a.withMessage(fmt.Sprintf("No model matching %q in current recipe.", mention.Errors[0]))
 	}
 	if len(mention.ModelIDs) > 0 {
 		if mention.Prompt == "" {
-			return a.withMessage("No prompt text after @mention(s)."), nil
+			return a.withMessage("No prompt text after @mention(s).")
 		}
 		var mentionAdapters []models.ModelAdapter
 		for _, id := range mention.ModelIDs {
@@ -81,7 +82,7 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 			if found == nil {
 				newAd, err := adapters.NewAdapter(id, a.cfg)
 				if err != nil {
-					return a.withMessage(fmt.Sprintf("Cannot create adapter for %q: %v", id, err)), nil
+					return a.withMessage(fmt.Sprintf("Cannot create adapter for %q: %v", id, err))
 				}
 				found = newAd
 			}
@@ -98,7 +99,7 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	if a.verbose {
 		state = "on"
 	}
-	return a.withMessage(fmt.Sprintf("Verbose mode %s.", state)), nil
+	return a.withMessage(fmt.Sprintf("Verbose mode %s.", state))
 }
 
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -106,9 +107,6 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 	a.rewindStack = nil
 	a.pastedText = ""
 	a.pastedLineCount = 0
-	a.feedVP.SetWidth(a.width)
-	a.feedVP.SetHeight(a.feedVPHeight())
-	a.feedVP.SetContent("")
 	return a, nil
 }
 
@@ -121,9 +119,6 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubblet
 	if err := history.Clear(a.histPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
 	}
-	a.feedVP.SetWidth(a.width)
-	a.feedVP.SetHeight(a.feedVPHeight())
-	a.feedVP.SetContent("")
 	return a, nil
 }
 
@@ -142,7 +137,8 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	if compactRecipe != nil {
 		compactSumPrompt = compactRecipe.SummarizationPrompt
 	}
-	return a.withMessage("Compacting conversation history…"), func() tea.Msg {
+	app, printCmd := a.withMessage("Compacting conversation history…")
+	return app, tea.Batch(printCmd, func() tea.Msg {
 		ctx := prompt.WithSummarizationPrompt(context.Background(), compactSumPrompt)
 		updated := runner.CompactHistories(
 			ctx, toCompact, histories,
@@ -151,7 +147,7 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 			},
 		)
 		return compactCompleteMsg{histories: updated}
-	}
+	})
 }
 
 func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -222,7 +218,7 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 		}
 		fmt.Fprintf(&sb, "  Total: $%.4f\n", a.totalCostUSD)
 	}
-	return a.withMessage(strings.TrimRight(sb.String(), "\n")), nil
+	return a.withMessage(strings.TrimRight(sb.String(), "\n"))
 }
 
 func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -238,7 +234,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	}
 
 	if len(toRun) == 0 {
-		return a.withMessage("No models configured. Set API keys in .env and restart."), nil
+		return a.withMessage("No models configured. Set API keys in .env and restart.")
 	}
 
 	// Record in prompt history (deduplicate consecutive identical entries).
@@ -269,7 +265,10 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		prompt: trimmed,
 		panels: a.panels,
 	})
-	a = a.withFeedRebuilt(true)
+
+	// Print the prompt to scrollback.
+	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
+	promptPrintCmd := tea.Println(wrapText("> "+trimmed, max(a.width, 40), 0, promptStyle))
 
 	ads := toRun
 	verbose := a.verbose
@@ -318,7 +317,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		baseCtx = adapters.WithDebugRequests(baseCtx)
 	}
 
-	return a, func() tea.Msg {
+	return a, tea.Batch(promptPrintCmd, func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		// Skip auto-compact when context strategy is "manual" or "off".
@@ -401,16 +400,16 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		}
 
 		return runCompleteMsg{responses: responses, compactedHistories: compacted, report: report}
-	}
+	})
 }
 
 func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	cp, err := checkpoint.Load(a.checkpointPath)
 	if err != nil {
-		return a.withMessage(fmt.Sprintf("Error loading checkpoint: %v", err)), nil
+		return a.withMessage(fmt.Sprintf("Error loading checkpoint: %v", err))
 	}
 	if cp == nil {
-		return a.withMessage("No interrupted run to resume."), nil
+		return a.withMessage("No interrupted run to resume.")
 	}
 
 	var completedResponses []models.ModelResponse
@@ -427,7 +426,7 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 		if err := checkpoint.Clear(a.checkpointPath); err != nil {
 			log.Printf("warning: failed to clear checkpoint: %v", err)
 		}
-		return a.withMessage("All models from the last run completed. No resume needed."), nil
+		return a.withMessage("All models from the last run completed. No resume needed.")
 	}
 
 	var rerunAdapters []models.ModelAdapter
@@ -442,7 +441,7 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 		if found == nil {
 			newAd, err := adapters.NewAdapter(id, a.cfg)
 			if err != nil {
-				return a.withMessage(fmt.Sprintf("Cannot create adapter for %q: %v", id, err)), nil
+				return a.withMessage(fmt.Sprintf("Cannot create adapter for %q: %v", id, err))
 			}
 			found = newAd
 		}
@@ -457,7 +456,7 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 
 func (a App) handleRewindCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if len(a.rewindStack) == 0 {
-		return a.withMessage("Nothing to rewind."), nil
+		return a.withMessage("Nothing to rewind.")
 	}
 
 	// Pop entry.
@@ -509,7 +508,7 @@ func (a App) handleRewindCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 		}
 	}
 
-	return a.withMessage("Rewound last run." + fileMsg), nil
+	return a.withMessage("Rewound last run." + fileMsg)
 }
 
 func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -543,7 +542,10 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		prompt: "[resume] " + userPrompt,
 		panels: a.panels,
 	})
-	a = a.withFeedRebuilt(true)
+
+	// Print the resume prompt to scrollback.
+	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
+	promptPrintCmd := tea.Println(wrapText("> [resume] "+userPrompt, max(a.width, 40), 0, promptStyle))
 
 	ads := rerunAdapters
 	prog := a.prog
@@ -590,7 +592,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		baseCtx = adapters.WithDebugRequests(baseCtx)
 	}
 
-	return a, func() tea.Msg {
+	return a, tea.Batch(promptPrintCmd, func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		if contextStrategy != "manual" && contextStrategy != "off" {
@@ -677,7 +679,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		}
 
 		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, report: report}
-	}
+	})
 }
 
 func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -696,7 +698,7 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 			a.recipeModified = false
 			a.applySessionRecipe()
 			a.configOverlayActive = false
-			return a.withMessage("Configuration reset to recipe defaults."), nil
+			return a.withMessage("Configuration reset to recipe defaults.")
 		}
 		for i, sec := range a.configSections {
 			if strings.EqualFold(sec.Name, lowerArgs) {
@@ -762,7 +764,7 @@ func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 	case "output":
 		return a.handleExportOutput(parts)
 	default:
-		return a.withMessage("Usage: /export recipe [path] | /export output [path]"), nil
+		return a.withMessage("Usage: /export recipe [path] | /export output [path]")
 	}
 }
 
@@ -772,7 +774,7 @@ func (a App) handleExportRecipe(parts []string) (tea.Model, tea.Cmd) { //nolint:
 		rec = a.recipe
 	}
 	if rec == nil {
-		return a.withMessage("No recipe to export."), nil
+		return a.withMessage("No recipe to export.")
 	}
 
 	path := "recipe_export.md"
@@ -782,14 +784,14 @@ func (a App) handleExportRecipe(parts []string) (tea.Model, tea.Cmd) { //nolint:
 
 	md := rec.MarshalMarkdown()
 	if err := os.WriteFile(path, []byte(md), 0o600); err != nil {
-		return a.withMessage(fmt.Sprintf("Export failed: %v", err)), nil
+		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
 	}
-	return a.withMessage(fmt.Sprintf("Recipe exported to %s", path)), nil
+	return a.withMessage(fmt.Sprintf("Recipe exported to %s", path))
 }
 
 func (a App) handleExportOutput(parts []string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if a.lastReport == nil {
-		return a.withMessage("No run output to export. Run a prompt first."), nil
+		return a.withMessage("No run output to export. Run a prompt first.")
 	}
 
 	dir := output.DefaultDir
@@ -799,9 +801,9 @@ func (a App) handleExportOutput(parts []string) (tea.Model, tea.Cmd) { //nolint:
 
 	path, err := output.Save(dir, a.lastReport)
 	if err != nil {
-		return a.withMessage(fmt.Sprintf("Export failed: %v", err)), nil
+		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
 	}
-	return a.withMessage(fmt.Sprintf("Output exported to %s", path)), nil
+	return a.withMessage(fmt.Sprintf("Output exported to %s", path))
 }
 
 func (a App) handleImportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -811,18 +813,18 @@ func (a App) handleImportCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 	switch sub {
 	case "recipe":
 		if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-			return a.withMessage("Usage: /import recipe <path>"), nil
+			return a.withMessage("Usage: /import recipe <path>")
 		}
 		return a.handleImportRecipe(strings.TrimSpace(parts[1]))
 	default:
-		return a.withMessage("Usage: /import recipe <path>"), nil
+		return a.withMessage("Usage: /import recipe <path>")
 	}
 }
 
 func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	rec, err := recipe.Parse(path)
 	if err != nil {
-		return a.withMessage(fmt.Sprintf("Import failed: %v", err)), nil
+		return a.withMessage(fmt.Sprintf("Import failed: %v", err))
 	}
 
 	a.sessionRecipe = cloneRecipe(rec)
@@ -842,5 +844,5 @@ func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:goc
 			}
 			return len(rec.Tools.Allowlist)
 		}(),
-	)), nil
+	))
 }

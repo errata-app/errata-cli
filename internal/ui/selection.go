@@ -34,14 +34,7 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 		}
 	}
 
-	switch msg.Code {
-	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
-		var cmd tea.Cmd
-		a.feedVP, cmd = a.feedVP.Update(msg)
-		return a, cmd
-
-	default:
-		if len(msg.Text) > 0 {
+	if len(msg.Text) > 0 {
 			switch strings.ToLower(msg.Text) {
 			case "y":
 				// Find the single OK response and record it as the winner.
@@ -62,7 +55,7 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 				}
 				a.responses = nil
 				a.mode = modeIdle
-				return a.withFeedRebuilt(true), nil
+				return a, nil
 
 			case "n":
 				for _, resp := range a.responses {
@@ -82,17 +75,16 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 				}
 				a.responses = nil
 				a.mode = modeIdle
-				return a.withFeedRebuilt(true), nil
+				return a, nil
 
 			case "s":
 				setNote("Skipped.")
 				a.lastReport = nil
 				a.responses = nil
 				a.mode = modeIdle
-				return a.withFeedRebuilt(true), nil
+				return a, nil
 			}
 		}
-	}
 	return a, nil
 }
 
@@ -108,10 +100,6 @@ func (a App) handleSelectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 	}
 
 	switch msg.Code {
-	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
-		var cmd tea.Cmd
-		a.feedVP, cmd = a.feedVP.Update(msg)
-		return a, cmd
 
 	case tea.KeyEnter:
 		choice := strings.TrimSpace(a.selection)
@@ -146,7 +134,7 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 		a.lastReport = nil
 		a.responses = nil
 		a.mode = modeIdle
-		return a.withFeedRebuilt(true), nil
+		return a, nil
 	}
 
 	n, err := strconv.Atoi(choice)
@@ -217,7 +205,7 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 
 	a.responses = nil
 	a.mode = modeIdle
-	return a.withFeedRebuilt(true), nil
+	return a, nil
 }
 
 // buildRecipeSnapshot creates a RecipeSnapshot from the current App state.

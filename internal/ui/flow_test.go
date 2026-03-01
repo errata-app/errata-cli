@@ -994,7 +994,7 @@ func TestRewind_EmptyStack(t *testing.T) {
 	a := newAppForTest(t, nil)
 	result, cmd := a.handleRewindCmd()
 	a = appFrom(t, result)
-	assert.Nil(t, cmd)
+	assert.NotNil(t, cmd, "withMessage returns a tea.Println cmd")
 	// Should show "Nothing to rewind." in the feed.
 	found := false
 	for _, item := range a.feed {
