@@ -1209,6 +1209,17 @@ func TestSystemPromptSuffix_NoActiveTools_ReturnsFullGuidance(t *testing.T) {
 	assert.Equal(t, unfiltered, s)
 }
 
+func TestSystemPromptSuffix_ExplicitlyEmptyTools_ReturnsNoGuidance(t *testing.T) {
+	// Explicitly setting an empty tool slice (all tools disabled) should return
+	// no tool guidance at all — distinct from "no tools in context" (nil).
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	s := tools.SystemPromptSuffix(ctx)
+	assert.NotContains(t, s, "list_directory")
+	assert.NotContains(t, s, "read_file")
+	assert.NotContains(t, s, "bash")
+	assert.NotContains(t, s, "Tool use guidance")
+}
+
 func TestSystemPromptSuffix_PartialOverlap_EditWithoutWrite(t *testing.T) {
 	// edit_file active but not write_file → lines mentioning edit_file are included
 	// (any tagged tool matching suffices).

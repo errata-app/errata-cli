@@ -568,10 +568,11 @@ func init() {
 }
 
 // buildGuidance returns the guidance text filtered to only include lines whose
-// tagged tools overlap with activeNames. If activeNames is empty (nil or zero
-// length), all lines are included (backward-compatible default).
+// tagged tools overlap with activeNames. A nil map means "no filter" and returns
+// the full guidance (backward-compatible default). A non-nil empty map means
+// "zero tools active" and returns no guidance.
 func buildGuidance(activeNames map[string]bool) string {
-	if len(activeNames) == 0 {
+	if activeNames == nil {
 		return toolUseGuidance
 	}
 	var lines []string
@@ -621,10 +622,19 @@ func effectiveGuidanceForCtx(ctx context.Context) string {
 		return base
 	}
 
-	active := ActiveToolsFromContext(ctx)
-	nameSet := make(map[string]bool, len(active))
-	for _, d := range active {
-		nameSet[d.Name] = true
+	// Read the raw context value to distinguish three cases:
+	//   1. No value in context (ok=false)       → nil map → full guidance
+	//   2. Nil slice stored (WithActiveTools(nil)) → nil map → full guidance
+	//   3. Non-nil slice (possibly empty)        → non-nil map → filtered
+	// ActiveToolsFromContext can't be used here because it falls back to
+	// Definitions when the slice is empty.
+	v, ok := ctx.Value(activeToolsKey{}).([]ToolDef)
+	var nameSet map[string]bool // nil = no filter
+	if ok && v != nil {
+		nameSet = make(map[string]bool, len(v))
+		for _, d := range v {
+			nameSet[d.Name] = true
+		}
 	}
 	base := buildGuidance(nameSet)
 	if SubagentEnabled {
