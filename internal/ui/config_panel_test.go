@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -440,7 +441,7 @@ func TestBuildScalarFields_UnknownSection(t *testing.T) {
 func TestRenderConfigOverlay_ContainsSectionNames(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "")
 	for _, name := range interactiveSections {
 		assert.Contains(t, out, name)
 	}
@@ -450,21 +451,21 @@ func TestRenderConfigOverlay_ContainsSectionNames(t *testing.T) {
 func TestRenderConfigOverlay_ModifiedBadge(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, true, 80, nil, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, -1, true, 80, 40, nil, 0, 0, nil, 0, "", false, "")
 	assert.Contains(t, out, "[modified]")
 }
 
 func TestRenderConfigOverlay_NoModifiedBadgeWhenClean(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "")
 	assert.NotContains(t, out, "[modified]")
 }
 
 func TestRenderConfigOverlay_ListExpanded(t *testing.T) {
 	sections := []configSection{{Name: "tools", Summary: "8 enabled", Kind: "list"}}
 	items := []listItem{{Label: "bash", Active: true}, {Label: "read_file", Active: false}}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, items, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, items, 0, 0, nil, 0, "", false, "")
 	assert.Contains(t, out, "bash")
 	assert.Contains(t, out, "read_file")
 	assert.Contains(t, out, "[x]")
@@ -477,7 +478,7 @@ func TestRenderConfigOverlay_ScalarExpanded(t *testing.T) {
 		{Key: "timeout", Path: "constraints.timeout", Value: "5m0s"},
 		{Key: "max_steps", Path: "constraints.max_steps", Value: "50"},
 	}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, nil, 0, fields, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, fields, 0, "", false, "")
 	assert.Contains(t, out, "timeout")
 	assert.Contains(t, out, "max_steps")
 	assert.Contains(t, out, "5m0s")
@@ -596,8 +597,8 @@ func TestConfigPathDefaults_RenderInScalarView(t *testing.T) {
 	fields := buildScalarFields("constraints", rec)
 	out := renderConfigOverlay(
 		[]configSection{{Name: "constraints", Kind: "scalar"}},
-		0, 0, false, 80,
-		nil, 0,
+		0, 0, false, 80, 40,
+		nil, 0, 0,
 		fields, 0, "", false, "",
 	)
 	// Unset fields should show their default values.
@@ -633,7 +634,7 @@ func TestSectionDescriptions_NavViewShowsDescForSelected(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
 	// Render with first section selected.
-	out := renderConfigOverlay(sections, 0, -1, false, 80, nil, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "")
 	// The selected section (models) should show its brief description.
 	assert.Contains(t, out, sectionDescriptions["models"].Brief)
 }
@@ -643,7 +644,7 @@ func TestSectionDescriptions_ExpandedViewShowsDetail(t *testing.T) {
 	sections := buildConfigSections(rec, nil, nil)
 	fields := buildScalarFields("constraints", rec)
 	// Expand constraints (index 5).
-	out := renderConfigOverlay(sections, 5, 5, false, 80, nil, 0, fields, 0, "", false, "")
+	out := renderConfigOverlay(sections, 5, 5, false, 80, 40, nil, 0, 0, fields, 0, "", false, "")
 	assert.Contains(t, out, "Set wall-clock timeout and maximum tool-call steps per model.")
 }
 
@@ -720,7 +721,7 @@ func TestTextSections_HavePaths(t *testing.T) {
 
 func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {
 	sections := []configSection{{Name: "system-prompt", Kind: "text", DetailDesc: "test detail"}}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, nil, 0, nil, 0, "",
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, nil, 0, "",
 		true, "  [textarea content here]")
 	assert.Contains(t, out, "[textarea content here]")
 	assert.Contains(t, out, "Ctrl+S = save")
@@ -728,8 +729,65 @@ func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {
 
 func TestRenderConfigOverlay_TextPreviewShown(t *testing.T) {
 	sections := []configSection{{Name: "system-prompt", Kind: "text", DetailDesc: "test detail"}}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, nil, 0, nil, 0, "Hello world",
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, nil, 0, "Hello world",
 		false, "")
 	assert.Contains(t, out, "Hello world")
 	assert.Contains(t, out, "Enter = edit")
+}
+
+// ── windowed list rendering ──────────────────────────────────────────────────
+
+func TestRenderConfigOverlay_ListWindowed(t *testing.T) {
+	// 20 items, small maxHeight → only a subset should be rendered.
+	sections := []configSection{{Name: "tools", Summary: "20 enabled", Kind: "list", DetailDesc: "Toggle tools"}}
+	items := make([]listItem, 20)
+	for i := range items {
+		items[i] = listItem{Label: fmt.Sprintf("tool_%02d", i), Active: true}
+	}
+	// maxHeight 12 → overhead ~6 → window ~6 items.
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 12, items, 0, 0, nil, 0, "", false, "")
+	// First few items should be visible.
+	assert.Contains(t, out, "tool_00")
+	assert.Contains(t, out, "tool_05")
+	// Items past the window should not be visible.
+	assert.NotContains(t, out, "tool_19")
+	// Should show "more" indicator at bottom.
+	assert.Contains(t, out, "↓")
+	assert.Contains(t, out, "more")
+	// Should NOT show "more" indicator at top since offset=0.
+	assert.NotContains(t, out, "↑")
+}
+
+func TestRenderConfigOverlay_ListWindowedWithOffset(t *testing.T) {
+	sections := []configSection{{Name: "tools", Summary: "20 enabled", Kind: "list", DetailDesc: "Toggle tools"}}
+	items := make([]listItem, 20)
+	for i := range items {
+		items[i] = listItem{Label: fmt.Sprintf("tool_%02d", i), Active: true}
+	}
+	// Offset=5 so items before 5 are hidden.
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 12, items, 5, 5, nil, 0, "", false, "")
+	// Items before offset should not be visible.
+	assert.NotContains(t, out, "tool_00")
+	// Items starting from offset should be visible.
+	assert.Contains(t, out, "tool_05")
+	// Should show "more" indicators at both top and bottom.
+	assert.Contains(t, out, "↑")
+	assert.Contains(t, out, "↓")
+}
+
+func TestRenderConfigOverlay_ListFitsHeight(t *testing.T) {
+	// Few items with large maxHeight → all should be rendered, no indicators.
+	sections := []configSection{{Name: "tools", Summary: "3 enabled", Kind: "list", DetailDesc: "Toggle tools"}}
+	items := []listItem{
+		{Label: "bash", Active: true},
+		{Label: "read_file", Active: true},
+		{Label: "write_file", Active: false},
+	}
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, items, 0, 0, nil, 0, "", false, "")
+	assert.Contains(t, out, "bash")
+	assert.Contains(t, out, "read_file")
+	assert.Contains(t, out, "write_file")
+	// No scroll indicators when all items fit.
+	assert.NotContains(t, out, "↑")
+	assert.NotContains(t, out, "↓")
 }

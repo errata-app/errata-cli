@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/stretchr/testify/assert"
 	"github.com/suarezc/errata/internal/models"
 )
 
@@ -236,4 +237,63 @@ func TestHintWriter_ZeroItems(t *testing.T) {
 	if sb.Len() != 0 {
 		t.Errorf("expected empty output for zero items, got %q", sb.String())
 	}
+}
+
+// ─── countCappedHints tests ──────────────────────────────────────────────────
+
+func TestCountCappedHints_Zero(t *testing.T) {
+	assert.Equal(t, 0, countCappedHints(0))
+}
+
+func TestCountCappedHints_BelowCap(t *testing.T) {
+	assert.Equal(t, 3, countCappedHints(3))
+}
+
+func TestCountCappedHints_AtCap(t *testing.T) {
+	assert.Equal(t, maxHintLines, countCappedHints(maxHintLines))
+}
+
+func TestCountCappedHints_AboveCap(t *testing.T) {
+	// Above cap: capped items + 1 for "... and N more" line.
+	assert.Equal(t, maxHintLines+1, countCappedHints(maxHintLines+5))
+}
+
+// ─── computeHintLines tests ─────────────────────────────────────────────────
+
+func TestComputeHintLines_Empty(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("")
+	assert.Equal(t, 0, a.computeHintLines())
+}
+
+func TestComputeHintLines_SlashCommand(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("/h")
+	lines := a.computeHintLines()
+	// "/h" matches "/help" at minimum.
+	assert.Positive(t, lines)
+}
+
+func TestComputeHintLines_ConfigSection(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("/config s")
+	lines := a.computeHintLines()
+	// "s" matches "system-prompt", "sandbox", "sub-agent" (if enabled).
+	assert.Positive(t, lines)
+}
+
+func TestComputeHintLines_Mention(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{
+		uiStub{"gpt-4o"}, uiStub{"gemini-2.0-flash"},
+	})
+	a.input.SetValue("@g")
+	lines := a.computeHintLines()
+	// "@g" matches both models.
+	assert.Equal(t, 2, lines)
+}
+
+func TestComputeHintLines_NoMatch(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("/zzzzz")
+	assert.Equal(t, 0, a.computeHintLines())
 }

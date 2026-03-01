@@ -570,3 +570,65 @@ func TestAltEnter_StillInsertsNewline(t *testing.T) {
 	// Alt+Enter should NOT submit — should stay idle.
 	assert.Equal(t, modeIdle, app.mode)
 }
+
+// ─── feedVPHeight hint accounting ────────────────────────────────────────────
+
+func TestFeedVPHeight_AccountsForHints(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.mode = modeIdle
+
+	// Baseline: no input → no hints.
+	baseHeight := a.feedVPHeight()
+
+	// Type "/" to trigger slash command hints.
+	a.input.SetValue("/")
+	a.lastHintLines = a.computeHintLines()
+	require.Positive(t, a.lastHintLines, "typing '/' should produce hint lines")
+
+	withHints := a.feedVPHeight()
+	assert.Less(t, withHints, baseHeight, "viewport should shrink when hints are shown")
+	assert.Equal(t, baseHeight-withHints, a.lastHintLines)
+}
+
+func TestFeedVPHeight_AccountsForPasteBadge(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.mode = modeIdle
+
+	baseHeight := a.feedVPHeight()
+
+	a.pastedText = "line1\nline2\nline3"
+	a.pastedLineCount = 3
+
+	withBadge := a.feedVPHeight()
+	assert.Less(t, withBadge, baseHeight, "viewport should shrink for paste badge")
+}
+
+func TestFeedVPHeight_AccountsForModifiedBadge(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.mode = modeIdle
+
+	baseHeight := a.feedVPHeight()
+
+	a.recipeModified = true
+	withBadge := a.feedVPHeight()
+	assert.Equal(t, baseHeight-1, withBadge, "viewport should shrink by 1 for [modified] badge")
+}
+
+func TestFeedVPHeight_AccountsForEscHint(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.width = 80
+	a.height = 40
+	a.mode = modeIdle
+
+	baseHeight := a.feedVPHeight()
+
+	a.escHintVisible = true
+	withHint := a.feedVPHeight()
+	assert.Equal(t, baseHeight-1, withHint, "viewport should shrink by 1 for ESC hint")
+}

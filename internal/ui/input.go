@@ -143,7 +143,7 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 		if a.pastedText != "" && a.input.Value() == "" {
 			a.pastedText = ""
 			a.pastedLineCount = 0
-			return a, nil
+			return a.withFeedRebuilt(true), nil
 		}
 	}
 
@@ -168,7 +168,7 @@ func (a App) handlePaste(text string) (tea.Model, tea.Cmd) { //nolint:gocritic /
 	if lineCount >= 3 {
 		a.pastedText = text
 		a.pastedLineCount = lineCount
-		return a, nil
+		return a.withFeedRebuilt(true), nil
 	}
 	// Short paste — insert into textarea as typed text.
 	a.input.InsertString(text)
