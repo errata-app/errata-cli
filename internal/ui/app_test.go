@@ -226,17 +226,11 @@ func TestCurrentSearchResult_EmptyWhenOutOfBounds(t *testing.T) {
 func TestHandleStatsCmd_NoData(t *testing.T) {
 	a := newAppForTest(t, nil)
 	result, cmd := a.handleStatsCmd()
-	if cmd != nil {
-		t.Error("expected nil cmd")
-	}
+	assert.NotNil(t, cmd, "withMessage now returns a tea.Println cmd")
 	app := result.(App)
-	if len(app.feed) == 0 {
-		t.Fatal("expected message in feed")
-	}
+	require.NotEmpty(t, app.feed, "expected message in feed")
 	msg := app.feed[len(app.feed)-1].text
-	if !strings.Contains(msg, "Stats") {
-		t.Errorf("expected 'Stats' in output, got: %s", msg)
-	}
+	assert.Contains(t, msg, "Stats")
 }
 
 func TestHandleStatsCmd_WithSessionCost(t *testing.T) {
@@ -257,25 +251,21 @@ func TestHandleStatsCmd_WithSessionCost(t *testing.T) {
 	}
 }
 
-func TestPinnedModels_ShownInHeader(t *testing.T) {
+func TestActiveModelIDs_SubsetShown(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
 	a := newAppForTest(t, ads)
 	a.activeAdapters = []models.ModelAdapter{uiStub{"m1"}}
 
-	view := a.View().Content
-	// Pinned models line shows only the active adapter.
-	assert.Contains(t, view, "m1")
-	// The old subset badge should be gone.
-	assert.NotContains(t, view, "[subset:")
+	ids := a.activeModelIDs()
+	assert.Equal(t, []string{"m1"}, ids)
 }
 
-func TestPinnedModels_AllModelsShown(t *testing.T) {
+func TestActiveModelIDs_AllModelsShown(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
 	a := newAppForTest(t, ads)
 
-	view := a.View().Content
-	assert.Contains(t, view, "m1")
-	assert.Contains(t, view, "m2")
+	ids := a.activeModelIDs()
+	assert.Equal(t, []string{"m1", "m2"}, ids)
 }
 
 func TestModelIDCandidates_UsesAvailableModels(t *testing.T) {
@@ -615,64 +605,32 @@ func TestPlainEnter_Submits(t *testing.T) {
 	assert.Empty(t, app.input.Value())
 }
 
-// ─── feedVPHeight hint accounting ────────────────────────────────────────────
+// ─── inline rendering ────────────────────────────────────────────────────────
 
-func TestFeedVPHeight_AccountsForHints(t *testing.T) {
+func TestWithMessage_ReturnsPrintCmd(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.width = 80
-	a.height = 40
-	a.mode = modeIdle
-
-	// Baseline: no input → no hints.
-	baseHeight := a.feedVPHeight()
-
-	// Type "/" to trigger slash command hints.
-	a.input.SetValue("/")
-	a.lastHintLines = a.computeHintLines()
-	require.Positive(t, a.lastHintLines, "typing '/' should produce hint lines")
-
-	withHints := a.feedVPHeight()
-	assert.Less(t, withHints, baseHeight, "viewport should shrink when hints are shown")
-	assert.Equal(t, baseHeight-withHints, a.lastHintLines)
+	result, cmd := a.withMessage("hello world")
+	assert.NotNil(t, cmd, "withMessage should return a non-nil tea.Println cmd")
+	assert.Len(t, result.feed, 1, "withMessage should append to feed")
+	assert.Equal(t, "hello world", result.feed[0].text)
 }
 
-func TestFeedVPHeight_AccountsForPasteBadge(t *testing.T) {
+func TestView_InlineModeNoAltScreen(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.width = 80
 	a.height = 40
-	a.mode = modeIdle
 
-	baseHeight := a.feedVPHeight()
-
-	a.pastedText = "line1\nline2\nline3"
-	a.pastedLineCount = 3
-
-	withBadge := a.feedVPHeight()
-	assert.Less(t, withBadge, baseHeight, "viewport should shrink for paste badge")
+	v := a.View()
+	assert.False(t, v.AltScreen, "View should use inline rendering (AltScreen=false)")
 }
 
-func TestFeedVPHeight_AccountsForModifiedBadge(t *testing.T) {
+func TestView_ConfigOverlayUsesAltScreen(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.width = 80
 	a.height = 40
-	a.mode = modeIdle
+	a.configOverlayActive = true
 
-	baseHeight := a.feedVPHeight()
-
-	a.recipeModified = true
-	withBadge := a.feedVPHeight()
-	assert.Equal(t, baseHeight-1, withBadge, "viewport should shrink by 1 for [modified] badge")
-}
-
-func TestFeedVPHeight_AccountsForEscHint(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.width = 80
-	a.height = 40
-	a.mode = modeIdle
-
-	baseHeight := a.feedVPHeight()
-
-	a.escHintVisible = true
-	withHint := a.feedVPHeight()
-	assert.Equal(t, baseHeight-1, withHint, "viewport should shrink by 1 for ESC hint")
+	v := a.View()
+	assert.True(t, v.AltScreen, "config overlay should use AltScreen=true")
 }

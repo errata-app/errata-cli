@@ -29,7 +29,7 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 			a.searchActive = true
 			a.searchQuery = ""
 			a.searchResultIdx = 0
-			return a.withFeedRebuilt(false), nil
+			return a, nil
 		}
 	}
 
@@ -69,18 +69,6 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 		}
 		// cursor on line > 0: fall through to textarea (cursor up in multiline)
 
-	case tea.KeyDown:
-		if a.historyIdx >= 0 {
-			return a.historyForward()
-		}
-		var cmd tea.Cmd
-		a.feedVP, cmd = a.feedVP.Update(msg)
-		return a, cmd
-
-	case tea.KeyPgUp, tea.KeyPgDown:
-		var cmd tea.Cmd
-		a.feedVP, cmd = a.feedVP.Update(msg)
-		return a, cmd
 
 	case 'j': // Shift+Enter sends Ctrl+J (linefeed) in many terminals.
 		if msg.Mod.Contains(tea.ModCtrl) {
@@ -152,7 +140,7 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 		if a.pastedText != "" && a.input.Value() == "" {
 			a.pastedText = ""
 			a.pastedLineCount = 0
-			return a.withFeedRebuilt(true), nil
+			return a, nil
 		}
 	}
 
@@ -177,7 +165,7 @@ func (a App) handlePaste(text string) (tea.Model, tea.Cmd) { //nolint:gocritic /
 	if lineCount >= 3 {
 		a.pastedText = text
 		a.pastedLineCount = lineCount
-		return a.withFeedRebuilt(true), nil
+		return a, nil
 	}
 	// Short paste — insert into textarea as typed text.
 	a.input.InsertString(text)
@@ -271,7 +259,7 @@ func (a App) toggleExpandLastRun() (tea.Model, tea.Cmd) { //nolint:gocritic // b
 		for _, p := range item.panels {
 			p.expanded = newState
 		}
-		return a.withFeedRebuilt(false), nil
+		return a, nil
 	}
 	return a, nil
 }
@@ -285,7 +273,7 @@ func (a App) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 			a.searchActive = false
 			a.searchQuery = ""
 			a.searchResultIdx = 0
-			return a.withFeedRebuilt(false), nil
+			return a, nil
 		case 'r':
 			// Cycle to next (older) match.
 			results := a.searchResults()
@@ -306,7 +294,7 @@ func (a App) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 		a.searchActive = false
 		a.searchQuery = ""
 		a.searchResultIdx = 0
-		return a.withFeedRebuilt(false), nil
+		return a, nil
 
 	case tea.KeyEnter:
 		result := a.currentSearchResult()
@@ -318,7 +306,7 @@ func (a App) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 			a.input.CursorEnd()
 			a.resizeInput()
 		}
-		return a.withFeedRebuilt(false), nil
+		return a, nil
 
 	case tea.KeyBackspace:
 		if len(a.searchQuery) > 0 {
