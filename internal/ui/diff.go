@@ -48,7 +48,7 @@ func RenderDiffs(responses []models.ModelResponse, width ...int) string {
 		if !resp.OK() {
 			sb.WriteString(ruleStyle.Render(fmt.Sprintf("── %s  %dms  error ", resp.ModelID, resp.LatencyMS)))
 			sb.WriteByte('\n')
-			sb.WriteString(errStyle.Render("  " + resp.Error))
+			sb.WriteString(wrapText(resp.Error, termW, 2, errStyle))
 			sb.WriteString("\n\n")
 			continue
 		}

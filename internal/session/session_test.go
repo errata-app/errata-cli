@@ -84,7 +84,7 @@ func TestSaveMeta_LoadMeta_RoundTrip(t *testing.T) {
 
 func TestLoadMeta_MissingFile(t *testing.T) {
 	m, err := LoadMeta("/nonexistent/path/meta.json")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Nil(t, m)
 }
 
@@ -94,7 +94,7 @@ func TestLoadMeta_CorruptFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("{invalid json"), 0o600))
 
 	m, err := LoadMeta(path)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, m)
 }
 
@@ -132,7 +132,7 @@ func TestSaveFeed_LoadFeed_RoundTrip(t *testing.T) {
 
 func TestLoadFeed_MissingFile(t *testing.T) {
 	entries, err := LoadFeed("/nonexistent/path/feed.json")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Nil(t, entries)
 }
 
@@ -221,7 +221,7 @@ func TestLatestID_ReturnsNewest(t *testing.T) {
 func TestLatestID_NoSessions(t *testing.T) {
 	base := t.TempDir()
 	_, err := LatestID(base)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no sessions found")
 }
 
@@ -251,19 +251,19 @@ func TestResolve_Ambiguous(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(base, "ses_019505e2-aaaa-7000-8000-000000000002"), 0o750))
 
 	_, err := Resolve(base, "ses_019505e2-aaaa")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous")
 }
 
 func TestResolve_NotFound(t *testing.T) {
 	base := t.TempDir()
 	_, err := Resolve(base, "nonexistent")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no session")
 }
 
 func TestResolve_MissingDir(t *testing.T) {
 	_, err := Resolve("/nonexistent/sessions", "abcd")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no sessions found")
 }

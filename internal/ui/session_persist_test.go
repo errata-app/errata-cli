@@ -78,7 +78,7 @@ func TestBuildFeedEntry_TextTruncatedAt500(t *testing.T) {
 	entry := buildFeedEntry("test", responses)
 
 	require.Len(t, entry.Models, 1)
-	assert.Equal(t, 500, len([]rune(entry.Models[0].Text)))
+	assert.Len(t, []rune(entry.Models[0].Text), 500)
 }
 
 func TestBuildFeedEntry_NoResponses(t *testing.T) {
@@ -86,7 +86,7 @@ func TestBuildFeedEntry_NoResponses(t *testing.T) {
 
 	assert.Equal(t, "run", entry.Kind)
 	assert.Equal(t, "test", entry.Prompt)
-	assert.Nil(t, entry.Models)
+	assert.Empty(t, entry.Models)
 }
 
 func TestBuildFeedEntry_NoProposedWrites(t *testing.T) {
@@ -96,7 +96,7 @@ func TestBuildFeedEntry_NoProposedWrites(t *testing.T) {
 	entry := buildFeedEntry("test", responses)
 
 	require.Len(t, entry.Models, 1)
-	assert.Nil(t, entry.Models[0].ProposedFiles)
+	assert.Empty(t, entry.Models[0].ProposedFiles)
 }
 
 func TestBuildFeedEntry_MultipleWrites(t *testing.T) {
@@ -358,7 +358,7 @@ func TestPersistSessionRecipe_EmptyPathNoop(t *testing.T) {
 
 	// No file should be written when path is empty.
 	// Verify by checking the temp dir has no recipe.md.
-	matches, _ := filepath.Glob(filepath.Join(t.TempDir(), "**/recipe.md"))
+	matches, _ := filepath.Glob(filepath.Join(t.TempDir(), "recipe.md"))
 	assert.Empty(t, matches)
 }
 

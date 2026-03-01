@@ -126,21 +126,21 @@ func formatDoneSummary(p *panelState) string {
 }
 
 // renderInlineEvent formats a single event for inline display.
-func renderInlineEvent(e models.AgentEvent) string {
+func renderInlineEvent(e models.AgentEvent, termWidth int) string {
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	switch e.Type {
 	case models.EventReading:
-		return dimStyle.Render("reading ") + truncateLine(e.Data, 70)
+		return dimStyle.Render("reading ") + truncateLine(e.Data, max(termWidth-13, 20))
 	case models.EventWriting:
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AFAF00")).Render("writing ") + truncateLine(e.Data, 70)
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AFAF00")).Render("writing ") + truncateLine(e.Data, max(termWidth-13, 20))
 	case models.EventBash:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF87")).Render("bash    ") + truncateLine(e.Data, 60)
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF87")).Render("bash    ") + truncateLine(e.Data, max(termWidth-13, 20))
 	case models.EventError:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error   ") + truncateLine(e.Data, 60)
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error   ") + truncateLine(e.Data, max(termWidth-13, 20))
 	case models.EventText:
-		return dimStyle.Render(truncateLine(e.Data, 70))
+		return dimStyle.Render(truncateLine(e.Data, max(termWidth-5, 20)))
 	default:
-		return dimStyle.Render(truncateLine(e.Data, 70))
+		return dimStyle.Render(truncateLine(e.Data, max(termWidth-5, 20)))
 	}
 }
 
@@ -182,7 +182,7 @@ func renderInlinePanel(p *panelState, termWidth int) string {
 				} else {
 					sb.WriteString(cont)
 				}
-				sb.WriteString(renderInlineEvent(e))
+				sb.WriteString(renderInlineEvent(e, termWidth))
 				sb.WriteByte('\n')
 			}
 			if len(p.events) == 0 {
@@ -214,7 +214,7 @@ func renderInlinePanel(p *panelState, termWidth int) string {
 			} else {
 				sb.WriteString(cont)
 			}
-			sb.WriteString(renderInlineEvent(e))
+			sb.WriteString(renderInlineEvent(e, termWidth))
 			sb.WriteByte('\n')
 		}
 		// Running stats line

@@ -869,7 +869,7 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 		sb.WriteString(titleStyle.Render(fmt.Sprintf("  Configuration > %s", sec.Name)))
 		sb.WriteByte('\n')
 		if sec.DetailDesc != "" {
-			sb.WriteString(dimStyle.Render("  " + sec.DetailDesc))
+			sb.WriteString(wrapText(sec.DetailDesc, width, 2, dimStyle))
 			sb.WriteByte('\n')
 		}
 		sb.WriteByte('\n')
@@ -932,7 +932,7 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 					preview = string(runes[:200]) + "..."
 				}
 				for line := range strings.SplitSeq(preview, "\n") {
-					sb.WriteString(dimStyle.Render("  " + line))
+					sb.WriteString(wrapText(line, width, 2, dimStyle))
 					sb.WriteByte('\n')
 				}
 				sb.WriteString(dimStyle.Render("  Enter = edit  Escape = back"))
@@ -949,15 +949,15 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 		if i == selectedIdx {
 			cursor = "> "
 		}
-		line := fmt.Sprintf("  %s%-16s %s", cursor, sec.Name, sec.Summary)
+		prefix := fmt.Sprintf("  %s%-16s ", cursor, sec.Name)
 		if i == selectedIdx {
-			sb.WriteString(selectedStyle.Render(line))
+			sb.WriteString(wrapText(prefix+sec.Summary, width, 0, selectedStyle))
 			if sec.Desc != "" {
 				sb.WriteByte('\n')
-				sb.WriteString(dimStyle.Render("    " + sec.Desc))
+				sb.WriteString(wrapText(sec.Desc, width, 4, dimStyle))
 			}
 		} else {
-			sb.WriteString(dimStyle.Render(line))
+			sb.WriteString(wrapText(prefix+sec.Summary, width, 0, dimStyle))
 		}
 		sb.WriteByte('\n')
 	}
