@@ -410,6 +410,40 @@ Follow PEP 8 strictly.
 
 The extra text is appended after the built-in tool guidance in each model's system prompt.
 
+### What gets sent to each model
+
+Every API call assembles the same structure across all providers:
+
+```
+┌─────────────────────────────────────────────┐
+│  System message (single block)              │
+│  ┌────────────────────────────────────────┐ │
+│  │ Tool use guidance (filtered to active) │ │
+│  │ + systemPromptExtra (recipe § System)  │ │
+│  └────────────────────────────────────────┘ │
+├─────────────────────────────────────────────┤
+│  History turns (trimmed/compacted)          │
+│    user: "previous prompt"                  │
+│    assistant: "previous response"           │
+│    ...                                      │
+├─────────────────────────────────────────────┤
+│  Current user prompt                        │
+├─────────────────────────────────────────────┤
+│  Tool definitions  (separate API param)     │
+│    [list_directory, read_file, bash, ...]   │
+└─────────────────────────────────────────────┘
+```
+
+The tool-use guidance is automatically filtered to only mention tools that are actually
+active for the current run — if you restrict the tool set to just `bash`, models won't
+see guidance for `read_file` or `write_file`. Custom guidance (recipe `## Tool Guidance`)
+is always sent verbatim.
+
+Tool definitions are passed as a separate API parameter (not embedded in the message
+stream). The only provider-level difference is placement: Anthropic uses a dedicated
+`System` field, OpenAI-compatible APIs use a `system` role message, and Gemini uses
+`SystemInstruction` on the config.
+
 ### Restricting the tool set
 
 Use the recipe `## Tools` section to specify an allowlist of tools. Tools not in the
