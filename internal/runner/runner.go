@@ -99,6 +99,9 @@ func RunAll(
 					}
 					return // never forward snapshot events to UI
 				}
+				if e.Type == models.EventRequest {
+					return // never forward request events to UI (captured by logging wrapper)
+				}
 				if !verbose && (e.Type == models.EventText || e.Type == models.EventError) {
 					return
 				}

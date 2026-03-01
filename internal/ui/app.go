@@ -194,6 +194,9 @@ type App struct {
 	sessionMeta       session.Meta  // in-memory metadata, updated after each run
 	sessionFeed       []session.FeedEntry // serialized feed for persistence
 
+	// debugLog is true when --debug-log is active; enables raw API request logging.
+	debugLog bool
+
 	// hint line tracking (for feed viewport height budget)
 	lastHintLines int
 
@@ -215,7 +218,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, availableModels []string, cs *recipestore.Store) *App {
+func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, availableModels []string, cs *recipestore.Store, debugLog bool) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -268,6 +271,7 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 		mcpDispatchers:        mcpDispatchers,
 		availableModels:       availableModels,
 		seed:                  cfg.Seed,
+		debugLog:              debugLog,
 		checkpointPath:        sp.CheckpointPath,
 		feedPath:              sp.FeedPath,
 		sessionMetaPath:       sp.MetaPath,
@@ -844,8 +848,8 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string, cs *recipestore.Store) error {
-	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels, cs)
+func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string, cs *recipestore.Store, debugLog bool) error {
+	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels, cs, debugLog)
 
 	p := tea.NewProgram(app)
 	app.SetProgram(p)

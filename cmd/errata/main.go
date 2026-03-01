@@ -254,7 +254,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	}
 
 	cs := recipestore.New("data/configs.json")
-	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming, availableModels, cs)
+	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming, availableModels, cs, debugLogPath != "")
 	fmt.Fprintf(os.Stderr, "To continue this session: errata --resume %s\n", sessionID)
 	return err
 }
@@ -325,6 +325,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 		OutputDir:      outputDir,
 		Verbose:        verbose,
 		JSON:           jsonFlag,
+		DebugLog:       debugLogPath != "",
 		MCPDefs:        mcpDefs,
 		MCPDispatchers: mcpDispatchers,
 	})

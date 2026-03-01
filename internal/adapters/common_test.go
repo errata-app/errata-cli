@@ -459,3 +459,48 @@ func TestDispatchTool_SpawnAgent_DispatcherErrorPropagates(t *testing.T) {
 	assert.Contains(t, result, "max depth reached")
 	assert.Empty(t, proposed)
 }
+
+// ─── DebugRequestsFromContext ───────────────────────────────────────────────
+
+func TestDebugRequestsFromContext_DefaultFalse(t *testing.T) {
+	assert.False(t, DebugRequestsFromContext(context.Background()))
+}
+
+func TestWithDebugRequests_SetsFlag(t *testing.T) {
+	ctx := WithDebugRequests(context.Background())
+	assert.True(t, DebugRequestsFromContext(ctx))
+}
+
+// ─── EmitRequest ────────────────────────────────────────────────────────────
+
+func TestEmitRequest_EmitsWhenDebugEnabled(t *testing.T) {
+	ctx := WithDebugRequests(context.Background())
+	var events []models.AgentEvent
+	params := map[string]string{"model": "test-model", "prompt": "hello"}
+
+	EmitRequest(ctx, func(e models.AgentEvent) { events = append(events, e) }, params)
+
+	require.Len(t, events, 1)
+	assert.Equal(t, models.EventRequest, events[0].Type)
+	assert.Contains(t, events[0].Data, `"model":"test-model"`)
+	assert.Contains(t, events[0].Data, `"prompt":"hello"`)
+}
+
+func TestEmitRequest_SkipsWhenDebugDisabled(t *testing.T) {
+	var events []models.AgentEvent
+	params := map[string]string{"model": "test-model"}
+
+	EmitRequest(context.Background(), func(e models.AgentEvent) { events = append(events, e) }, params)
+
+	assert.Empty(t, events)
+}
+
+func TestEmitRequest_HandlesUnmarshalableParams(t *testing.T) {
+	ctx := WithDebugRequests(context.Background())
+	var events []models.AgentEvent
+
+	// Channels cannot be JSON-marshalled.
+	EmitRequest(ctx, func(e models.AgentEvent) { events = append(events, e) }, make(chan int))
+
+	assert.Empty(t, events)
+}

@@ -58,6 +58,7 @@ func runOpenAIAgentLoop(
 		if seed, ok := tools.SeedFromContext(ctx); ok {
 			params.Seed = openai.Int(seed)
 		}
+		EmitRequest(ctx, onEvent, params)
 		resp, err := cfg.client.Chat.Completions.New(ctx, params)
 		if err != nil {
 			if ctx.Err() != nil {

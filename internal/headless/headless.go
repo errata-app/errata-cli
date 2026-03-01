@@ -13,6 +13,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/criteria"
@@ -35,6 +36,9 @@ type Options struct {
 	OutputDir  string // "" → output.DefaultDir
 	Verbose    bool
 	JSON       bool // also emit report to stdout
+
+	// DebugLog enables raw API request logging in adapter loops.
+	DebugLog bool
 
 	// MCP state.
 	MCPDefs        []tools.ToolDef
@@ -256,7 +260,11 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		bashPrefixes = rec.Tools.BashPrefixes
 	}
 
-	ctx := tools.WithActiveTools(parent, activeDefs)
+	ctx := parent
+	if opts.DebugLog {
+		ctx = adapters.WithDebugRequests(ctx)
+	}
+	ctx = tools.WithActiveTools(ctx, activeDefs)
 	ctx = tools.WithMCPDispatchers(ctx, opts.MCPDispatchers)
 	ctx = tools.WithBashPrefixes(ctx, bashPrefixes)
 	ctx = prompt.WithSummarizationPrompt(ctx, rec.SummarizationPrompt)

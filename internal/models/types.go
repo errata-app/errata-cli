@@ -24,6 +24,7 @@ const (
 	EventError    EventType = "error"
 	EventBash     EventType = "bash"
 	EventSnapshot EventType = "snapshot"
+	EventRequest  EventType = "request"
 )
 
 // AgentEvent is a single observable event emitted by an agent during its run.
