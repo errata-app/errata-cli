@@ -47,6 +47,16 @@ const (
 // Set to true to re-enable the feature.
 const SubagentEnabled = false
 
+// HooksEnabled gates lifecycle event hooks.
+// When false, the config panel omits the hooks section and hook execution
+// is skipped. Recipe parsing is unaffected. Set to true to activate.
+const HooksEnabled = false
+
+// RemindersEnabled gates conditional mid-conversation system reminders.
+// When false, the config panel omits the reminders section and reminder
+// state is not initialised. Recipe parsing is unaffected. Set to true to activate.
+const RemindersEnabled = false
+
 func init() {
 	if !SubagentEnabled {
 		filtered := Definitions[:0]

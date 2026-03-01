@@ -271,7 +271,7 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 		app.sandboxFilesystem = rec.Sandbox.Filesystem
 		app.sandboxNetwork = rec.Sandbox.Network
 		app.projectRoot = rec.Metadata.ProjectRoot
-		if len(rec.SystemReminders) > 0 {
+		if tools.RemindersEnabled && len(rec.SystemReminders) > 0 {
 			var rs []reminders.Reminder
 			for _, cfg := range rec.SystemReminders {
 				tr, err := reminders.ParseTrigger(cfg.Trigger)
