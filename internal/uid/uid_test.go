@@ -16,7 +16,7 @@ var uuidV7Re = regexp.MustCompile(
 
 func TestNew_Format(t *testing.T) {
 	id := uid.New("ses_")
-	require.True(t, len(id) > 4)
+	require.Greater(t, len(id), 4)
 	assert.Equal(t, "ses_", id[:4])
 	assert.Regexp(t, uuidV7Re, id[4:])
 }
@@ -37,7 +37,7 @@ func TestNew_Monotonic(t *testing.T) {
 		// UUID v7 embeds a timestamp in the first 48 bits; lexicographic
 		// ordering of the UUID portion (after the prefix) must be
 		// non-decreasing within a single goroutine.
-		assert.True(t, next[2:] >= prev[2:],
+		assert.GreaterOrEqual(t, next[2:], prev[2:],
 			"expected monotonic ordering: %s >= %s", next, prev)
 		prev = next
 	}

@@ -25,6 +25,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 	case tea.KeyEsc:
 		if time.Since(a.lastEscTime) < 1*time.Second && (a.input.Value() != "" || a.pastedText != "") {
 			a.input.Reset()
+			a.resizeInput()
 			a.pastedText = ""
 			a.pastedLineCount = 0
 			a.historyIdx = -1
@@ -38,6 +39,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		var cmds []tea.Cmd
 		var inputCmd tea.Cmd
 		a.input, inputCmd = a.input.Update(msg)
+		a.resizeInput()
 		if inputCmd != nil {
 			cmds = append(cmds, inputCmd)
 		}
@@ -96,6 +98,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 			prompt = typed
 		}
 		a.input.Reset()
+		a.resizeInput()
 		a.historyIdx = -1
 		a.historyInputBuf = ""
 		if prompt == "" {
@@ -110,6 +113,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 			if completed, ok := a.tryArgComplete(val); ok {
 				a.input.SetValue(completed)
 				a.input.CursorEnd()
+				a.resizeInput()
 				return a, nil
 			}
 			// Fall back to command-name completion.
@@ -118,6 +122,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 				if strings.HasPrefix(c.Name, prefix) {
 					a.input.SetValue(c.Name + " ")
 					a.input.CursorEnd()
+					a.resizeInput()
 					return a, nil
 				}
 			}
@@ -126,6 +131,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		if completed, ok := a.tryMentionComplete(val); ok {
 			a.input.SetValue(completed)
 			a.input.CursorEnd()
+			a.resizeInput()
 			return a, nil
 		}
 	}
@@ -160,6 +166,7 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 
 	var cmd tea.Cmd
 	a.input, cmd = a.input.Update(msg)
+	a.resizeInput()
 	return a, cmd
 }
 
@@ -178,6 +185,7 @@ func (a App) historyBack() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea
 	}
 	a.input.SetValue(a.promptHistory[a.historyIdx])
 	a.input.CursorEnd()
+	a.resizeInput()
 	return a, nil
 }
 
@@ -197,6 +205,7 @@ func (a App) historyForward() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 		a.input.SetValue(a.promptHistory[a.historyIdx])
 		a.input.CursorEnd()
 	}
+	a.resizeInput()
 	return a, nil
 }
 
@@ -270,6 +279,7 @@ func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		if r := a.currentSearchResult(); r != "" {
 			a.input.SetValue(r)
 			a.input.CursorEnd()
+			a.resizeInput()
 		}
 		return a, nil
 
@@ -281,6 +291,7 @@ func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		if result != "" {
 			a.input.SetValue(result)
 			a.input.CursorEnd()
+			a.resizeInput()
 		}
 		return a.withFeedRebuilt(false), nil
 
@@ -293,6 +304,7 @@ func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		if r := a.currentSearchResult(); r != "" {
 			a.input.SetValue(r)
 			a.input.CursorEnd()
+			a.resizeInput()
 		}
 		return a, nil
 
@@ -302,6 +314,7 @@ func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		if r := a.currentSearchResult(); r != "" {
 			a.input.SetValue(r)
 			a.input.CursorEnd()
+			a.resizeInput()
 		}
 		return a, nil
 	}

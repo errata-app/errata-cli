@@ -644,7 +644,7 @@ func TestSectionDescriptions_ExpandedViewShowsDetail(t *testing.T) {
 	fields := buildScalarFields("constraints", rec)
 	// Expand constraints (index 5).
 	out := renderConfigOverlay(sections, 5, 5, false, 80, nil, 0, fields, 0, "", false, "")
-	assert.Contains(t, out, sectionDescriptions["constraints"].Detail)
+	assert.Contains(t, out, "Set wall-clock timeout and maximum tool-call steps per model.")
 }
 
 // ── text editing tests ───────────────────────────────────────────────────────

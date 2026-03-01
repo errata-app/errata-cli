@@ -14,8 +14,8 @@ This is a Go-primary project. Default to Go idioms, conventions, and tooling (`g
 
 ## Build & Test Workflow
 
-After implementing changes, always run `go build ./...`, `go vet ./...`, and `go test ./...`
-before committing. Fix any issues before proceeding.
+After implementing changes, always run `go build ./...`, `go vet ./...`, `go test ./...`,
+and `golangci-lint run ./...` before committing. Fix any issues before proceeding.
 
 ---
 

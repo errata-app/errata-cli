@@ -294,7 +294,7 @@ func TestRenderInlineEvent_EventTypes(t *testing.T) {
 	for _, tt := range types {
 		t.Run(string(tt.typ), func(t *testing.T) {
 			e := models.AgentEvent{Type: tt.typ, Data: tt.data}
-			result := renderInlineEvent(e)
+			result := renderInlineEvent(e, 80)
 			if !strings.Contains(result, tt.data) {
 				t.Errorf("renderInlineEvent(%s) should contain %q, got %q", tt.typ, tt.data, result)
 			}
@@ -305,7 +305,7 @@ func TestRenderInlineEvent_EventTypes(t *testing.T) {
 func TestRenderInlineEvent_LongDataTruncated(t *testing.T) {
 	longData := strings.Repeat("x", 100)
 	e := models.AgentEvent{Type: models.EventReading, Data: longData}
-	result := renderInlineEvent(e)
+	result := renderInlineEvent(e, 80)
 	if strings.Contains(result, longData) {
 		t.Error("long data should be truncated in renderInlineEvent")
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rivo/uniseg"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/history"
@@ -213,7 +214,8 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
 	ta.SetWidth(80)
-	ta.SetHeight(3)
+	ta.SetHeight(1)
+	ta.MaxHeight = 8
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
 
@@ -297,7 +299,7 @@ func (a *App) feedVPHeight() int {
 	var footerLines int
 	switch a.mode {
 	case modeIdle:
-		footerLines = 3 // textarea SetHeight(3)
+		footerLines = a.input.Height()
 		if a.searchActive {
 			footerLines++ // search bar line
 		}
@@ -313,6 +315,39 @@ func (a *App) feedVPHeight() int {
 	return h
 }
 
+// inputLines computes the visual line count of the textarea (accounting for
+// soft-wrap at the textarea width), capped at MaxHeight.
+func (a *App) inputLines() int {
+	val := a.input.Value()
+	if val == "" {
+		return 1
+	}
+	w := a.input.Width()
+	if w <= 0 {
+		w = 1
+	}
+	lines := 0
+	for line := range strings.SplitSeq(val, "\n") {
+		r := uniseg.StringWidth(line)
+		if r == 0 {
+			lines++
+		} else {
+			lines += (r + w - 1) / w
+		}
+	}
+	return max(1, min(lines, a.input.MaxHeight))
+}
+
+// resizeInput updates the textarea height to match its content and rebuilds
+// the feed viewport if the height changed.
+func (a *App) resizeInput() {
+	h := a.inputLines()
+	if h != a.input.Height() {
+		a.input.SetHeight(h)
+		*a = a.withFeedRebuilt(true)
+	}
+}
+
 // renderFeedContent builds the viewport content string from all feed items.
 func (a *App) renderFeedContent() string {
 	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
@@ -324,12 +359,12 @@ func (a *App) renderFeedContent() string {
 		switch item.kind {
 		case "message":
 			for line := range strings.SplitSeq(item.text, "\n") {
-				sb.WriteString(msgStyle.Render("  " + line))
+				sb.WriteString(wrapText(line, a.width, 2, msgStyle))
 				sb.WriteByte('\n')
 			}
 			sb.WriteByte('\n')
 		case "run":
-			sb.WriteString(promptStyle.Render("> " + item.prompt))
+			sb.WriteString(wrapText("> "+item.prompt, a.width, 0, promptStyle))
 			sb.WriteByte('\n')
 			if len(item.panels) > 0 {
 				sb.WriteString(renderInlinePanels(item.panels, a.width))
@@ -342,7 +377,7 @@ func (a *App) renderFeedContent() string {
 				}
 			}
 			if item.note != "" {
-				sb.WriteString(noteStyle.Render("  " + item.note))
+				sb.WriteString(wrapText(item.note, a.width, 2, noteStyle))
 				sb.WriteByte('\n')
 			}
 			sb.WriteByte('\n')
@@ -386,6 +421,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.input.SetWidth(msg.Width - 4)
+		a.resizeInput()
 		atBottom := a.feedVP.AtBottom()
 		return a.withFeedRebuilt(atBottom), nil
 
@@ -583,6 +619,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.mode == modeIdle {
 		var cmd tea.Cmd
 		a.input, cmd = a.input.Update(msg)
+		a.resizeInput()
 		return a, cmd
 	}
 	return a, nil
@@ -597,7 +634,7 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 	sb.WriteString(headerStyle.Render("  Errata  A/B testing tool for agentic AI models"))
 	sb.WriteByte('\n')
 	modelLineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	sb.WriteString(modelLineStyle.Render("  " + strings.Join(a.activeModelIDs(), " · ")))
+	sb.WriteString(wrapText(strings.Join(a.activeModelIDs(), " · "), a.width, 2, modelLineStyle))
 	sb.WriteByte('\n')
 
 	sb.WriteString(a.feedVP.View())
@@ -884,9 +921,9 @@ func truncateStr(s string, maxLen int) string {
 
 // buildFeedEntry creates a session.FeedEntry from a run's prompt and responses.
 func buildFeedEntry(prompt string, responses []models.ModelResponse) session.FeedEntry {
-	var modelEntries []session.ModelEntry
+	modelEntries := make([]session.ModelEntry, 0, len(responses))
 	for _, r := range responses {
-		var files []string
+		files := make([]string, 0, len(r.ProposedWrites))
 		for _, fw := range r.ProposedWrites {
 			files = append(files, fw.Path)
 		}
@@ -916,9 +953,9 @@ func replayFeed(entries []session.FeedEntry) []feedItem {
 			for _, m := range e.Models {
 				preview := truncateStr(m.Text, 200)
 				preview = strings.ReplaceAll(preview, "\n", " ")
-				sb.WriteString(fmt.Sprintf("  %s: %s", m.ID, preview))
+				fmt.Fprintf(&sb, "  %s: %s", m.ID, preview)
 				if len(m.ProposedFiles) > 0 {
-					sb.WriteString(fmt.Sprintf(" [%s]", strings.Join(m.ProposedFiles, ", ")))
+					fmt.Fprintf(&sb, " [%s]", strings.Join(m.ProposedFiles, ", "))
 				}
 				sb.WriteByte('\n')
 			}
