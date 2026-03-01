@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/tools"
@@ -135,7 +136,7 @@ func TestRenderDiffs_WrapsLongTextLines(t *testing.T) {
 		if strings.Contains(line, "m1") || strings.TrimSpace(line) == "" {
 			continue
 		}
-		assert.LessOrEqual(t, len([]rune(line)), 40,
+		assert.LessOrEqual(t, ansi.StringWidth(line), 40,
 			"visual line exceeds terminal width: %q", line)
 	}
 	// All content should still be present.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/suarezc/errata/internal/diff"
 	"github.com/suarezc/errata/internal/models"
 )

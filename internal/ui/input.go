@@ -4,11 +4,11 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/suarezc/errata/internal/commands"
 )
 
-func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	// Config overlay captures all keystrokes.
 	if a.configOverlayActive {
 		return a.handleConfigKey(msg)
@@ -18,11 +18,23 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		return a.handleSearchKey(msg)
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlD, tea.KeyCtrlC:
-		return a, tea.Quit
+	// Ctrl+key combos checked first.
+	if msg.Mod.Contains(tea.ModCtrl) {
+		switch msg.Code {
+		case 'd', 'c':
+			return a, tea.Quit
+		case 'o':
+			return a.toggleExpandLastRun()
+		case 'r':
+			a.searchActive = true
+			a.searchQuery = ""
+			a.searchResultIdx = 0
+			return a.withFeedRebuilt(false), nil
+		}
+	}
 
-	case tea.KeyEsc:
+	switch msg.Code {
+	case tea.KeyEscape:
 		if time.Since(a.lastEscTime) < 1*time.Second && (a.input.Value() != "" || a.pastedText != "") {
 			a.input.Reset()
 			a.resizeInput()
@@ -51,15 +63,6 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		}
 		return a, tea.Batch(cmds...)
 
-	case tea.KeyCtrlO:
-		return a.toggleExpandLastRun()
-
-	case tea.KeyCtrlR:
-		a.searchActive = true
-		a.searchQuery = ""
-		a.searchResultIdx = 0
-		return a.withFeedRebuilt(false), nil
-
 	case tea.KeyUp:
 		if a.input.Line() == 0 {
 			return a.historyBack()
@@ -80,8 +83,8 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 		return a, cmd
 
 	case tea.KeyEnter:
-		if msg.Alt {
-			break
+		if msg.Mod.Contains(tea.ModShift) || msg.Mod.Contains(tea.ModAlt) {
+			break // fall through to textarea → inserts newline
 		}
 		typed := strings.TrimSpace(a.input.Value())
 		var prompt string
@@ -134,27 +137,14 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 			a.resizeInput()
 			return a, nil
 		}
-	}
 
-	// Detect multi-line paste — show a compact badge instead of flooding the textarea.
-	// Terminals send \r (not \n) for newlines inside bracket paste, so normalise first.
-	if msg.Type == tea.KeyRunes && msg.Paste {
-		text := string(msg.Runes)
-		text = strings.ReplaceAll(text, "\r\n", "\n")
-		text = strings.ReplaceAll(text, "\r", "\n")
-		lineCount := strings.Count(text, "\n") + 1
-		if lineCount >= 3 {
-			a.pastedText = text
-			a.pastedLineCount = lineCount
+	case tea.KeyBackspace:
+		// Backspace clears pasted text when textarea is empty.
+		if a.pastedText != "" && a.input.Value() == "" {
+			a.pastedText = ""
+			a.pastedLineCount = 0
 			return a, nil
 		}
-	}
-
-	// Backspace clears pasted text when textarea is empty.
-	if msg.Type == tea.KeyBackspace && a.pastedText != "" && a.input.Value() == "" {
-		a.pastedText = ""
-		a.pastedLineCount = 0
-		return a, nil
 	}
 
 	// For any other key: if currently navigating history, exit navigation
@@ -168,6 +158,22 @@ func (a App) handleIdleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocri
 	a.input, cmd = a.input.Update(msg)
 	a.resizeInput()
 	return a, cmd
+}
+
+// handlePaste processes bracketed-paste text.
+func (a App) handlePaste(text string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lineCount := strings.Count(text, "\n") + 1
+	if lineCount >= 3 {
+		a.pastedText = text
+		a.pastedLineCount = lineCount
+		return a, nil
+	}
+	// Short paste — insert into textarea as typed text.
+	a.input.InsertString(text)
+	a.resizeInput()
+	return a, nil
 }
 
 // historyBack moves one step backward (older) through prompt history.
@@ -262,26 +268,36 @@ func (a App) toggleExpandLastRun() (tea.Model, tea.Cmd) { //nolint:gocritic // b
 }
 
 // handleSearchKey processes keypresses while Ctrl-R search is active.
-func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	switch msg.Type {
-	case tea.KeyEsc, tea.KeyCtrlC:
+func (a App) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	// Ctrl combos.
+	if msg.Mod.Contains(tea.ModCtrl) {
+		switch msg.Code {
+		case 'c':
+			a.searchActive = false
+			a.searchQuery = ""
+			a.searchResultIdx = 0
+			return a.withFeedRebuilt(false), nil
+		case 'r':
+			// Cycle to next (older) match.
+			results := a.searchResults()
+			if a.searchResultIdx < len(results)-1 {
+				a.searchResultIdx++
+			}
+			if r := a.currentSearchResult(); r != "" {
+				a.input.SetValue(r)
+				a.input.CursorEnd()
+				a.resizeInput()
+			}
+			return a, nil
+		}
+	}
+
+	switch msg.Code {
+	case tea.KeyEscape:
 		a.searchActive = false
 		a.searchQuery = ""
 		a.searchResultIdx = 0
 		return a.withFeedRebuilt(false), nil
-
-	case tea.KeyCtrlR:
-		// Cycle to next (older) match.
-		results := a.searchResults()
-		if a.searchResultIdx < len(results)-1 {
-			a.searchResultIdx++
-		}
-		if r := a.currentSearchResult(); r != "" {
-			a.input.SetValue(r)
-			a.input.CursorEnd()
-			a.resizeInput()
-		}
-		return a, nil
 
 	case tea.KeyEnter:
 		result := a.currentSearchResult()
@@ -308,15 +324,17 @@ func (a App) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		}
 		return a, nil
 
-	case tea.KeyRunes:
-		a.searchQuery += string(msg.Runes)
-		a.searchResultIdx = 0
-		if r := a.currentSearchResult(); r != "" {
-			a.input.SetValue(r)
-			a.input.CursorEnd()
-			a.resizeInput()
+	default:
+		if len(msg.Text) > 0 {
+			a.searchQuery += msg.Text
+			a.searchResultIdx = 0
+			if r := a.currentSearchResult(); r != "" {
+				a.input.SetValue(r)
+				a.input.CursorEnd()
+				a.resizeInput()
+			}
+			return a, nil
 		}
-		return a, nil
 	}
 	return a, nil
 }

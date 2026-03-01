@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/models"
@@ -47,14 +47,19 @@ func (s *scenarioAdapter) RunAgent(
 	return resp, nil
 }
 
-// keyRunes constructs a tea.KeyMsg for printable rune input.
-func keyRunes(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+// keyRunes constructs a tea.KeyPressMsg for printable rune input.
+func keyRunes(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
 }
 
-// keyType constructs a tea.KeyMsg for a special key.
-func keyType(t tea.KeyType) tea.KeyMsg {
-	return tea.KeyMsg{Type: t}
+// keyType constructs a tea.KeyPressMsg for a special key.
+func keyType(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
+}
+
+// ctrlKey constructs a tea.KeyPressMsg for a Ctrl+key combo.
+func ctrlKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModCtrl}
 }
 
 // appFrom extracts the App value from an Update() return.
@@ -465,7 +470,7 @@ func TestRating_SSkips(t *testing.T) {
 
 func TestRating_CtrlDQuits(t *testing.T) {
 	a := ratingApp(t, models.ModelResponse{ModelID: "m1", Text: "answer"})
-	_, cmd := a.handleRatingKey(keyType(tea.KeyCtrlD))
+	_, cmd := a.handleRatingKey(ctrlKey('d'))
 	// tea.Quit is a function that returns tea.QuitMsg{}.
 	require.NotNil(t, cmd)
 	quitMsg := cmd()
@@ -706,7 +711,7 @@ func TestInput_CtrlDQuitsFromIdle(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.mode = modeIdle
 
-	_, cmd := a.handleIdleKey(keyType(tea.KeyCtrlD))
+	_, cmd := a.handleIdleKey(ctrlKey('d'))
 	require.NotNil(t, cmd)
 	quitMsg := cmd()
 	_, isQuit := quitMsg.(tea.QuitMsg)
@@ -718,7 +723,7 @@ func TestInput_CtrlREntersSearchMode(t *testing.T) {
 	a.mode = modeIdle
 	a.promptHistory = []string{"fix bug", "add feature"}
 
-	result, _ := a.handleIdleKey(keyType(tea.KeyCtrlR))
+	result, _ := a.handleIdleKey(ctrlKey('r'))
 	a = appFrom(t, result)
 
 	assert.True(t, a.searchActive)
@@ -730,7 +735,7 @@ func TestInput_EscExitsSearchMode(t *testing.T) {
 	a.searchActive = true
 	a.searchQuery = "fix"
 
-	result, _ := a.handleSearchKey(keyType(tea.KeyEsc))
+	result, _ := a.handleSearchKey(keyType(tea.KeyEscape))
 	a = appFrom(t, result)
 
 	assert.False(t, a.searchActive)
@@ -742,7 +747,7 @@ func TestInput_RunningModeIgnoresKeys(t *testing.T) {
 	a.mode = modeRunning
 
 	// Various keys should be ignored.
-	keys := []tea.KeyMsg{
+	keys := []tea.KeyPressMsg{
 		keyRunes("x"),
 		keyType(tea.KeyEnter),
 		keyType(tea.KeyTab),
@@ -873,7 +878,7 @@ func TestSelection_CtrlDQuitsFromSelecting(t *testing.T) {
 	}
 	a := selectionApp(t, responses)
 
-	_, cmd := a.handleSelectKey(keyType(tea.KeyCtrlD))
+	_, cmd := a.handleSelectKey(ctrlKey('d'))
 	require.NotNil(t, cmd)
 	quitMsg := cmd()
 	_, isQuit := quitMsg.(tea.QuitMsg)
@@ -954,7 +959,7 @@ func TestRatingView_ShowsModelName(t *testing.T) {
 	a = appFrom(t, result)
 	require.Equal(t, modeRating, a.mode)
 
-	view := a.View()
+	view := a.View().Content
 	assert.Contains(t, view, "claude-sonnet-4-6's response:")
 	assert.NotContains(t, view, "Rate this response:")
 }
@@ -968,7 +973,7 @@ func TestRatingView_FallbackWhenNoOKResponse(t *testing.T) {
 		{ModelID: "m1", Error: "failed"},
 	}
 
-	view := a.View()
+	view := a.View().Content
 	// Falls back to generic "this" when no OK response found.
 	assert.Contains(t, view, "this's response:")
 }

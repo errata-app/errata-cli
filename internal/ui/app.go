@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/rivo/uniseg"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
@@ -248,7 +248,7 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 		sessionID:             sessionID,
 		input:                 ta,
 		configTextArea:        cta,
-		feedVP:                viewport.New(80, 20),
+		feedVP:                viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		panelIdx:              make(map[string]int),
 		conversationHistories: h,
 		sessionCostPerModel:   make(map[string]float64),
@@ -391,8 +391,8 @@ func (a *App) renderFeedContent() string {
 
 // withFeedRebuilt resizes and refreshes the feed viewport. Returns updated App.
 func (a *App) withFeedRebuilt(gotoBottom bool) App {
-	a.feedVP.Width = a.width
-	a.feedVP.Height = a.feedVPHeight()
+	a.feedVP.SetWidth(a.width)
+	a.feedVP.SetHeight(a.feedVPHeight())
 	a.feedVP.SetContent(a.renderFeedContent())
 	if gotoBottom {
 		a.feedVP.GotoBottom()
@@ -428,12 +428,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		atBottom := a.feedVP.AtBottom()
 		return a.withFeedRebuilt(atBottom), nil
 
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		if a.mode == modeIdle {
+			return a.handlePaste(msg.Content)
+		}
+		return a, nil
+
+	case tea.KeyPressMsg:
 		switch a.mode {
 		case modeIdle:
 			return a.handleIdleKey(msg)
 		case modeRunning:
-			if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlC {
+			if msg.Code == tea.KeyEscape || (msg.Code == 'c' && msg.Mod.Contains(tea.ModCtrl)) {
 				if a.cancelRun != nil {
 					a.cancelRun()
 					a.cancelRun = nil
@@ -452,8 +458,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if idx, ok := a.panelIdx[msg.modelID]; ok {
 			a.panels[idx].addEvent(msg.event)
 		}
-		a.feedVP.Width = a.width
-		a.feedVP.Height = a.feedVPHeight()
+		a.feedVP.SetWidth(a.width)
+		a.feedVP.SetHeight(a.feedVPHeight())
 		a.feedVP.SetContent(a.renderFeedContent())
 		a.feedVP.GotoBottom()
 		return a, nil
@@ -630,7 +636,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ---- view ----
 
-func (a App) View() string { //nolint:gocritic // bubbletea requires value receiver for tea.Model interface
+func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value receiver for tea.Model interface
 	var sb strings.Builder
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
@@ -794,14 +800,14 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 		}
 	}
 
-	return sb.String()
+	v := tea.NewView(sb.String()); v.AltScreen = true; return v
 }
 
 // Run starts the bubbletea program and blocks until exit.
 func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string, cs *recipestore.Store) error {
 	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels, cs)
 
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app)
 	app.SetProgram(p)
 
 	// Handle SIGTERM for graceful shutdown. Bubbletea already handles SIGINT

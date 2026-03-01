@@ -6,17 +6,17 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/suarezc/errata/internal/recipestore"
+	tea "charm.land/bubbletea/v2"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
+	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/tools"
 )
 
 // handleRatingKey handles y/n/s input in modeRating (single-model response).
 // y = thumbs up (records a preference win), n = thumbs down (skipped, no record), s = skip.
-func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	setNote := func(note string) {
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].note = note
@@ -24,80 +24,90 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		a.updateLastFeedNote(note)
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlD, tea.KeyCtrlC:
-		return a, tea.Quit
+	// Ctrl combos.
+	if msg.Mod.Contains(tea.ModCtrl) {
+		switch msg.Code {
+		case 'd', 'c':
+			return a, tea.Quit
+		case 'o':
+			return a.toggleExpandLastRun()
+		}
+	}
 
-	case tea.KeyCtrlO:
-		return a.toggleExpandLastRun()
-
+	switch msg.Code {
 	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
 		var cmd tea.Cmd
 		a.feedVP, cmd = a.feedVP.Update(msg)
 		return a, cmd
 
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "y", "Y":
-			// Find the single OK response and record it as the winner.
-			for _, resp := range a.responses {
-				if resp.OK() {
-					if err := preferences.Record(a.prefPath, a.lastPrompt, resp.ModelID, a.recipeHash(), a.sessionID, a.responses); err != nil {
-						log.Printf("warning: failed to record preference: %v", err)
-					}
-					if a.lastReport != nil {
-						if err := output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "good"); err != nil {
-							log.Printf("warning: failed to record selection: %v", err)
+	default:
+		if len(msg.Text) > 0 {
+			switch strings.ToLower(msg.Text) {
+			case "y":
+				// Find the single OK response and record it as the winner.
+				for _, resp := range a.responses {
+					if resp.OK() {
+						if err := preferences.Record(a.prefPath, a.lastPrompt, resp.ModelID, a.recipeHash(), a.sessionID, a.responses); err != nil {
+							log.Printf("warning: failed to record preference: %v", err)
 						}
-						a.lastReport = nil
-					}
-					setNote(fmt.Sprintf("Rated good: %s", resp.ModelID))
-					break
-				}
-			}
-			a.responses = nil
-			a.mode = modeIdle
-			return a.withFeedRebuilt(true), nil
-
-		case "n", "N":
-			for _, resp := range a.responses {
-				if resp.OK() {
-					if err := preferences.RecordBad(a.prefPath, a.lastPrompt, resp.ModelID, a.recipeHash(), a.sessionID, a.responses); err != nil {
-						log.Printf("warning: failed to record preference: %v", err)
-					}
-					if a.lastReport != nil {
-						if err := output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "bad"); err != nil {
-							log.Printf("warning: failed to record selection: %v", err)
+						if a.lastReport != nil {
+							if err := output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "good"); err != nil {
+								log.Printf("warning: failed to record selection: %v", err)
+							}
+							a.lastReport = nil
 						}
-						a.lastReport = nil
+						setNote(fmt.Sprintf("Rated good: %s", resp.ModelID))
+						break
 					}
-					setNote(fmt.Sprintf("Rated bad: %s", resp.ModelID))
-					break
 				}
-			}
-			a.responses = nil
-			a.mode = modeIdle
-			return a.withFeedRebuilt(true), nil
+				a.responses = nil
+				a.mode = modeIdle
+				return a.withFeedRebuilt(true), nil
 
-		case "s", "S":
-			setNote("Skipped.")
-			a.lastReport = nil
-			a.responses = nil
-			a.mode = modeIdle
-			return a.withFeedRebuilt(true), nil
+			case "n":
+				for _, resp := range a.responses {
+					if resp.OK() {
+						if err := preferences.RecordBad(a.prefPath, a.lastPrompt, resp.ModelID, a.recipeHash(), a.sessionID, a.responses); err != nil {
+							log.Printf("warning: failed to record preference: %v", err)
+						}
+						if a.lastReport != nil {
+							if err := output.RecordSelection(output.DefaultDir, a.lastReport, resp.ModelID, nil, "bad"); err != nil {
+								log.Printf("warning: failed to record selection: %v", err)
+							}
+							a.lastReport = nil
+						}
+						setNote(fmt.Sprintf("Rated bad: %s", resp.ModelID))
+						break
+					}
+				}
+				a.responses = nil
+				a.mode = modeIdle
+				return a.withFeedRebuilt(true), nil
+
+			case "s":
+				setNote("Skipped.")
+				a.lastReport = nil
+				a.responses = nil
+				a.mode = modeIdle
+				return a.withFeedRebuilt(true), nil
+			}
 		}
 	}
 	return a, nil
 }
 
-func (a App) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	switch msg.Type {
-	case tea.KeyCtrlD, tea.KeyCtrlC:
-		return a, tea.Quit
+func (a App) handleSelectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	// Ctrl combos.
+	if msg.Mod.Contains(tea.ModCtrl) {
+		switch msg.Code {
+		case 'd', 'c':
+			return a, tea.Quit
+		case 'o':
+			return a.toggleExpandLastRun()
+		}
+	}
 
-	case tea.KeyCtrlO:
-		return a.toggleExpandLastRun()
-
+	switch msg.Code {
 	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
 		var cmd tea.Cmd
 		a.feedVP, cmd = a.feedVP.Update(msg)
@@ -114,9 +124,11 @@ func (a App) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		}
 		a.selectionErr = ""
 
-	case tea.KeyRunes:
-		a.selection += string(msg.Runes)
-		a.selectionErr = ""
+	default:
+		if len(msg.Text) > 0 {
+			a.selection += msg.Text
+			a.selectionErr = ""
+		}
 	}
 	return a, nil
 }

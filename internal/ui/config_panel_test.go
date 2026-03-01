@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/models"
@@ -533,7 +533,7 @@ func TestConfigOverlay_EscapeCloses(t *testing.T) {
 	a.configOverlayActive = true
 	a.configSections = buildConfigSections(recipe.Default(), nil, nil)
 	a.configExpandedIdx = -1
-	result, _ := a.handleConfigKey(keyType(tea.KeyEsc))
+	result, _ := a.handleConfigKey(keyType(tea.KeyEscape))
 	app := result.(App)
 	assert.False(t, app.configOverlayActive)
 }
@@ -570,14 +570,14 @@ func TestTryArgComplete_ConfigSection(t *testing.T) {
 func TestModifiedBadge_ShownWhenModified(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.recipeModified = true
-	view := a.View()
+	view := a.View().Content
 	assert.Contains(t, view, "[modified]")
 }
 
 func TestModifiedBadge_HiddenWhenClean(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.recipeModified = false
-	view := a.View()
+	view := a.View().Content
 	assert.NotContains(t, view, "[modified]")
 }
 
@@ -659,7 +659,7 @@ func TestHandleConfigTextKey_CtrlSSavesSystemPrompt(t *testing.T) {
 	a.configTextEditing = true
 	a.configTextArea.SetValue("New system prompt content")
 
-	result, _ := a.handleConfigTextKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	result, _ := a.handleConfigTextKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	app := result.(App)
 	assert.Equal(t, "New system prompt content", app.sessionRecipe.SystemPrompt)
 	assert.True(t, app.recipeModified)
@@ -675,7 +675,7 @@ func TestHandleConfigTextKey_EscapeCancelsEditing(t *testing.T) {
 	a.configTextEditing = true
 	a.configTextArea.SetValue("Unsaved content")
 
-	result, _ := a.handleConfigTextKey(tea.KeyMsg{Type: tea.KeyEsc})
+	result, _ := a.handleConfigTextKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	app := result.(App)
 	assert.False(t, app.configTextEditing)
 	// Original prompt should be unchanged.
@@ -700,7 +700,7 @@ func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
 	a.configTextEditing = true
 	a.configTextArea.SetValue("Custom summarization prompt")
 
-	result, _ := a.handleConfigTextKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	result, _ := a.handleConfigTextKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	app := result.(App)
 	assert.Equal(t, "Custom summarization prompt", app.sessionRecipe.SummarizationPrompt)
 	assert.True(t, app.recipeModified)
