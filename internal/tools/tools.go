@@ -266,14 +266,19 @@ type activeToolsKey struct{}
 
 // WithActiveTools returns a context carrying the given tool definitions.
 // Adapters call ActiveToolsFromContext to retrieve the set for this run.
+// Passing nil is a no-op (nil means "not set"); pass an empty slice to
+// explicitly indicate zero active tools.
 func WithActiveTools(ctx context.Context, defs []ToolDef) context.Context {
+	if defs == nil {
+		return ctx
+	}
 	return context.WithValue(ctx, activeToolsKey{}, defs)
 }
 
 // ActiveToolsFromContext returns the tool definitions stored in ctx, or Definitions
-// if no active set was provided.
+// if no active set was provided. An empty slice means zero tools are active.
 func ActiveToolsFromContext(ctx context.Context) []ToolDef {
-	if v, ok := ctx.Value(activeToolsKey{}).([]ToolDef); ok && len(v) > 0 {
+	if v, ok := ctx.Value(activeToolsKey{}).([]ToolDef); ok {
 		return v
 	}
 	return Definitions
@@ -568,12 +573,11 @@ func init() {
 }
 
 // buildGuidance returns the guidance text filtered to only include lines whose
-// tagged tools overlap with activeNames. A nil map means "no filter" and returns
-// the full guidance (backward-compatible default). A non-nil empty map means
-// "zero tools active" and returns no guidance.
+// tagged tools overlap with activeNames. An empty map means "zero tools active"
+// and returns no guidance.
 func buildGuidance(activeNames map[string]bool) string {
-	if activeNames == nil {
-		return toolUseGuidance
+	if len(activeNames) == 0 {
+		return ""
 	}
 	var lines []string
 	for _, g := range defaultGuidanceLines {
@@ -622,23 +626,14 @@ func effectiveGuidanceForCtx(ctx context.Context) string {
 		return base
 	}
 
-	// Read the raw context value to distinguish three cases:
-	//   1. No value in context (ok=false)       → nil map → full guidance
-	//   2. Nil slice stored (WithActiveTools(nil)) → nil map → full guidance
-	//   3. Non-nil slice (possibly empty)        → non-nil map → filtered
-	// ActiveToolsFromContext can't be used here because it falls back to
-	// Definitions when the slice is empty.
-	v, ok := ctx.Value(activeToolsKey{}).([]ToolDef)
-	var nameSet map[string]bool // nil = no filter
-	if ok && v != nil {
-		nameSet = make(map[string]bool, len(v))
-		for _, d := range v {
-			nameSet[d.Name] = true
-		}
+	active := ActiveToolsFromContext(ctx)
+	nameSet := make(map[string]bool, len(active))
+	for _, d := range active {
+		nameSet[d.Name] = true
 	}
 	base := buildGuidance(nameSet)
 	if SubagentEnabled {
-		if nameSet[SpawnAgentToolName] || len(nameSet) == 0 {
+		if nameSet[SpawnAgentToolName] {
 			return base + spawnAgentGuidance + "\n"
 		}
 	}

@@ -473,9 +473,16 @@ func TestWithActiveTools_RoundTrip(t *testing.T) {
 	assert.Equal(t, subset, got)
 }
 
-func TestActiveToolsFromContext_EmptySliceFallsBackToAll(t *testing.T) {
-	// A context carrying an empty slice should fall back to all Definitions.
+func TestActiveToolsFromContext_EmptySliceReturnsEmpty(t *testing.T) {
+	// A context carrying an empty slice means zero active tools.
 	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	got := tools.ActiveToolsFromContext(ctx)
+	assert.Empty(t, got)
+}
+
+func TestActiveToolsFromContext_NilDoesNotStore(t *testing.T) {
+	// WithActiveTools(ctx, nil) is a no-op — ActiveToolsFromContext returns Definitions.
+	ctx := tools.WithActiveTools(context.Background(), nil)
 	got := tools.ActiveToolsFromContext(ctx)
 	assert.Equal(t, tools.Definitions, got)
 }
@@ -1202,7 +1209,7 @@ func TestSystemPromptSuffix_SingleToolBash(t *testing.T) {
 }
 
 func TestSystemPromptSuffix_NoActiveTools_ReturnsFullGuidance(t *testing.T) {
-	// Empty active tool set in context → full guidance (backward compat).
+	// WithActiveTools(nil) is a no-op — no value stored → full guidance.
 	ctx := tools.WithActiveTools(context.Background(), nil)
 	s := tools.SystemPromptSuffix(ctx)
 	unfiltered := tools.SystemPromptSuffix(context.Background())
@@ -1218,6 +1225,25 @@ func TestSystemPromptSuffix_ExplicitlyEmptyTools_ReturnsNoGuidance(t *testing.T)
 	assert.NotContains(t, s, "read_file")
 	assert.NotContains(t, s, "bash")
 	assert.NotContains(t, s, "Tool use guidance")
+}
+
+func TestSystemPromptSuffix_AllToolsDisabledViaDefinitionsAllowed(t *testing.T) {
+	// Mirrors the exact TUI code path: DefinitionsAllowed with every built-in
+	// tool disabled → non-nil empty slice → WithActiveTools → no guidance.
+	disabled := map[string]bool{
+		tools.ReadToolName: true, tools.WriteToolName: true, tools.EditToolName: true,
+		tools.ListDirToolName: true, tools.SearchFilesName: true, tools.SearchCodeName: true,
+		tools.BashToolName: true, tools.WebFetchToolName: true, tools.WebSearchToolName: true,
+	}
+	activeDefs := tools.DefinitionsAllowed(nil, disabled)
+	require.NotNil(t, activeDefs, "DefinitionsAllowed should return non-nil empty slice")
+	assert.Empty(t, activeDefs)
+
+	ctx := tools.WithActiveTools(context.Background(), activeDefs)
+	s := tools.SystemPromptSuffix(ctx)
+	assert.NotContains(t, s, "Tool use guidance")
+	assert.NotContains(t, s, "list_directory")
+	assert.NotContains(t, s, "bash")
 }
 
 func TestSystemPromptSuffix_PartialOverlap_EditWithoutWrite(t *testing.T) {
