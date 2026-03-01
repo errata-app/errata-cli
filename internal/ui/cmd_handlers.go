@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
@@ -106,8 +106,8 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 	a.rewindStack = nil
 	a.pastedText = ""
 	a.pastedLineCount = 0
-	a.feedVP.Width = a.width
-	a.feedVP.Height = a.feedVPHeight()
+	a.feedVP.SetWidth(a.width)
+	a.feedVP.SetHeight(a.feedVPHeight())
 	a.feedVP.SetContent("")
 	return a, nil
 }
@@ -121,8 +121,8 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubblet
 	if err := history.Clear(a.histPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
 	}
-	a.feedVP.Width = a.width
-	a.feedVP.Height = a.feedVPHeight()
+	a.feedVP.SetWidth(a.width)
+	a.feedVP.SetHeight(a.feedVPHeight())
 	a.feedVP.SetContent("")
 	return a, nil
 }
@@ -167,7 +167,7 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 	stats := preferences.SummarizeDetailed(a.prefPath, filter)
 	var sb strings.Builder
 	if recipeName != "" {
-		sb.WriteString(fmt.Sprintf("Stats (recipe: %s):\n", recipeName))
+		fmt.Fprintf(&sb, "Stats (recipe: %s):\n", recipeName)
 	} else {
 		sb.WriteString("Stats:\n")
 	}

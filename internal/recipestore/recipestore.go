@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -101,9 +102,7 @@ func (s *Store) List() map[string]*RecipeSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make(map[string]*RecipeSnapshot, len(s.configs))
-	for k, v := range s.configs {
-		out[k] = v
-	}
+	maps.Copy(out, s.configs)
 	return out
 }
 

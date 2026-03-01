@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/config"
@@ -262,7 +262,7 @@ func TestPinnedModels_ShownInHeader(t *testing.T) {
 	a := newAppForTest(t, ads)
 	a.activeAdapters = []models.ModelAdapter{uiStub{"m1"}}
 
-	view := a.View()
+	view := a.View().Content
 	// Pinned models line shows only the active adapter.
 	assert.Contains(t, view, "m1")
 	// The old subset badge should be gone.
@@ -273,7 +273,7 @@ func TestPinnedModels_AllModelsShown(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
 	a := newAppForTest(t, ads)
 
-	view := a.View()
+	view := a.View().Content
 	assert.Contains(t, view, "m1")
 	assert.Contains(t, view, "m2")
 }
@@ -333,13 +333,9 @@ func TestHandlePrompt_MentionDoesNotChangeActiveAdapters(t *testing.T) {
 
 // ─── paste badge ─────────────────────────────────────────────────────────────
 
-func pasteMsg(text string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text), Paste: true}
-}
-
 func TestPaste_MultiLineStoresBadge(t *testing.T) {
 	a := newAppForTest(t, nil)
-	result, cmd := a.handleIdleKey(pasteMsg("line1\nline2\nline3"))
+	result, cmd := a.handlePaste("line1\nline2\nline3")
 	assert.Nil(t, cmd)
 	app := result.(App)
 	assert.Equal(t, "line1\nline2\nline3", app.pastedText)
@@ -349,7 +345,7 @@ func TestPaste_MultiLineStoresBadge(t *testing.T) {
 func TestPaste_MultiLineWithCarriageReturns(t *testing.T) {
 	a := newAppForTest(t, nil)
 	// Terminals send \r instead of \n inside bracket paste.
-	result, cmd := a.handleIdleKey(pasteMsg("line1\rline2\rline3"))
+	result, cmd := a.handlePaste("line1\rline2\rline3")
 	assert.Nil(t, cmd)
 	app := result.(App)
 	assert.Equal(t, "line1\nline2\nline3", app.pastedText)
@@ -358,7 +354,7 @@ func TestPaste_MultiLineWithCarriageReturns(t *testing.T) {
 
 func TestPaste_MultiLineWithCRLF(t *testing.T) {
 	a := newAppForTest(t, nil)
-	result, cmd := a.handleIdleKey(pasteMsg("line1\r\nline2\r\nline3"))
+	result, cmd := a.handlePaste("line1\r\nline2\r\nline3")
 	assert.Nil(t, cmd)
 	app := result.(App)
 	assert.Equal(t, "line1\nline2\nline3", app.pastedText)
@@ -367,7 +363,7 @@ func TestPaste_MultiLineWithCRLF(t *testing.T) {
 
 func TestPaste_TwoLinesPassesToTextarea(t *testing.T) {
 	a := newAppForTest(t, nil)
-	result, _ := a.handleIdleKey(pasteMsg("line1\nline2"))
+	result, _ := a.handlePaste("line1\nline2")
 	app := result.(App)
 	// 2-line paste should NOT be intercepted — goes to textarea.
 	assert.Empty(t, app.pastedText)
@@ -379,7 +375,7 @@ func TestPaste_EnterSubmitsPastedText(t *testing.T) {
 	a.pastedText = "line1\nline2\nline3"
 	a.pastedLineCount = 3
 
-	result, _ := a.handleIdleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	result, _ := a.handleIdleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	app := result.(App)
 	// Paste state should be cleared after submit.
 	assert.Empty(t, app.pastedText)
@@ -392,7 +388,7 @@ func TestPaste_EnterCombinesTypedAndPasted(t *testing.T) {
 	a.pastedText = "line1\nline2\nline3"
 	a.pastedLineCount = 3
 
-	result, _ := a.handleIdleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	result, _ := a.handleIdleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	app := result.(App)
 	// After submission, paste state should be cleared.
 	assert.Empty(t, app.pastedText)
@@ -407,7 +403,7 @@ func TestPaste_BackspaceClearsPasteWhenEmpty(t *testing.T) {
 	a.pastedText = "line1\nline2\nline3"
 	a.pastedLineCount = 3
 
-	result, cmd := a.handleIdleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	result, cmd := a.handleIdleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	assert.Nil(t, cmd)
 	app := result.(App)
 	assert.Empty(t, app.pastedText)
@@ -420,7 +416,7 @@ func TestPaste_BackspaceDoesNotClearWhenTextareaHasContent(t *testing.T) {
 	a.pastedText = "line1\nline2\nline3"
 	a.pastedLineCount = 3
 
-	result, _ := a.handleIdleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	result, _ := a.handleIdleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	app := result.(App)
 	// Paste should NOT be cleared because textarea has content.
 	assert.Equal(t, "line1\nline2\nline3", app.pastedText)
@@ -433,7 +429,7 @@ func TestPaste_BadgeShownInView(t *testing.T) {
 	a.pastedText = "a\nb\nc\nd\ne"
 	a.pastedLineCount = 5
 
-	view := a.View()
+	view := a.View().Content
 	assert.Contains(t, view, "pasted 5 lines")
 }
 
@@ -442,7 +438,7 @@ func TestPaste_BadgeNotShownWhenNoPaste(t *testing.T) {
 	a.width = 80
 	a.height = 40
 
-	view := a.View()
+	view := a.View().Content
 	assert.NotContains(t, view, "pasted")
 }
 
@@ -470,8 +466,8 @@ func TestPaste_WipeCmdResetsPaste(t *testing.T) {
 
 // ─── double-ESC to clear ─────────────────────────────────────────────────────
 
-func escMsg() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyEsc}
+func escMsg() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEscape}
 }
 
 func TestDoubleEsc_ClearsTextarea(t *testing.T) {
@@ -549,4 +545,28 @@ func TestDoubleEsc_NoopWhenEmpty(t *testing.T) {
 	app := result.(App)
 	// Should just record lastEscTime, pass through to textarea.
 	assert.NotEqual(t, time.Time{}, app.lastEscTime)
+}
+
+// ─── Shift+Enter / Alt+Enter newline insertion ──────────────────────────────
+
+func TestShiftEnter_InsertsNewline(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("hello")
+
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}
+	result, _ := a.handleIdleKey(msg)
+	app := result.(App)
+	// Shift+Enter should NOT submit — should stay idle (textarea processes it).
+	assert.Equal(t, modeIdle, app.mode)
+}
+
+func TestAltEnter_StillInsertsNewline(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.input.SetValue("hello")
+
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}
+	result, _ := a.handleIdleKey(msg)
+	app := result.(App)
+	// Alt+Enter should NOT submit — should stay idle.
+	assert.Equal(t, modeIdle, app.mode)
 }

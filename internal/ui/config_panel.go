@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/lipgloss/v2"
+	tea "charm.land/bubbletea/v2"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/tools"
@@ -983,7 +983,7 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 
 // ── key handling ────────────────────────────────────────────────────────────
 
-func (a App) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+func (a App) handleConfigKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if a.configExpandedIdx >= 0 {
 		sec := a.configSections[a.configExpandedIdx]
 		switch sec.Kind {
@@ -999,9 +999,9 @@ func (a App) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 	return a.handleConfigNavKey(msg)
 }
 
-func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	switch msg.Type {
-	case tea.KeyEsc:
+func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	switch msg.Code {
+	case tea.KeyEscape:
 		a.configOverlayActive = false
 		return a, nil
 	case tea.KeyUp:
@@ -1049,24 +1049,26 @@ func (a App) handleConfigNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:
 			a.configTextEditing = true
 		}
 		return a, nil
-	case tea.KeyRunes:
-		if string(msg.Runes) == "r" || string(msg.Runes) == "R" {
-			a.sessionRecipe = cloneRecipe(a.recipe)
-			a.recipeModified = false
-			a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
-			return a, nil
-		}
-		if string(msg.Runes) == "q" || string(msg.Runes) == "Q" {
-			a.configOverlayActive = false
-			return a, nil
+	default:
+		if len(msg.Text) > 0 {
+			switch strings.ToLower(msg.Text) {
+			case "r":
+				a.sessionRecipe = cloneRecipe(a.recipe)
+				a.recipeModified = false
+				a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+				return a, nil
+			case "q":
+				a.configOverlayActive = false
+				return a, nil
+			}
 		}
 	}
 	return a, nil
 }
 
-func (a App) handleConfigListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	switch msg.Type {
-	case tea.KeyEsc:
+func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	switch msg.Code {
+	case tea.KeyEscape:
 		a.configExpandedIdx = -1
 		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
@@ -1080,7 +1082,7 @@ func (a App) handleConfigListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint
 			a.configListCursor++
 		}
 		return a, nil
-	case tea.KeyEnter, tea.KeySpace:
+	case tea.KeyEnter, ' ':
 		if a.configListCursor < len(a.configListItems) {
 			item := &a.configListItems[a.configListCursor]
 			item.Active = !item.Active
@@ -1124,7 +1126,7 @@ func (a App) handleConfigListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint
 	return a, nil
 }
 
-func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+func (a App) handleConfigScalarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	// Check if we're currently editing a field.
 	editing := false
 	if a.configScalarCursor < len(a.configScalarFields) {
@@ -1132,8 +1134,8 @@ func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //noli
 	}
 
 	if editing {
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch msg.Code {
+		case tea.KeyEscape:
 			// Cancel editing.
 			a.configScalarFields[a.configScalarCursor].Editing = false
 			a.configEditBuf = ""
@@ -1159,15 +1161,16 @@ func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //noli
 				a.configEditBuf = a.configEditBuf[:len(a.configEditBuf)-1]
 			}
 			return a, nil
-		case tea.KeyRunes:
-			a.configEditBuf += string(msg.Runes)
+		default:
+			if len(msg.Text) > 0 {
+				a.configEditBuf += msg.Text
+			}
 			return a, nil
 		}
-		return a, nil
 	}
 
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch msg.Code {
+	case tea.KeyEscape:
 		a.configExpandedIdx = -1
 		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 		return a, nil
@@ -1192,10 +1195,10 @@ func (a App) handleConfigScalarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //noli
 	return a, nil
 }
 
-func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if !a.configTextEditing {
 		// Not actively editing — Enter starts, Escape goes back.
-		if msg.Type == tea.KeyEsc {
+		if msg.Code == tea.KeyEscape {
 			a.configExpandedIdx = -1
 			a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
 			return a, nil
@@ -1204,7 +1207,7 @@ func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint
 	}
 
 	// Ctrl+S or Ctrl+D saves the text.
-	if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyCtrlD {
+	if msg.Mod.Contains(tea.ModCtrl) && (msg.Code == 's' || msg.Code == 'd') {
 		sec := a.configSections[a.configExpandedIdx]
 		val := a.configTextArea.Value()
 		_ = setConfigValue(a.sessionRecipe, sec.Path, val)
@@ -1217,7 +1220,7 @@ func (a App) handleConfigTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint
 	}
 
 	// Escape cancels editing.
-	if msg.Type == tea.KeyEsc {
+	if msg.Code == tea.KeyEscape {
 		a.configTextEditing = false
 		a.configTextArea.Blur()
 		return a, nil
