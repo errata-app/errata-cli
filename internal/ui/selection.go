@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
@@ -41,7 +42,7 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 			// Find the single OK response and record it as the winner.
 			for _, resp := range a.responses {
 				if resp.OK() {
-					if err := preferences.Record(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses); err != nil {
+					if err := preferences.Record(a.prefPath, a.lastPrompt, resp.ModelID, a.recipeHash(), a.sessionID, a.responses); err != nil {
 						log.Printf("warning: failed to record preference: %v", err)
 					}
 					if a.lastReport != nil {
@@ -61,7 +62,7 @@ func (a App) handleRatingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 		case "n", "N":
 			for _, resp := range a.responses {
 				if resp.OK() {
-					if err := preferences.RecordBad(a.prefPath, a.lastPrompt, resp.ModelID, a.sessionID, a.responses); err != nil {
+					if err := preferences.RecordBad(a.prefPath, a.lastPrompt, resp.ModelID, a.recipeHash(), a.sessionID, a.responses); err != nil {
 						log.Printf("warning: failed to record preference: %v", err)
 					}
 					if a.lastReport != nil {
@@ -187,7 +188,7 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 		}
 	}
 
-	if err := preferences.Record(a.prefPath, a.lastPrompt, selected.ModelID, a.sessionID, a.responses); err != nil {
+	if err := preferences.Record(a.prefPath, a.lastPrompt, selected.ModelID, a.recipeHash(), a.sessionID, a.responses); err != nil {
 		log.Printf("warning: failed to record preference: %v", err)
 	}
 
@@ -205,4 +206,53 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 	a.responses = nil
 	a.mode = modeIdle
 	return a.withFeedRebuilt(true), nil
+}
+
+// buildRecipeSnapshot creates a RecipeSnapshot from the current App state.
+func (a App) buildRecipeSnapshot() *recipestore.RecipeSnapshot { //nolint:gocritic // bubbletea value-receiver pattern
+	rec := a.sessionRecipe
+	if rec == nil {
+		rec = a.recipe
+	}
+
+	snap := &recipestore.RecipeSnapshot{Name: "default"}
+	if rec != nil {
+		snap.Name = rec.Name
+		if snap.Name == "" {
+			snap.Name = "default"
+		}
+		snap.SystemPrompt = rec.SystemPrompt
+		if rec.Constraints.MaxSteps > 0 || rec.Constraints.Timeout > 0 {
+			snap.Constraints = &recipestore.ConstraintsConfig{
+				MaxSteps: rec.Constraints.MaxSteps,
+			}
+			if rec.Constraints.Timeout > 0 {
+				snap.Constraints.Timeout = rec.Constraints.Timeout.String()
+			}
+		}
+		if rec.ModelParams.Temperature != nil || rec.ModelParams.MaxTokens != nil || rec.ModelParams.Seed != nil {
+			snap.ModelParams = &recipestore.ModelParamsConfig{
+				Temperature: rec.ModelParams.Temperature,
+				MaxTokens:   rec.ModelParams.MaxTokens,
+				Seed:        rec.ModelParams.Seed,
+			}
+		}
+	}
+
+	// Populate tools from the last report's active tool list (reflects actual run config).
+	if a.lastReport != nil {
+		snap.Tools = a.lastReport.Recipe.Tools
+	}
+
+	return snap
+}
+
+// recipeHash builds a RecipeSnapshot from the current state, puts it in the
+// store, and returns the hash. Returns "" if no store is configured.
+func (a App) recipeHash() string { //nolint:gocritic // bubbletea value-receiver pattern
+	if a.recipeStore == nil {
+		return ""
+	}
+	snap := a.buildRecipeSnapshot()
+	return a.recipeStore.Put(snap)
 }

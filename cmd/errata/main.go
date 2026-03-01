@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/headless"
 	"github.com/suarezc/errata/internal/logging"
 	"github.com/suarezc/errata/internal/mcp"
@@ -52,6 +53,8 @@ func main() {
 		RunE:  runStats,
 	}
 	statsCmd.Flags().Bool("detail", false, "Show detailed analytics (win rate, avg latency, avg cost)")
+	statsCmd.Flags().String("recipe", "", "Filter stats by recipe name")
+	statsCmd.Flags().String("config", "", "Filter stats by config hash")
 
 	runCmd := &cobra.Command{
 		Use:   "run",
@@ -250,7 +253,8 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming, availableModels)
+	cs := recipestore.New("data/configs.json")
+	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming, availableModels, cs)
 	fmt.Fprintf(os.Stderr, "To continue this session: errata --resume %s\n", sessionID)
 	return err
 }
@@ -329,15 +333,19 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 
 func runStats(cmd *cobra.Command, args []string) error {
 	detail, _ := cmd.Flags().GetBool("detail")
+	recipeFilter, _ := cmd.Flags().GetString("recipe")
+	configFilter, _ := cmd.Flags().GetString("config")
 	rec := loadRecipe()
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
 
+	filter := resolveStatsFilter(recipeFilter, configFilter)
+
 	if detail {
-		return runStatsDetailed(cfg)
+		return runStatsDetailed(cfg, filter)
 	}
 
-	tally := preferences.Summarize(cfg.PreferencesPath)
+	tally := preferences.Summarize(cfg.PreferencesPath, filter)
 	if len(tally) == 0 {
 		fmt.Println("No preference data yet.")
 		return nil
@@ -366,8 +374,29 @@ func runStats(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runStatsDetailed(cfg config.Config) error {
-	stats := preferences.SummarizeDetailed(cfg.PreferencesPath)
+// resolveStatsFilter builds a StatsFilter from CLI flags.
+// --config takes precedence; --recipe resolves to matching hashes via the config store.
+func resolveStatsFilter(recipeName, configHash string) *preferences.StatsFilter {
+	if configHash != "" {
+		return &preferences.StatsFilter{ConfigHash: configHash}
+	}
+	if recipeName != "" {
+		cs := recipestore.New("data/configs.json")
+		hashes := cs.HashesForName(recipeName)
+		if len(hashes) == 1 {
+			return &preferences.StatsFilter{ConfigHash: hashes[0]}
+		}
+		if len(hashes) > 1 {
+			fmt.Fprintf(os.Stderr, "warning: recipe %q has %d configs; showing all. Use --config to filter by specific hash.\n", recipeName, len(hashes))
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: no config found for recipe %q; showing all.\n", recipeName)
+		}
+	}
+	return nil
+}
+
+func runStatsDetailed(cfg config.Config, filter *preferences.StatsFilter) error {
+	stats := preferences.SummarizeDetailed(cfg.PreferencesPath, filter)
 	if len(stats) == 0 {
 		fmt.Println("No preference data yet.")
 		return nil

@@ -19,6 +19,7 @@ import (
 	"github.com/rivo/uniseg"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
@@ -99,6 +100,7 @@ type App struct {
 	prefPath       string
 	sessionID      string
 	cfg            config.Config
+	recipeStore    *recipestore.Store // content-addressed config snapshot store
 
 	// MCP tool definitions and dispatchers (nil if no MCP servers configured)
 	mcpDefs        []tools.ToolDef
@@ -209,7 +211,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, availableModels []string) *App {
+func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, availableModels []string, cs *recipestore.Store) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -251,6 +253,7 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 		conversationHistories: h,
 		sessionCostPerModel:   make(map[string]float64),
 		cfg:                   cfg,
+		recipeStore:           cs,
 		mcpDefs:               mcpDefs,
 		mcpDispatchers:        mcpDispatchers,
 		availableModels:       availableModels,
@@ -795,8 +798,8 @@ func (a App) View() string { //nolint:gocritic // bubbletea requires value recei
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string) error {
-	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels)
+func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string, cs *recipestore.Store) error {
+	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels, cs)
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	app.SetProgram(p)
