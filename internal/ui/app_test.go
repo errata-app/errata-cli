@@ -552,23 +552,27 @@ func TestDoubleEsc_NoopWhenEmpty(t *testing.T) {
 func TestShiftEnter_InsertsNewline(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.input.SetValue("hello")
+	a.input.CursorEnd()
 
 	msg := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}
 	result, _ := a.handleIdleKey(msg)
 	app := result.(App)
-	// Shift+Enter should NOT submit — should stay idle (textarea processes it).
+	// Shift+Enter should NOT submit — should stay idle and insert a newline.
 	assert.Equal(t, modeIdle, app.mode)
+	assert.Contains(t, app.input.Value(), "\n", "Shift+Enter should insert a newline")
 }
 
 func TestAltEnter_StillInsertsNewline(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.input.SetValue("hello")
+	a.input.CursorEnd()
 
 	msg := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}
 	result, _ := a.handleIdleKey(msg)
 	app := result.(App)
-	// Alt+Enter should NOT submit — should stay idle.
+	// Alt+Enter should NOT submit — should stay idle and insert a newline.
 	assert.Equal(t, modeIdle, app.mode)
+	assert.Contains(t, app.input.Value(), "\n", "Alt+Enter should insert a newline")
 }
 
 // ─── feedVPHeight hint accounting ────────────────────────────────────────────

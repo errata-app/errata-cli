@@ -84,7 +84,11 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 
 	case tea.KeyEnter:
 		if msg.Mod.Contains(tea.ModShift) || msg.Mod.Contains(tea.ModAlt) {
-			break // fall through to textarea → inserts newline
+			// The textarea's InsertNewline binding only matches bare "enter",
+			// not "shift+enter" or "alt+enter", so insert the newline manually.
+			a.input.InsertString("\n")
+			a.resizeInput()
+			return a, nil
 		}
 		typed := strings.TrimSpace(a.input.Value())
 		var prompt string
