@@ -183,28 +183,6 @@ func (a App) computeHintLines() int { //nolint:gocritic // called from bubbletea
 			}
 			return countCappedHints(count)
 
-		case strings.HasPrefix(lower, "/export "):
-			partial := lastWord(val[len("/export "):])
-			lp := strings.ToLower(partial)
-			count := 0
-			for _, sub := range []string{"recipe", "output"} {
-				if strings.HasPrefix(sub, lp) {
-					count++
-				}
-			}
-			return count
-
-		case strings.HasPrefix(lower, "/import "):
-			partial := lastWord(val[len("/import "):])
-			lp := strings.ToLower(partial)
-			count := 0
-			for _, sub := range []string{"recipe"} {
-				if strings.HasPrefix(sub, lp) {
-					count++
-				}
-			}
-			return count
-
 		default:
 			prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
 			count := 0

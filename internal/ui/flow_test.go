@@ -521,9 +521,9 @@ func TestRunComplete_CostAccumulation(t *testing.T) {
 	result, _ := a.Update(msg1)
 	a = appFrom(t, result)
 
-	assert.InDelta(t, 0.03, a.totalCostUSD, 0.001)
-	assert.InDelta(t, 0.01, a.sessionCostPerModel["m1"], 0.001)
-	assert.InDelta(t, 0.02, a.sessionCostPerModel["m2"], 0.001)
+	assert.InDelta(t, 0.03, a.store.TotalCost(), 0.001)
+	assert.InDelta(t, 0.01, a.store.CostPerModel()["m1"], 0.001)
+	assert.InDelta(t, 0.02, a.store.CostPerModel()["m2"], 0.001)
 
 	// Second run (only m1).
 	// Reset mode for the second run.
@@ -535,9 +535,9 @@ func TestRunComplete_CostAccumulation(t *testing.T) {
 	result, _ = a.Update(msg2)
 	a = appFrom(t, result)
 
-	assert.InDelta(t, 0.035, a.totalCostUSD, 0.001)
-	assert.InDelta(t, 0.015, a.sessionCostPerModel["m1"], 0.001)
-	assert.InDelta(t, 0.02, a.sessionCostPerModel["m2"], 0.001)
+	assert.InDelta(t, 0.035, a.store.TotalCost(), 0.001)
+	assert.InDelta(t, 0.015, a.store.CostPerModel()["m1"], 0.001)
+	assert.InDelta(t, 0.02, a.store.CostPerModel()["m2"], 0.001)
 }
 
 func TestRunComplete_ContextOverflowReplacesError(t *testing.T) {
@@ -565,8 +565,8 @@ func TestRunComplete_HistoryUpdatedAfterRun(t *testing.T) {
 	result, _ := a.Update(msg)
 	a = appFrom(t, result)
 
-	require.NotNil(t, a.conversationHistories)
-	h := a.conversationHistories["m1"]
+	require.NotNil(t, a.store.Histories())
+	h := a.store.Histories()["m1"]
 	require.Len(t, h, 2)
 	assert.Equal(t, "user", h[0].Role)
 	assert.Equal(t, "what is Go?", h[0].Content)
@@ -577,12 +577,12 @@ func TestRunComplete_HistoryUpdatedAfterRun(t *testing.T) {
 func TestRunComplete_CompactedHistoriesApplied(t *testing.T) {
 	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
 	// Pre-populate history.
-	a.conversationHistories = map[string][]models.ConversationTurn{
+	a.store.SetHistories(map[string][]models.ConversationTurn{
 		"m1": {
 			{Role: "user", Content: "old question"},
 			{Role: "assistant", Content: "old answer"},
 		},
-	}
+	})
 	setupRunState(&a, "new question", []string{"m1"})
 
 	// runCompleteMsg carries compacted histories (simulating auto-compact).
@@ -603,7 +603,7 @@ func TestRunComplete_CompactedHistoriesApplied(t *testing.T) {
 
 	// The compacted history should have replaced the original,
 	// then AppendHistory added the new turn pair.
-	h := a.conversationHistories["m1"]
+	h := a.store.Histories()["m1"]
 	require.Len(t, h, 4)
 	assert.Contains(t, h[0].Content, "compacted")
 	assert.Equal(t, "new question", h[2].Content)
@@ -721,7 +721,8 @@ func TestInput_CtrlDQuitsFromIdle(t *testing.T) {
 func TestInput_CtrlREntersSearchMode(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.mode = modeIdle
-	a.promptHistory = []string{"fix bug", "add feature"}
+	a.store.RecordPrompt("add feature")
+	a.store.RecordPrompt("fix bug")
 
 	result, _ := a.handleIdleKey(ctrlKey('r'))
 	a = appFrom(t, result)
@@ -807,13 +808,12 @@ func TestLaunchRun_PushesFeedItem(t *testing.T) {
 func TestLaunchRun_RecordsPromptHistory(t *testing.T) {
 	ads := []models.ModelAdapter{&scenarioAdapter{id: "m1"}}
 	a := newAppForTest(t, ads)
-	a.promptHistory = nil
 
 	result, _ := a.launchRun("my prompt")
 	app := appFrom(t, result)
 
-	require.Len(t, app.promptHistory, 1)
-	assert.Equal(t, "my prompt", app.promptHistory[0])
+	require.Len(t, app.store.PromptHistory(), 1)
+	assert.Equal(t, "my prompt", app.store.PromptHistory()[0])
 }
 
 func TestLaunchRun_UsesActiveAdapters(t *testing.T) {
@@ -836,13 +836,13 @@ func TestLaunchRun_UsesActiveAdapters(t *testing.T) {
 func TestLaunchRun_DeduplicatesPromptHistory(t *testing.T) {
 	ads := []models.ModelAdapter{&scenarioAdapter{id: "m1"}}
 	a := newAppForTest(t, ads)
-	a.promptHistory = []string{"same prompt"}
+	a.store.RecordPrompt("same prompt")
 
 	result, _ := a.launchRun("same prompt")
 	app := appFrom(t, result)
 
 	// Should not add a duplicate at the front.
-	assert.Len(t, app.promptHistory, 1)
+	assert.Len(t, app.store.PromptHistory(), 1)
 }
 
 // ── Group I: Misc Edge Cases ────────────────────────────────────────────────
@@ -896,7 +896,7 @@ func TestRunComplete_ErrorResponseDoesNotUpdateHistory(t *testing.T) {
 	a = appFrom(t, result)
 
 	// Error responses should not add history turns.
-	if h, ok := a.conversationHistories["m1"]; ok {
+	if h, ok := a.store.Histories()["m1"]; ok {
 		assert.Empty(t, h)
 	}
 }
@@ -915,12 +915,12 @@ func TestWindowSizeMsg_UpdatesDimensions(t *testing.T) {
 
 func TestCompactCompleteMsg_UpdatesHistories(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.conversationHistories = map[string][]models.ConversationTurn{
+	a.store.SetHistories(map[string][]models.ConversationTurn{
 		"m1": {
 			{Role: "user", Content: "old q"},
 			{Role: "assistant", Content: "old a"},
 		},
-	}
+	})
 
 	compacted := map[string][]models.ConversationTurn{
 		"m1": {
@@ -931,8 +931,8 @@ func TestCompactCompleteMsg_UpdatesHistories(t *testing.T) {
 	result, _ := a.Update(compactCompleteMsg{histories: compacted})
 	a = appFrom(t, result)
 
-	require.Len(t, a.conversationHistories["m1"], 2)
-	assert.Contains(t, a.conversationHistories["m1"][0].Content, "compacted")
+	require.Len(t, a.store.Histories()["m1"], 2)
+	assert.Contains(t, a.store.Histories()["m1"][0].Content, "compacted")
 
 	// Feed should contain the compaction message.
 	found := false
@@ -1016,16 +1016,16 @@ func TestRewind_RevertsConversationHistory(t *testing.T) {
 	a = appFrom(t, result)
 
 	// History should have 2 turns (user + assistant).
-	require.Len(t, a.conversationHistories["m1"], 2)
-	require.Len(t, a.rewindStack, 1)
+	require.Len(t, a.store.Histories()["m1"], 2)
+	assert.True(t, a.store.CanRewind())
 
 	// Rewind.
 	result, _ = a.handleRewindCmd()
 	a = appFrom(t, result)
 
 	// History should be empty.
-	assert.Empty(t, a.conversationHistories["m1"])
-	assert.Empty(t, a.rewindStack)
+	assert.Empty(t, a.store.Histories()["m1"])
+	assert.False(t, a.store.CanRewind())
 }
 
 func TestRewind_AnnotatesFeedItem(t *testing.T) {
@@ -1169,20 +1169,20 @@ func TestRewind_MultipleRewinds(t *testing.T) {
 	a = appFrom(t, result)
 	a.mode = modeIdle
 
-	require.Len(t, a.conversationHistories["m1"], 4) // 2 turns per run
-	require.Len(t, a.rewindStack, 2)
+	require.Len(t, a.store.Histories()["m1"], 4) // 2 turns per run
+	assert.Equal(t, 2, a.store.RewindStackLen())
 
 	// First rewind — removes second run.
 	result, _ = a.handleRewindCmd()
 	a = appFrom(t, result)
-	assert.Len(t, a.conversationHistories["m1"], 2)
-	assert.Len(t, a.rewindStack, 1)
+	assert.Len(t, a.store.Histories()["m1"], 2)
+	assert.Equal(t, 1, a.store.RewindStackLen())
 
 	// Second rewind — removes first run.
 	result, _ = a.handleRewindCmd()
 	a = appFrom(t, result)
-	assert.Empty(t, a.conversationHistories["m1"])
-	assert.Empty(t, a.rewindStack)
+	assert.Empty(t, a.store.Histories()["m1"])
+	assert.False(t, a.store.CanRewind())
 }
 
 func TestRewind_TextOnlyRun(t *testing.T) {
@@ -1199,14 +1199,14 @@ func TestRewind_TextOnlyRun(t *testing.T) {
 	result, _ = a.handleRatingKey(keyRunes("s"))
 	a = appFrom(t, result)
 
-	require.Len(t, a.conversationHistories["m1"], 2)
-	require.Len(t, a.rewindStack, 1)
+	require.Len(t, a.store.Histories()["m1"], 2)
+	assert.True(t, a.store.CanRewind())
 
 	// Rewind — no files, just history.
 	result, _ = a.handleRewindCmd()
 	a = appFrom(t, result)
-	assert.Empty(t, a.conversationHistories["m1"])
-	assert.Empty(t, a.rewindStack)
+	assert.Empty(t, a.store.Histories()["m1"])
+	assert.False(t, a.store.CanRewind())
 }
 
 func TestRewind_ClearClearsStack(t *testing.T) {
@@ -1218,11 +1218,11 @@ func TestRewind_ClearClearsStack(t *testing.T) {
 	result, _ := a.Update(msg)
 	a = appFrom(t, result)
 	a.mode = modeIdle
-	require.Len(t, a.rewindStack, 1)
+	assert.True(t, a.store.CanRewind())
 
 	result, _ = a.handleClearCmd()
 	a = appFrom(t, result)
-	assert.Nil(t, a.rewindStack)
+	assert.False(t, a.store.CanRewind())
 }
 
 func TestRewind_WipeClearsStack(t *testing.T) {
@@ -1234,9 +1234,9 @@ func TestRewind_WipeClearsStack(t *testing.T) {
 	result, _ := a.Update(msg)
 	a = appFrom(t, result)
 	a.mode = modeIdle
-	require.Len(t, a.rewindStack, 1)
+	assert.True(t, a.store.CanRewind())
 
 	result, _ = a.handleWipeCmd()
 	a = appFrom(t, result)
-	assert.Nil(t, a.rewindStack)
+	assert.False(t, a.store.CanRewind())
 }

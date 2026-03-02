@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -14,16 +15,13 @@ import (
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
-	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/prompt"
-	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
-	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/subagent"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -35,11 +33,14 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 	if lower == "/config" || strings.HasPrefix(lower, "/config ") {
 		return a.handleConfigCommand(strings.TrimSpace(trimmed[len("/config"):]))
 	}
+	if lower == "/save" || strings.HasPrefix(lower, "/save ") {
+		return a.handleSaveCommand(strings.TrimSpace(trimmed[len("/save"):]))
+	}
+	if lower == "/load" || strings.HasPrefix(lower, "/load ") {
+		return a.handleLoadCommand(strings.TrimSpace(trimmed[len("/load"):]))
+	}
 	if lower == "/export" || strings.HasPrefix(lower, "/export ") {
 		return a.handleExportCommand(strings.TrimSpace(trimmed[len("/export"):]))
-	}
-	if lower == "/import" || strings.HasPrefix(lower, "/import ") {
-		return a.handleImportCommand(strings.TrimSpace(trimmed[len("/import"):]))
 	}
 	switch lower {
 	case "/exit", "/quit":
@@ -104,7 +105,7 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
-	a.rewindStack = nil
+	a.store.ClearRewindStack()
 	a.pastedText = ""
 	a.pastedLineCount = 0
 	return a, nil
@@ -112,13 +113,10 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 
 func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
-	a.rewindStack = nil
+	a.store.ClearRewindStack()
 	a.pastedText = ""
 	a.pastedLineCount = 0
-	a.conversationHistories = nil
-	if err := history.Clear(a.histPath); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
-	}
+	a.store.ClearHistories()
 	return a, nil
 }
 
@@ -127,15 +125,11 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	if a.activeAdapters != nil {
 		toCompact = a.activeAdapters
 	}
-	histories := a.conversationHistories
+	histories := a.store.Histories()
 	prog := a.prog
-	compactRecipe := a.recipe
-	if a.sessionRecipe != nil {
-		compactRecipe = a.sessionRecipe
-	}
 	var compactSumPrompt string
-	if compactRecipe != nil {
-		compactSumPrompt = compactRecipe.SummarizationPrompt
+	if compactRec := a.store.ActiveRecipe(); compactRec != nil {
+		compactSumPrompt = compactRec.SummarizationPrompt
 	}
 	app, printCmd := a.withMessage("Compacting conversation history…")
 	return app, tea.Batch(printCmd, func() tea.Msg {
@@ -154,13 +148,13 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 	// Filter stats by current config when a config store is available.
 	var filter *preferences.StatsFilter
 	var recipeName string
-	if a.recipeStore != nil {
-		snap := a.buildRecipeSnapshot()
-		h := a.recipeStore.Put(snap)
+	if a.store.RecipeStore() != nil {
+		snap := a.store.BuildRecipeSnapshot()
+		h := a.store.RecipeStore().Put(snap)
 		filter = &preferences.StatsFilter{ConfigHash: h}
 		recipeName = snap.Name
 	}
-	stats := preferences.SummarizeDetailed(a.prefPath, filter)
+	stats := preferences.SummarizeDetailed(a.store.PrefPath(), filter)
 	var sb strings.Builder
 	if recipeName != "" {
 		fmt.Fprintf(&sb, "Stats (recipe: %s):\n", recipeName)
@@ -204,19 +198,20 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 			)
 		}
 	}
-	if len(a.sessionCostPerModel) > 0 {
+	costPerModel := a.store.CostPerModel()
+	if len(costPerModel) > 0 {
 		sb.WriteString("  Session cost:\n")
-		ids := make([]string, 0, len(a.sessionCostPerModel))
-		for id := range a.sessionCostPerModel {
+		ids := make([]string, 0, len(costPerModel))
+		for id := range costPerModel {
 			ids = append(ids, id)
 		}
 		sort.Slice(ids, func(i, j int) bool {
-			return a.sessionCostPerModel[ids[i]] > a.sessionCostPerModel[ids[j]]
+			return costPerModel[ids[i]] > costPerModel[ids[j]]
 		})
 		for _, id := range ids {
-			fmt.Fprintf(&sb, "    %s: $%.4f\n", id, a.sessionCostPerModel[id])
+			fmt.Fprintf(&sb, "    %s: $%.4f\n", id, costPerModel[id])
 		}
-		fmt.Fprintf(&sb, "  Total: $%.4f\n", a.totalCostUSD)
+		fmt.Fprintf(&sb, "  Total: $%.4f\n", a.store.TotalCost())
 	}
 	return a.withMessage(strings.TrimRight(sb.String(), "\n"))
 }
@@ -240,12 +235,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	// Record in prompt history (deduplicate consecutive identical entries).
 	a.historyIdx = -1
 	a.historyInputBuf = ""
-	if len(a.promptHistory) == 0 || a.promptHistory[0] != trimmed {
-		a.promptHistory = append([]string{trimmed}, a.promptHistory...)
-		if err := prompthistory.Append(a.promptHistPath, trimmed); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save prompt history: %v\n", err)
-		}
-	}
+	a.store.RecordPrompt(trimmed)
 
 	a.lastPrompt = trimmed
 	a.mode = modeRunning
@@ -253,7 +243,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	a.panelIdx = make(map[string]int)
 	for i, ad := range toRun {
 		ps := newPanelState(ad.ID(), i)
-		ps.histTokens = runner.EstimateHistoryTokens(a.conversationHistories[ad.ID()])
+		ps.histTokens = runner.EstimateHistoryTokens(a.store.Histories()[ad.ID()])
 		a.panels = append(a.panels, ps)
 		a.panelIdx[ad.ID()] = i
 	}
@@ -273,7 +263,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	ads := toRun
 	verbose := a.verbose
 	prog := a.prog
-	histories := a.conversationHistories // read-only in goroutine; written only by main loop
+	histories := a.store.Histories() // read-only in goroutine; written only by main loop
 	activeDefs := tools.DefinitionsAllowed(a.toolAllowlist, a.disabledTools)
 	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
 	// Apply sandbox restrictions from recipe.
@@ -290,14 +280,10 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		})
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
-	activeRecipe := a.recipe
-	if a.sessionRecipe != nil {
-		activeRecipe = a.sessionRecipe
-	}
 	var sumPrompt string
-	if activeRecipe != nil {
-		activeDefs = tools.ApplyDescriptions(activeDefs, activeRecipe.ToolDescriptions)
-		sumPrompt = activeRecipe.SummarizationPrompt
+	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
+		activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.ToolDescriptions)
+		sumPrompt = activeRec.SummarizationPrompt
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
@@ -307,9 +293,9 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	projectRoot := a.projectRoot
 	cfg := a.cfg
 	seed := a.seed
-	sessionID := a.sessionID
-	rec := a.recipe
-	cpPath := a.checkpointPath
+	sessionID := a.store.SessionID()
+	rec := a.store.BaseRecipe()
+	cpPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
@@ -395,16 +381,17 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			toolNames[i] = d.Name
 		}
 		report := output.BuildReport(sessionID, rec, trimmed, responses, collector, toolNames)
-		if _, err := output.Save(output.DefaultDir, report); err != nil {
+		reportPath, err := output.Save(output.DefaultDir, report)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
 		}
 
-		return runCompleteMsg{responses: responses, compactedHistories: compacted, report: report}
+		return runCompleteMsg{responses: responses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
 	})
 }
 
 func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	cp, err := checkpoint.Load(a.checkpointPath)
+	cp, err := a.store.LoadCheckpoint()
 	if err != nil {
 		return a.withMessage(fmt.Sprintf("Error loading checkpoint: %v", err))
 	}
@@ -423,9 +410,7 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 	}
 
 	if len(toRerunIDs) == 0 {
-		if err := checkpoint.Clear(a.checkpointPath); err != nil {
-			log.Printf("warning: failed to clear checkpoint: %v", err)
-		}
+		a.store.ClearCheckpoint()
 		return a.withMessage("All models from the last run completed. No resume needed.")
 	}
 
@@ -448,67 +433,26 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 		rerunAdapters = append(rerunAdapters, found)
 	}
 
-	if err := checkpoint.Clear(a.checkpointPath); err != nil {
-		log.Printf("warning: failed to clear checkpoint: %v", err)
-	}
+	a.store.ClearCheckpoint()
 	return a.launchResumeRun(cp.Prompt, rerunAdapters, completedResponses, cp.Verbose)
 }
 
 func (a App) handleRewindCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if len(a.rewindStack) == 0 {
+	if !a.store.CanRewind() {
 		return a.withMessage("Nothing to rewind.")
 	}
 
-	// Pop entry.
-	entry := a.rewindStack[len(a.rewindStack)-1]
-	a.rewindStack = a.rewindStack[:len(a.rewindStack)-1]
-
-	// Restore files.
-	var fileMsg string
-	if len(entry.fileSnapshots) > 0 {
-		if err := tools.RestoreSnapshots(entry.fileSnapshots); err != nil {
-			log.Printf("warning: rewind file restore error: %v", err)
-			fileMsg = fmt.Sprintf(" (file restore warning: %v)", err)
-		}
+	result, err := a.store.Rewind()
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Rewind failed: %v", err))
 	}
 
-	// Truncate conversation histories to pre-run lengths.
-	for adapterID, prevLen := range entry.historyLengths {
-		h := a.conversationHistories[adapterID]
-		if prevLen < len(h) {
-			a.conversationHistories[adapterID] = h[:prevLen]
-		}
-		if len(a.conversationHistories[adapterID]) == 0 {
-			delete(a.conversationHistories, adapterID)
-		}
-	}
-	if err := history.Save(a.histPath, a.conversationHistories); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
+	// Annotate the UI display feed.
+	if result.FeedIndex >= 0 && result.FeedIndex < len(a.feed) {
+		a.feed[result.FeedIndex].note = result.Note
 	}
 
-	// Record rewind marker in preferences.
-	if err := preferences.RecordRewind(a.prefPath, entry.prompt, a.sessionID); err != nil {
-		log.Printf("warning: failed to record rewind preference: %v", err)
-	}
-
-	// Annotate feed item.
-	if entry.feedIndex >= 0 && entry.feedIndex < len(a.feed) {
-		item := &a.feed[entry.feedIndex]
-		if item.note != "" {
-			item.note = "[rewound] " + item.note
-		} else {
-			item.note = "[rewound]"
-		}
-		// Persist the annotation to session feed so it survives resume.
-		if entry.feedIndex < len(a.sessionFeed) {
-			a.sessionFeed[entry.feedIndex].Note = item.note
-			if err := session.SaveFeed(a.feedPath, a.sessionFeed); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
-			}
-		}
-	}
-
-	return a.withMessage("Rewound last run." + fileMsg)
+	return a.withMessage("Rewound last run." + result.FileMsg)
 }
 
 func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -532,7 +476,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	for j, ad := range rerunAdapters {
 		idx := len(completedResponses) + j
 		ps := newPanelState(ad.ID(), idx)
-		ps.histTokens = runner.EstimateHistoryTokens(a.conversationHistories[ad.ID()])
+		ps.histTokens = runner.EstimateHistoryTokens(a.store.Histories()[ad.ID()])
 		a.panels = append(a.panels, ps)
 		a.panelIdx[ad.ID()] = idx
 	}
@@ -549,7 +493,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 
 	ads := rerunAdapters
 	prog := a.prog
-	histories := a.conversationHistories
+	histories := a.store.Histories()
 	activeDefs := tools.DefinitionsAllowed(a.toolAllowlist, a.disabledTools)
 	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
 	if a.sandboxFilesystem == "read_only" {
@@ -565,14 +509,10 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		})
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
-	resumeRecipe := a.recipe
-	if a.sessionRecipe != nil {
-		resumeRecipe = a.sessionRecipe
-	}
 	var resumeSumPrompt string
-	if resumeRecipe != nil {
-		activeDefs = tools.ApplyDescriptions(activeDefs, resumeRecipe.ToolDescriptions)
-		resumeSumPrompt = resumeRecipe.SummarizationPrompt
+	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
+		activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.ToolDescriptions)
+		resumeSumPrompt = resumeRec.SummarizationPrompt
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
@@ -582,9 +522,9 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	projectRoot := a.projectRoot
 	cfg := a.cfg
 	seed := a.seed
-	sessionID := a.sessionID
-	rec := a.recipe
-	resumeCPPath := a.checkpointPath
+	sessionID := a.store.SessionID()
+	rec := a.store.BaseRecipe()
+	resumeCPPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
@@ -674,19 +614,21 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			toolNames[i] = d.Name
 		}
 		report := output.BuildReport(sessionID, rec, userPrompt, allResponses, collector, toolNames)
-		if _, err := output.Save(output.DefaultDir, report); err != nil {
+		reportPath, err := output.Save(output.DefaultDir, report)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
 		}
 
-		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, report: report}
+		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
 	})
 }
 
 func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if a.sessionRecipe == nil {
-		a.sessionRecipe = cloneRecipe(a.recipe)
+	if a.store.SessionRecipe() == nil {
+		a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
 	}
-	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	sessRec := a.store.SessionRecipe()
+	a.configSections = buildConfigSections(sessRec, a.adapters, a.disabledTools)
 	a.configOverlayActive = true
 	a.configSelectedIdx = 0
 	a.configExpandedIdx = -1
@@ -694,8 +636,8 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 	if args != "" {
 		lowerArgs := strings.ToLower(args)
 		if lowerArgs == "reset" {
-			a.sessionRecipe = cloneRecipe(a.recipe)
-			a.recipeModified = false
+			a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
+			a.store.SetRecipeModified(false)
 			a.applySessionRecipe()
 			a.configOverlayActive = false
 			return a.withMessage("Configuration reset to recipe defaults.")
@@ -709,28 +651,28 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 				case "list":
 					switch sec.Name {
 					case "models":
-						a.configListItems = buildModelsList(a.sessionRecipe, a.adapters, a.activeAdapters)
+						a.configListItems = buildModelsList(sessRec, a.adapters, a.activeAdapters)
 					case "tools":
 						a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
 					case "mcp-servers":
 						var items []listItem
-						for _, s := range a.sessionRecipe.MCPServers {
+						for _, s := range sessRec.MCPServers {
 							items = append(items, listItem{Label: s.Name + ": " + s.Command, Active: true})
 						}
 						a.configListItems = items
 					}
 					a.configListCursor = 0
 				case "scalar":
-					a.configScalarFields = buildScalarFields(sec.Name, a.sessionRecipe)
+					a.configScalarFields = buildScalarFields(sec.Name, sessRec)
 					a.configScalarCursor = 0
 					a.configEditBuf = ""
 				case "text":
 					var content string
 					switch sec.Name {
 					case "system-prompt":
-						content = a.sessionRecipe.SystemPrompt
+						content = sessRec.SystemPrompt
 					case "context-summarization":
-						content = a.sessionRecipe.SummarizationPrompt
+						content = sessRec.SummarizationPrompt
 					}
 					a.configTextArea.SetValue(content)
 					a.configTextArea.Focus()
@@ -752,90 +694,47 @@ func helpText() string {
 	return sb.String()
 }
 
-// ── export/import handlers ──────────────────────────────────────────────────
+// ── save/load/export handlers ────────────────────────────────────────────────
 
-func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	parts := strings.SplitN(args, " ", 2)
-	sub := strings.ToLower(parts[0])
-
-	switch sub {
-	case "recipe":
-		return a.handleExportRecipe(parts)
-	case "output":
-		return a.handleExportOutput(parts)
-	default:
-		return a.withMessage("Usage: /export recipe [path] | /export output [path]")
-	}
-}
-
-func (a App) handleExportRecipe(parts []string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	rec := a.sessionRecipe
+func (a App) handleSaveCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	rec := a.store.ActiveRecipe()
 	if rec == nil {
-		rec = a.recipe
-	}
-	if rec == nil {
-		return a.withMessage("No recipe to export.")
+		return a.withMessage("No recipe to save.")
 	}
 
-	path := "recipe_export.md"
-	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
-		path = strings.TrimSpace(parts[1])
+	var path string
+	if args != "" {
+		path = args
+	} else {
+		path = nextAvailablePath("recipe.md")
 	}
 
 	md := rec.MarshalMarkdown()
 	if err := os.WriteFile(path, []byte(md), 0o600); err != nil {
-		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
+		return a.withMessage(fmt.Sprintf("Save failed: %v", err))
 	}
-	return a.withMessage(fmt.Sprintf("Recipe exported to %s", path))
+	return a.withMessage(fmt.Sprintf("Recipe saved to %s", path))
 }
 
-func (a App) handleExportOutput(parts []string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if a.lastReport == nil {
-		return a.withMessage("No run output to export. Run a prompt first.")
+func (a App) handleLoadCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if args == "" {
+		return a.withMessage("Usage: /load <path>")
 	}
 
-	dir := output.DefaultDir
-	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
-		dir = strings.TrimSpace(parts[1])
-	}
-
-	path, err := output.Save(dir, a.lastReport)
+	rec, err := recipe.Parse(args)
 	if err != nil {
-		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
-	}
-	return a.withMessage(fmt.Sprintf("Output exported to %s", path))
-}
-
-func (a App) handleImportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	parts := strings.SplitN(args, " ", 2)
-	sub := strings.ToLower(parts[0])
-
-	switch sub {
-	case "recipe":
-		if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-			return a.withMessage("Usage: /import recipe <path>")
-		}
-		return a.handleImportRecipe(strings.TrimSpace(parts[1]))
-	default:
-		return a.withMessage("Usage: /import recipe <path>")
-	}
-}
-
-func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	rec, err := recipe.Parse(path)
-	if err != nil {
-		return a.withMessage(fmt.Sprintf("Import failed: %v", err))
+		return a.withMessage(fmt.Sprintf("Load failed: %v", err))
 	}
 
-	a.sessionRecipe = cloneRecipe(rec)
-	a.recipeModified = true
+	a.store.SetSessionRecipe(cloneRecipe(rec))
+	a.store.SetRecipeModified(true)
 	a.applySessionRecipe()
 
 	name := rec.Name
 	if name == "" {
-		name = path
+		name = args
 	}
-	return a.withMessage(fmt.Sprintf("Imported recipe %q (%d models, %d tools)",
+	return a.withMessage(fmt.Sprintf("Loaded recipe %q (%d models, %d tools)",
 		name,
 		len(rec.Models),
 		func() int {
@@ -845,4 +744,44 @@ func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:goc
 			return len(rec.Tools.Allowlist)
 		}(),
 	))
+}
+
+func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	report, err := a.store.LoadLastReport()
+	if err != nil {
+		return a.withMessage("No run output to export. Run a prompt first.")
+	}
+
+	dir := output.DefaultDir
+	if args != "" {
+		dir = args
+	}
+
+	path, err := output.Save(dir, report)
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
+	}
+	return a.withMessage(fmt.Sprintf("Output exported to %s", path))
+}
+
+// maxSaveSuffix is the highest numeric suffix nextAvailablePath will try
+// before giving up and falling back to overwriting the base path.
+const maxSaveSuffix = 100
+
+// nextAvailablePath returns base if it doesn't exist, otherwise tries
+// base_1.ext, base_2.ext, … up to maxSaveSuffix. Falls back to base if
+// all slots are taken.
+func nextAvailablePath(base string) string {
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		return base
+	}
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 1; i <= maxSaveSuffix; i++ {
+		candidate := fmt.Sprintf("%s_%d%s", stem, i, ext)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+	return base
 }

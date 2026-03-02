@@ -18,8 +18,9 @@ var All = []Command{
 	{"/config", "View/edit configuration; /config <section> jumps to section"},
 	{"/resume", "Resume interrupted run — re-runs only interrupted models"},
 	{"/rewind", "Undo last run — revert writes and remove from context"},
-	{"/export", "Export: /export recipe [path]; /export output [path]"},
-	{"/import", "Import: /import recipe <path>"},
+	{"/save", "Save session recipe to disk: /save [path]"},
+	{"/load", "Load recipe from disk: /load <path>"},
+	{"/export", "Export output report: /export [path]"},
 	{"/stats", "Show preference wins and session cost"},
 	{"/exit", "Exit"},
 }

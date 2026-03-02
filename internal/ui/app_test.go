@@ -11,7 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/datastore"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/session"
 )
 
@@ -29,6 +31,11 @@ func (s uiStub) RunAgent(_ context.Context, _ []models.ConversationTurn, _ strin
 
 func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 	t.Helper()
+	return newAppForTestWithRecipe(t, ads, nil)
+}
+
+func newAppForTestWithRecipe(t *testing.T, ads []models.ModelAdapter, rec *recipe.Recipe) App {
+	t.Helper()
 	tmp := t.TempDir()
 	sp := session.Paths{
 		Dir:            filepath.Join(tmp, "session"),
@@ -39,7 +46,17 @@ func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 		RecipePath:     filepath.Join(tmp, "session", "recipe.md"),
 	}
 	meta := session.Meta{ID: "test-session"}
-	a := New(ads, filepath.Join(tmp, "pref.jsonl"), filepath.Join(tmp, "prompt_hist.jsonl"), "session", config.Config{}, nil, nil, nil, sp, meta, nil, nil, false)
+	store, err := datastore.New(datastore.Options{
+		HistoryPath:    sp.HistoryPath,
+		PromptHistPath: filepath.Join(tmp, "prompt_hist.jsonl"),
+		SessionPaths:   sp,
+		SessionID:      "session",
+		PrefPath:       filepath.Join(tmp, "pref.jsonl"),
+		Meta:           meta,
+		Recipe:         rec,
+	})
+	require.NoError(t, err)
+	a := New(ads, config.Config{}, nil, nil, nil, false, store)
 	return *a
 }
 
@@ -48,8 +65,10 @@ func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 func appWithHistory(t *testing.T, prompts []string) App {
 	t.Helper()
 	a := newAppForTest(t, nil)
-	// Inject history newest-first, as Load() returns them.
-	a.promptHistory = prompts
+	// Inject history newest-first by recording in reverse order.
+	for i := len(prompts) - 1; i >= 0; i-- {
+		a.store.RecordPrompt(prompts[i])
+	}
 	a.historyIdx = -1
 	return a
 }
@@ -235,8 +254,7 @@ func TestHandleStatsCmd_NoData(t *testing.T) {
 
 func TestHandleStatsCmd_WithSessionCost(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionCostPerModel = map[string]float64{"claude-sonnet-4-6": 0.0042}
-	a.totalCostUSD = 0.0042
+	a.store.AccumulateCost("claude-sonnet-4-6", 0.0042)
 	result, _ := a.handleStatsCmd()
 	app := result.(App)
 	if len(app.feed) == 0 {

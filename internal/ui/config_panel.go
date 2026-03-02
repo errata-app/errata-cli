@@ -810,10 +810,10 @@ func cloneRecipe(r *recipe.Recipe) *recipe.Recipe {
 // applySessionRecipe syncs the session recipe overrides back to the App's
 // runtime fields so that subsequent runs use the updated configuration.
 func (a *App) applySessionRecipe() {
-	if a.sessionRecipe == nil {
+	rec := a.store.SessionRecipe()
+	if rec == nil {
 		return
 	}
-	rec := a.sessionRecipe
 	if rec.Tools != nil {
 		a.toolAllowlist = rec.Tools.Allowlist
 		a.bashPrefixes = rec.Tools.BashPrefixes
@@ -841,7 +841,8 @@ func (a *App) applySessionRecipe() {
 // syncToolAllowlist rebuilds the session recipe's tool allowlist from the
 // current configListItems state and syncs it back to app runtime fields.
 func (a *App) syncToolAllowlist() {
-	if a.sessionRecipe == nil {
+	sessRec := a.store.SessionRecipe()
+	if sessRec == nil {
 		return
 	}
 	// Build allowlist from active tools in the config list.
@@ -851,10 +852,10 @@ func (a *App) syncToolAllowlist() {
 			allowlist = append(allowlist, item.Label)
 		}
 	}
-	if a.sessionRecipe.Tools == nil {
-		a.sessionRecipe.Tools = &recipe.ToolsConfig{}
+	if sessRec.Tools == nil {
+		sessRec.Tools = &recipe.ToolsConfig{}
 	}
-	a.sessionRecipe.Tools.Allowlist = allowlist
+	sessRec.Tools.Allowlist = allowlist
 	a.toolAllowlist = allowlist
 }
 
@@ -1054,33 +1055,34 @@ func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //no
 	case tea.KeyEnter:
 		a.configExpandedIdx = a.configSelectedIdx
 		sec := a.configSections[a.configSelectedIdx]
+		sessRec := a.store.SessionRecipe()
 		switch sec.Kind {
 		case "list":
 			switch sec.Name {
 			case "models":
-				a.configListItems = buildModelsList(a.sessionRecipe, a.adapters, a.activeAdapters)
+				a.configListItems = buildModelsList(sessRec, a.adapters, a.activeAdapters)
 			case "tools":
 				a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
 			case "mcp-servers":
 				// MCP servers are read-only in the overlay for now.
 				var items []listItem
-				for _, s := range a.sessionRecipe.MCPServers {
+				for _, s := range sessRec.MCPServers {
 					items = append(items, listItem{Label: s.Name + ": " + s.Command, Active: true})
 				}
 				a.configListItems = items
 			case "reminders":
-				a.configListItems = buildRemindersList(a.sessionRecipe)
+				a.configListItems = buildRemindersList(sessRec)
 			case "hooks":
-				a.configListItems = buildHooksList(a.sessionRecipe)
+				a.configListItems = buildHooksList(sessRec)
 			}
 			a.configListCursor = 0
 			a.configListOffset = 0
 		case "scalar":
-			a.configScalarFields = buildScalarFields(sec.Name, a.sessionRecipe)
+			a.configScalarFields = buildScalarFields(sec.Name, sessRec)
 			a.configScalarCursor = 0
 			a.configEditBuf = ""
 		case "text":
-			content := configPathGet(a.sessionRecipe, sec.Path)
+			content := configPathGet(sessRec, sec.Path)
 			a.configEditBuf = content
 			a.configTextArea.SetValue(content)
 			a.configTextArea.Focus()
@@ -1091,9 +1093,9 @@ func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //no
 		if len(msg.Text) > 0 {
 			switch strings.ToLower(msg.Text) {
 			case "r":
-				a.sessionRecipe = cloneRecipe(a.recipe)
-				a.recipeModified = false
-				a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+				a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
+				a.store.SetRecipeModified(false)
+				a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 				return a, nil
 			case "q":
 				a.configOverlayActive = false
@@ -1109,7 +1111,7 @@ func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 	case tea.KeyEscape:
 		a.configExpandedIdx = -1
 		a.configListOffset = 0
-		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+		a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 		return a, nil
 	case tea.KeyUp:
 		if a.configListCursor > 0 {
@@ -1132,7 +1134,7 @@ func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 		if a.configListCursor < len(a.configListItems) {
 			item := &a.configListItems[a.configListCursor]
 			item.Active = !item.Active
-			a.recipeModified = true
+			a.store.SetRecipeModified(true)
 
 			sec := a.configSections[a.configExpandedIdx]
 			switch sec.Name {
@@ -1189,7 +1191,7 @@ func (a App) handleConfigScalarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { /
 		case tea.KeyEnter:
 			// Confirm edit.
 			field := &a.configScalarFields[a.configScalarCursor]
-			err := setConfigValue(a.sessionRecipe, field.Path, a.configEditBuf)
+			err := setConfigValue(a.store.SessionRecipe(), field.Path, a.configEditBuf)
 			if err != nil {
 				// Leave editing mode but don't apply.
 				field.Editing = false
@@ -1199,7 +1201,7 @@ func (a App) handleConfigScalarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { /
 			field.Value = a.configEditBuf
 			field.Editing = false
 			a.configEditBuf = ""
-			a.recipeModified = true
+			a.store.SetRecipeModified(true)
 			a.applySessionRecipe()
 			return a, nil
 		case tea.KeyBackspace, tea.KeyDelete:
@@ -1218,7 +1220,7 @@ func (a App) handleConfigScalarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { /
 	switch msg.Code {
 	case tea.KeyEscape:
 		a.configExpandedIdx = -1
-		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+		a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 		return a, nil
 	case tea.KeyUp:
 		if a.configScalarCursor > 0 {
@@ -1247,7 +1249,7 @@ func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 		// now return to section navigation. Handle defensively: Escape or
 		// any key goes back.
 		a.configExpandedIdx = -1
-		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+		a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 		return a, nil
 	}
 
@@ -1255,13 +1257,13 @@ func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 	if msg.Mod.Contains(tea.ModCtrl) && (msg.Code == 's' || msg.Code == 'd') {
 		sec := a.configSections[a.configExpandedIdx]
 		val := a.configTextArea.Value()
-		_ = setConfigValue(a.sessionRecipe, sec.Path, val)
-		a.recipeModified = true
+		_ = setConfigValue(a.store.SessionRecipe(), sec.Path, val)
+		a.store.SetRecipeModified(true)
 		a.configTextEditing = false
 		a.configTextArea.Blur()
 		a.applySessionRecipe()
 		a.configExpandedIdx = -1
-		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+		a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 		return a, nil
 	}
 
@@ -1270,7 +1272,7 @@ func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 		a.configTextEditing = false
 		a.configTextArea.Blur()
 		a.configExpandedIdx = -1
-		a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+		a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 		return a, nil
 	}
 
