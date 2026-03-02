@@ -1,14 +1,12 @@
 package ui
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/suarezc/errata/internal/datastore"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/session"
@@ -245,278 +243,6 @@ func TestReplayPanels_NilEntries(t *testing.T) {
 	assert.Empty(t, panels)
 }
 
-// ── Group E: clearCheckpoint ────────────────────────────────────────────────
-
-func TestClearCheckpoint_RemovesFile(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "checkpoint.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o600))
-
-	clearCheckpoint(path)
-
-	_, err := os.Stat(path)
-	assert.True(t, os.IsNotExist(err))
-}
-
-func TestClearCheckpoint_MissingFileNoPanic(t *testing.T) {
-	assert.NotPanics(t, func() {
-		clearCheckpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
-	})
-}
-
-func TestClearCheckpoint_InvalidPathNoPanic(t *testing.T) {
-	assert.NotPanics(t, func() {
-		clearCheckpoint("/nonexistent/dir/cp.json")
-	})
-}
-
-// ── Group F: persistSessionState ────────────────────────────────────────────
-
-func TestPersistSessionState_UpdatesMetadata(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.lastPrompt = "fix bug"
-	before := time.Now().Truncate(time.Second)
-
-	responses := []models.ModelResponse{{ModelID: "m1", Text: "done"}}
-	a.persistSessionState(responses)
-
-	assert.Equal(t, 1, a.sessionMeta.PromptCount)
-	assert.Equal(t, "fix bug", a.sessionMeta.FirstPrompt)
-	assert.Equal(t, "fix bug", a.sessionMeta.LastPrompt)
-	assert.WithinDuration(t, before, a.sessionMeta.LastActiveAt, 2*time.Second)
-}
-
-func TestPersistSessionState_SecondCallPreservesFirst(t *testing.T) {
-	a := newAppForTest(t, nil)
-
-	a.lastPrompt = "first prompt"
-	a.persistSessionState([]models.ModelResponse{{ModelID: "m1", Text: "r1"}})
-
-	a.lastPrompt = "second prompt"
-	a.persistSessionState([]models.ModelResponse{{ModelID: "m1", Text: "r2"}})
-
-	assert.Equal(t, 2, a.sessionMeta.PromptCount)
-	assert.Equal(t, "first prompt", a.sessionMeta.FirstPrompt)
-	assert.Equal(t, "second prompt", a.sessionMeta.LastPrompt)
-}
-
-func TestPersistSessionState_MetaSavedToDisk(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.lastPrompt = "disk test"
-	a.persistSessionState([]models.ModelResponse{{ModelID: "m1", Text: "ok"}})
-
-	loaded, err := session.LoadMeta(a.sessionMetaPath)
-	require.NoError(t, err)
-	require.NotNil(t, loaded)
-	assert.Equal(t, 1, loaded.PromptCount)
-	assert.Equal(t, "disk test", loaded.FirstPrompt)
-}
-
-func TestPersistSessionState_FeedSavedToDisk(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.lastPrompt = "feed test"
-	a.persistSessionState([]models.ModelResponse{{ModelID: "m1", Text: "ok"}})
-
-	entries, err := session.LoadFeed(a.feedPath)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "run", entries[0].Kind)
-}
-
-func TestPersistSessionState_FeedAccumulates(t *testing.T) {
-	a := newAppForTest(t, nil)
-
-	a.lastPrompt = "prompt 1"
-	a.persistSessionState([]models.ModelResponse{{ModelID: "m1", Text: "r1"}})
-
-	a.lastPrompt = "prompt 2"
-	a.persistSessionState([]models.ModelResponse{{ModelID: "m1", Text: "r2"}})
-
-	assert.Len(t, a.sessionFeed, 2)
-
-	entries, err := session.LoadFeed(a.feedPath)
-	require.NoError(t, err)
-	assert.Len(t, entries, 2)
-}
-
-func TestPersistSessionState_LongPromptTruncated(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.lastPrompt = strings.Repeat("x", 200)
-	a.persistSessionState([]models.ModelResponse{{ModelID: "m1", Text: "ok"}})
-
-	assert.LessOrEqual(t, len([]rune(a.sessionMeta.FirstPrompt)), 120)
-	assert.LessOrEqual(t, len([]rune(a.sessionMeta.LastPrompt)), 120)
-}
-
-// ── Group G: persistSessionRecipe ───────────────────────────────────────────
-
-func TestPersistSessionRecipe_EmptyPathNoop(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionRecipePath = ""
-	a.recipe = &recipe.Recipe{Name: "test"}
-	a.persistSessionRecipe()
-
-	// No file should be written when path is empty.
-	// Verify by checking the temp dir has no recipe.md.
-	matches, _ := filepath.Glob(filepath.Join(t.TempDir(), "recipe.md"))
-	assert.Empty(t, matches)
-}
-
-func TestPersistSessionRecipe_NilRecipesNoop(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.recipe = nil
-	a.sessionRecipe = nil
-	a.persistSessionRecipe()
-
-	_, err := os.Stat(a.sessionRecipePath)
-	assert.True(t, os.IsNotExist(err))
-}
-
-func TestPersistSessionRecipe_UsesSessionRecipe(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionRecipe = &recipe.Recipe{Name: "session-recipe"}
-	a.recipe = &recipe.Recipe{Name: "base-recipe"}
-	a.persistSessionRecipe()
-
-	data, err := os.ReadFile(a.sessionRecipePath)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), "session-recipe")
-}
-
-func TestPersistSessionRecipe_FallsBackToBaseRecipe(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionRecipe = nil
-	a.recipe = &recipe.Recipe{Name: "fallback-recipe"}
-	a.persistSessionRecipe()
-
-	data, err := os.ReadFile(a.sessionRecipePath)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), "fallback-recipe")
-}
-
-func TestPersistSessionRecipe_CreatesParentDir(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionRecipePath = filepath.Join(t.TempDir(), "nested", "dir", "recipe.md")
-	a.recipe = &recipe.Recipe{Name: "nested-test"}
-	a.persistSessionRecipe()
-
-	_, err := os.Stat(a.sessionRecipePath)
-	require.NoError(t, err)
-}
-
-// ── Group H: updateLastFeedNote ─────────────────────────────────────────────
-
-func TestUpdateLastFeedNote_EmptyFeedNoop(t *testing.T) {
-	a := newAppForTest(t, nil)
-	assert.NotPanics(t, func() {
-		a.updateLastFeedNote("should not panic")
-	})
-	// No feed file should be created.
-	_, err := os.Stat(a.feedPath)
-	assert.True(t, os.IsNotExist(err))
-}
-
-func TestUpdateLastFeedNote_UpdatesLastEntry(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionFeed = []session.FeedEntry{
-		{Kind: "run", Prompt: "first"},
-		{Kind: "run", Prompt: "second"},
-	}
-
-	a.updateLastFeedNote("Applied: foo.go")
-
-	assert.Empty(t, a.sessionFeed[0].Note)
-	assert.Equal(t, "Applied: foo.go", a.sessionFeed[1].Note)
-}
-
-func TestUpdateLastFeedNote_SavesToDisk(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionFeed = []session.FeedEntry{
-		{Kind: "run", Prompt: "test"},
-	}
-
-	a.updateLastFeedNote("Skipped.")
-
-	entries, err := session.LoadFeed(a.feedPath)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "Skipped.", entries[0].Note)
-}
-
-func TestUpdateLastFeedNote_OverwritesPrevious(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionFeed = []session.FeedEntry{
-		{Kind: "run", Prompt: "test"},
-	}
-
-	a.updateLastFeedNote("first note")
-	a.updateLastFeedNote("second note")
-
-	assert.Equal(t, "second note", a.sessionFeed[0].Note)
-}
-
-// ── Group J: handleRewindCmd feed persistence ───────────────────────────────
-
-func TestHandleRewindCmd_PersistsAnnotationToSessionFeed(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionFeed = []session.FeedEntry{
-		{Kind: "run", Prompt: "fix bug", Note: "Applied: foo.go"},
-	}
-	a.feed = []feedItem{
-		{kind: "run", prompt: "fix bug", note: "Applied: foo.go"},
-	}
-	a.rewindStack = []rewindEntry{
-		{feedIndex: 0, prompt: "fix bug", historyLengths: map[string]int{}},
-	}
-
-	result, _ := a.handleRewindCmd()
-	app := result.(App)
-
-	// Display feed gets annotated.
-	assert.Equal(t, "[rewound] Applied: foo.go", app.feed[0].note)
-	// Session feed (persisted to disk) must also be updated.
-	require.Len(t, app.sessionFeed, 1)
-	assert.Equal(t, "[rewound] Applied: foo.go", app.sessionFeed[0].Note)
-}
-
-func TestHandleRewindCmd_AnnotationSavedToDisk(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionFeed = []session.FeedEntry{
-		{Kind: "run", Prompt: "test", Note: "Skipped."},
-	}
-	a.feed = []feedItem{
-		{kind: "run", prompt: "test", note: "Skipped."},
-	}
-	a.rewindStack = []rewindEntry{
-		{feedIndex: 0, prompt: "test", historyLengths: map[string]int{}},
-	}
-
-	a.handleRewindCmd()
-
-	entries, err := session.LoadFeed(a.feedPath)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "[rewound] Skipped.", entries[0].Note)
-}
-
-func TestHandleRewindCmd_EmptyNoteBecomes_Rewound(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.sessionFeed = []session.FeedEntry{
-		{Kind: "run", Prompt: "test"},
-	}
-	a.feed = []feedItem{
-		{kind: "run", prompt: "test"},
-	}
-	a.rewindStack = []rewindEntry{
-		{feedIndex: 0, prompt: "test", historyLengths: map[string]int{}},
-	}
-
-	result, _ := a.handleRewindCmd()
-	app := result.(App)
-
-	assert.Equal(t, "[rewound]", app.sessionFeed[0].Note)
-}
-
 // ── Group I: syncToolAllowlist ──────────────────────────────────────────────
 
 func TestSyncToolAllowlist_NilSessionRecipeNoop(t *testing.T) {
@@ -580,4 +306,66 @@ func TestSyncToolAllowlist_AllInactiveEmptiesAllowlist(t *testing.T) {
 
 	assert.Nil(t, a.sessionRecipe.Tools.Allowlist)
 	assert.Nil(t, a.toolAllowlist)
+}
+
+// ── Group J: handleRewindCmd feed persistence ───────────────────────────────
+
+func TestHandleRewindCmd_PersistsAnnotationToSessionFeed(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.store.SetSessionFeed([]session.FeedEntry{
+		{Kind: "run", Prompt: "fix bug", Note: "Applied: foo.go"},
+	})
+	a.feed = []feedItem{
+		{kind: "run", prompt: "fix bug", note: "Applied: foo.go"},
+	}
+	a.store.PushRewindEntry(datastore.RewindEntry{
+		FeedIndex: 0, Prompt: "fix bug", HistoryLengths: map[string]int{},
+	})
+
+	result, _ := a.handleRewindCmd()
+	app := result.(App)
+
+	// Display feed gets annotated.
+	assert.Equal(t, "[rewound] Applied: foo.go", app.feed[0].note)
+	// Session feed (persisted to disk) must also be updated.
+	require.Len(t, app.store.SessionFeed(), 1)
+	assert.Equal(t, "[rewound] Applied: foo.go", app.store.SessionFeed()[0].Note)
+}
+
+func TestHandleRewindCmd_AnnotationSavedToDisk(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.store.SetSessionFeed([]session.FeedEntry{
+		{Kind: "run", Prompt: "test", Note: "Skipped."},
+	})
+	a.feed = []feedItem{
+		{kind: "run", prompt: "test", note: "Skipped."},
+	}
+	a.store.PushRewindEntry(datastore.RewindEntry{
+		FeedIndex: 0, Prompt: "test", HistoryLengths: map[string]int{},
+	})
+
+	a.handleRewindCmd()
+
+	entries, err := session.LoadFeed(a.store.FeedPath())
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "[rewound] Skipped.", entries[0].Note)
+}
+
+func TestHandleRewindCmd_EmptyNoteBecomes_Rewound(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.store.SetSessionFeed([]session.FeedEntry{
+		{Kind: "run", Prompt: "test"},
+	})
+	a.feed = []feedItem{
+		{kind: "run", prompt: "test"},
+	}
+	a.store.PushRewindEntry(datastore.RewindEntry{
+		FeedIndex: 0, Prompt: "test", HistoryLengths: map[string]int{},
+	})
+
+	result, _ := a.handleRewindCmd()
+	app := result.(App)
+
+	assert.Equal(t, "[rewound]", app.store.SessionFeed()[0].Note)
 }

@@ -521,9 +521,9 @@ func TestRunComplete_CostAccumulation(t *testing.T) {
 	result, _ := a.Update(msg1)
 	a = appFrom(t, result)
 
-	assert.InDelta(t, 0.03, a.totalCostUSD, 0.001)
-	assert.InDelta(t, 0.01, a.sessionCostPerModel["m1"], 0.001)
-	assert.InDelta(t, 0.02, a.sessionCostPerModel["m2"], 0.001)
+	assert.InDelta(t, 0.03, a.store.TotalCost(), 0.001)
+	assert.InDelta(t, 0.01, a.store.CostPerModel()["m1"], 0.001)
+	assert.InDelta(t, 0.02, a.store.CostPerModel()["m2"], 0.001)
 
 	// Second run (only m1).
 	// Reset mode for the second run.
@@ -535,9 +535,9 @@ func TestRunComplete_CostAccumulation(t *testing.T) {
 	result, _ = a.Update(msg2)
 	a = appFrom(t, result)
 
-	assert.InDelta(t, 0.035, a.totalCostUSD, 0.001)
-	assert.InDelta(t, 0.015, a.sessionCostPerModel["m1"], 0.001)
-	assert.InDelta(t, 0.02, a.sessionCostPerModel["m2"], 0.001)
+	assert.InDelta(t, 0.035, a.store.TotalCost(), 0.001)
+	assert.InDelta(t, 0.015, a.store.CostPerModel()["m1"], 0.001)
+	assert.InDelta(t, 0.02, a.store.CostPerModel()["m2"], 0.001)
 }
 
 func TestRunComplete_ContextOverflowReplacesError(t *testing.T) {
@@ -1017,7 +1017,7 @@ func TestRewind_RevertsConversationHistory(t *testing.T) {
 
 	// History should have 2 turns (user + assistant).
 	require.Len(t, a.store.Histories()["m1"], 2)
-	require.Len(t, a.rewindStack, 1)
+	assert.True(t, a.store.CanRewind())
 
 	// Rewind.
 	result, _ = a.handleRewindCmd()
@@ -1025,7 +1025,7 @@ func TestRewind_RevertsConversationHistory(t *testing.T) {
 
 	// History should be empty.
 	assert.Empty(t, a.store.Histories()["m1"])
-	assert.Empty(t, a.rewindStack)
+	assert.False(t, a.store.CanRewind())
 }
 
 func TestRewind_AnnotatesFeedItem(t *testing.T) {
@@ -1170,19 +1170,19 @@ func TestRewind_MultipleRewinds(t *testing.T) {
 	a.mode = modeIdle
 
 	require.Len(t, a.store.Histories()["m1"], 4) // 2 turns per run
-	require.Len(t, a.rewindStack, 2)
+	assert.Equal(t, 2, a.store.RewindStackLen())
 
 	// First rewind — removes second run.
 	result, _ = a.handleRewindCmd()
 	a = appFrom(t, result)
 	assert.Len(t, a.store.Histories()["m1"], 2)
-	assert.Len(t, a.rewindStack, 1)
+	assert.Equal(t, 1, a.store.RewindStackLen())
 
 	// Second rewind — removes first run.
 	result, _ = a.handleRewindCmd()
 	a = appFrom(t, result)
 	assert.Empty(t, a.store.Histories()["m1"])
-	assert.Empty(t, a.rewindStack)
+	assert.False(t, a.store.CanRewind())
 }
 
 func TestRewind_TextOnlyRun(t *testing.T) {
@@ -1200,13 +1200,13 @@ func TestRewind_TextOnlyRun(t *testing.T) {
 	a = appFrom(t, result)
 
 	require.Len(t, a.store.Histories()["m1"], 2)
-	require.Len(t, a.rewindStack, 1)
+	assert.True(t, a.store.CanRewind())
 
 	// Rewind — no files, just history.
 	result, _ = a.handleRewindCmd()
 	a = appFrom(t, result)
 	assert.Empty(t, a.store.Histories()["m1"])
-	assert.Empty(t, a.rewindStack)
+	assert.False(t, a.store.CanRewind())
 }
 
 func TestRewind_ClearClearsStack(t *testing.T) {
@@ -1218,11 +1218,11 @@ func TestRewind_ClearClearsStack(t *testing.T) {
 	result, _ := a.Update(msg)
 	a = appFrom(t, result)
 	a.mode = modeIdle
-	require.Len(t, a.rewindStack, 1)
+	assert.True(t, a.store.CanRewind())
 
 	result, _ = a.handleClearCmd()
 	a = appFrom(t, result)
-	assert.Nil(t, a.rewindStack)
+	assert.False(t, a.store.CanRewind())
 }
 
 func TestRewind_WipeClearsStack(t *testing.T) {
@@ -1234,9 +1234,9 @@ func TestRewind_WipeClearsStack(t *testing.T) {
 	result, _ := a.Update(msg)
 	a = appFrom(t, result)
 	a.mode = modeIdle
-	require.Len(t, a.rewindStack, 1)
+	assert.True(t, a.store.CanRewind())
 
 	result, _ = a.handleWipeCmd()
 	a = appFrom(t, result)
-	assert.Nil(t, a.rewindStack)
+	assert.False(t, a.store.CanRewind())
 }

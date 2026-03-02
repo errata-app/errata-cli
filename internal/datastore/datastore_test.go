@@ -3,13 +3,18 @@ package datastore
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/prompthistory"
+	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/internal/session"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 func tempStore(t *testing.T) *Store {
@@ -18,6 +23,32 @@ func tempStore(t *testing.T) *Store {
 	s, err := New(Options{
 		HistoryPath:    filepath.Join(tmp, "history.json"),
 		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+	})
+	require.NoError(t, err)
+	return s
+}
+
+// tempStoreWithSession creates a Store with full session paths configured.
+func tempStoreWithSession(t *testing.T) *Store {
+	t.Helper()
+	tmp := t.TempDir()
+	sessDir := filepath.Join(tmp, "session")
+	require.NoError(t, os.MkdirAll(sessDir, 0o750))
+	sp := session.Paths{
+		Dir:            sessDir,
+		HistoryPath:    filepath.Join(sessDir, "history.json"),
+		CheckpointPath: filepath.Join(sessDir, "checkpoint.json"),
+		MetaPath:       filepath.Join(sessDir, "meta.json"),
+		FeedPath:       filepath.Join(sessDir, "feed.json"),
+		RecipePath:     filepath.Join(sessDir, "recipe.md"),
+	}
+	s, err := New(Options{
+		HistoryPath:    sp.HistoryPath,
+		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+		SessionPaths:   sp,
+		SessionID:      "test-session",
+		PrefPath:       filepath.Join(tmp, "pref.jsonl"),
+		Meta:           session.Meta{ID: "test-session"},
 	})
 	require.NoError(t, err)
 	return s
@@ -309,4 +340,311 @@ func TestRoundTrip_PromptHistoryPersistsAcrossInstances(t *testing.T) {
 	require.Len(t, s2.PromptHistory(), 2)
 	assert.Equal(t, "p2", s2.PromptHistory()[0])
 	assert.Equal(t, "p1", s2.PromptHistory()[1])
+}
+
+// ── Checkpoint ──────────────────────────────────────────────────────────────
+
+func TestClearCheckpoint_RemovesFile(t *testing.T) {
+	s := tempStoreWithSession(t)
+	require.NoError(t, os.WriteFile(s.CheckpointPath(), []byte(`{}`), 0o600))
+
+	s.ClearCheckpoint()
+
+	_, err := os.Stat(s.CheckpointPath())
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestClearCheckpoint_MissingFileNoPanic(t *testing.T) {
+	s := tempStoreWithSession(t)
+	assert.NotPanics(t, func() {
+		s.ClearCheckpoint()
+	})
+}
+
+// ── PersistRunState ─────────────────────────────────────────────────────────
+
+func TestPersistRunState_UpdatesMetadata(t *testing.T) {
+	s := tempStoreWithSession(t)
+	before := time.Now().Truncate(time.Second)
+
+	responses := []models.ModelResponse{{ModelID: "m1", Text: "done"}}
+	s.PersistRunState("fix bug", responses, nil)
+
+	meta := s.SessionMeta()
+	assert.Equal(t, 1, meta.PromptCount)
+	assert.Equal(t, "fix bug", meta.FirstPrompt)
+	assert.Equal(t, "fix bug", meta.LastPrompt)
+	assert.WithinDuration(t, before, meta.LastActiveAt, 2*time.Second)
+}
+
+func TestPersistRunState_SecondCallPreservesFirst(t *testing.T) {
+	s := tempStoreWithSession(t)
+
+	s.PersistRunState("first prompt", []models.ModelResponse{{ModelID: "m1", Text: "r1"}}, nil)
+	s.PersistRunState("second prompt", []models.ModelResponse{{ModelID: "m1", Text: "r2"}}, nil)
+
+	meta := s.SessionMeta()
+	assert.Equal(t, 2, meta.PromptCount)
+	assert.Equal(t, "first prompt", meta.FirstPrompt)
+	assert.Equal(t, "second prompt", meta.LastPrompt)
+}
+
+func TestPersistRunState_MetaSavedToDisk(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.PersistRunState("disk test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil)
+
+	loaded, err := session.LoadMeta(s.SessionMetaPath())
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, 1, loaded.PromptCount)
+	assert.Equal(t, "disk test", loaded.FirstPrompt)
+}
+
+func TestPersistRunState_FeedSavedToDisk(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.PersistRunState("feed test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil)
+
+	entries, err := session.LoadFeed(s.FeedPath())
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "run", entries[0].Kind)
+}
+
+func TestPersistRunState_FeedAccumulates(t *testing.T) {
+	s := tempStoreWithSession(t)
+
+	s.PersistRunState("prompt 1", []models.ModelResponse{{ModelID: "m1", Text: "r1"}}, nil)
+	s.PersistRunState("prompt 2", []models.ModelResponse{{ModelID: "m1", Text: "r2"}}, nil)
+
+	assert.Len(t, s.SessionFeed(), 2)
+
+	entries, err := session.LoadFeed(s.FeedPath())
+	require.NoError(t, err)
+	assert.Len(t, entries, 2)
+}
+
+func TestPersistRunState_LongPromptTruncated(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.PersistRunState(strings.Repeat("x", 200), []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil)
+
+	meta := s.SessionMeta()
+	assert.LessOrEqual(t, len([]rune(meta.FirstPrompt)), 120)
+	assert.LessOrEqual(t, len([]rune(meta.LastPrompt)), 120)
+}
+
+// ── persistSessionRecipe (tested through PersistRunState) ───────────────────
+
+func TestPersistRunState_RecipeWrittenToDisk(t *testing.T) {
+	s := tempStoreWithSession(t)
+	rec := &recipe.Recipe{Name: "session-recipe"}
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, rec)
+
+	data, err := os.ReadFile(s.SessionRecipePath())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "session-recipe")
+}
+
+func TestPersistRunState_NilRecipeNoFile(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil)
+
+	_, err := os.Stat(s.SessionRecipePath())
+	assert.True(t, os.IsNotExist(err))
+}
+
+// ── UpdateLastFeedNote ──────────────────────────────────────────────────────
+
+func TestUpdateLastFeedNote_EmptyFeedNoop(t *testing.T) {
+	s := tempStoreWithSession(t)
+	assert.NotPanics(t, func() {
+		s.UpdateLastFeedNote("should not panic")
+	})
+	_, err := os.Stat(s.FeedPath())
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestUpdateLastFeedNote_UpdatesLastEntry(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.SetSessionFeed([]session.FeedEntry{
+		{Kind: "run", Prompt: "first"},
+		{Kind: "run", Prompt: "second"},
+	})
+
+	s.UpdateLastFeedNote("Applied: foo.go")
+
+	feed := s.SessionFeed()
+	assert.Empty(t, feed[0].Note)
+	assert.Equal(t, "Applied: foo.go", feed[1].Note)
+}
+
+func TestUpdateLastFeedNote_SavesToDisk(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.SetSessionFeed([]session.FeedEntry{
+		{Kind: "run", Prompt: "test"},
+	})
+
+	s.UpdateLastFeedNote("Skipped.")
+
+	entries, err := session.LoadFeed(s.FeedPath())
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "Skipped.", entries[0].Note)
+}
+
+func TestUpdateLastFeedNote_OverwritesPrevious(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.SetSessionFeed([]session.FeedEntry{
+		{Kind: "run", Prompt: "test"},
+	})
+
+	s.UpdateLastFeedNote("first note")
+	s.UpdateLastFeedNote("second note")
+
+	assert.Equal(t, "second note", s.SessionFeed()[0].Note)
+}
+
+// ── BuildFeedEntry ──────────────────────────────────────────────────────────
+
+func TestBuildFeedEntry_BasicRun(t *testing.T) {
+	responses := []models.ModelResponse{
+		{
+			ModelID: "m1",
+			Text:    "fixed it",
+			ProposedWrites: []tools.FileWrite{
+				{Path: "foo.go", Content: "package foo"},
+			},
+		},
+		{
+			ModelID: "m2",
+			Text:    "also fixed",
+			ProposedWrites: []tools.FileWrite{
+				{Path: "bar.go", Content: "package bar"},
+			},
+		},
+	}
+	entry := BuildFeedEntry("fix bug", responses)
+
+	assert.Equal(t, "run", entry.Kind)
+	assert.Equal(t, "fix bug", entry.Prompt)
+	require.Len(t, entry.Models, 2)
+	assert.Equal(t, "m1", entry.Models[0].ID)
+	assert.Equal(t, "m2", entry.Models[1].ID)
+	assert.Equal(t, []string{"foo.go"}, entry.Models[0].ProposedFiles)
+	assert.Equal(t, []string{"bar.go"}, entry.Models[1].ProposedFiles)
+}
+
+func TestBuildFeedEntry_TextTruncatedAt500(t *testing.T) {
+	longText := strings.Repeat("x", 600)
+	responses := []models.ModelResponse{
+		{ModelID: "m1", Text: longText},
+	}
+	entry := BuildFeedEntry("test", responses)
+
+	require.Len(t, entry.Models, 1)
+	assert.Len(t, []rune(entry.Models[0].Text), 500)
+}
+
+// ── Cost Tracking ───────────────────────────────────────────────────────────
+
+func TestAccumulateCost_Accumulates(t *testing.T) {
+	s := tempStore(t)
+
+	s.AccumulateCost("m1", 0.01)
+	s.AccumulateCost("m2", 0.02)
+	s.AccumulateCost("m1", 0.005)
+
+	assert.InDelta(t, 0.035, s.TotalCost(), 0.001)
+	assert.InDelta(t, 0.015, s.CostPerModel()["m1"], 0.001)
+	assert.InDelta(t, 0.02, s.CostPerModel()["m2"], 0.001)
+}
+
+// ── Rewind ──────────────────────────────────────────────────────────────────
+
+func TestRewind_EmptyStackReturnsError(t *testing.T) {
+	s := tempStoreWithSession(t)
+	_, err := s.Rewind()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing to rewind")
+}
+
+func TestRewind_TruncatesHistories(t *testing.T) {
+	s := tempStoreWithSession(t)
+
+	// Append history, then push a rewind entry.
+	preLens := s.AppendHistories(
+		[]string{"m1"},
+		[]models.ModelResponse{{ModelID: "m1", Text: "a"}},
+		"q",
+	)
+	s.PushRewindEntry(RewindEntry{
+		HistoryLengths: preLens,
+		FeedIndex:      -1,
+		Prompt:         "q",
+	})
+
+	require.Len(t, s.Histories()["m1"], 2)
+
+	_, err := s.Rewind()
+	require.NoError(t, err)
+
+	assert.Empty(t, s.Histories()["m1"])
+	assert.False(t, s.CanRewind())
+}
+
+func TestRewind_AnnotatesSessionFeed(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.SetSessionFeed([]session.FeedEntry{
+		{Kind: "run", Prompt: "fix bug", Note: "Applied: foo.go"},
+	})
+	s.PushRewindEntry(RewindEntry{
+		FeedIndex:      0,
+		Prompt:         "fix bug",
+		HistoryLengths: map[string]int{},
+	})
+
+	result, err := s.Rewind()
+	require.NoError(t, err)
+
+	assert.Equal(t, "[rewound] Applied: foo.go", result.Note)
+	assert.Equal(t, "[rewound] Applied: foo.go", s.SessionFeed()[0].Note)
+
+	// Also saved to disk.
+	entries, err := session.LoadFeed(s.FeedPath())
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "[rewound] Applied: foo.go", entries[0].Note)
+}
+
+func TestRewind_EmptyNoteBecomes_Rewound(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.SetSessionFeed([]session.FeedEntry{
+		{Kind: "run", Prompt: "test"},
+	})
+	s.PushRewindEntry(RewindEntry{
+		FeedIndex:      0,
+		Prompt:         "test",
+		HistoryLengths: map[string]int{},
+	})
+
+	result, err := s.Rewind()
+	require.NoError(t, err)
+
+	assert.Equal(t, "[rewound]", result.Note)
+	assert.Equal(t, "[rewound]", s.SessionFeed()[0].Note)
+}
+
+// ── RewindStackLen ──────────────────────────────────────────────────────────
+
+func TestRewindStackLen(t *testing.T) {
+	s := tempStore(t)
+	assert.Equal(t, 0, s.RewindStackLen())
+
+	s.PushRewindEntry(RewindEntry{FeedIndex: 0, Prompt: "p1", HistoryLengths: map[string]int{}})
+	assert.Equal(t, 1, s.RewindStackLen())
+
+	s.PushRewindEntry(RewindEntry{FeedIndex: 1, Prompt: "p2", HistoryLengths: map[string]int{}})
+	assert.Equal(t, 2, s.RewindStackLen())
+
+	s.ClearRewindStack()
+	assert.Equal(t, 0, s.RewindStackLen())
 }

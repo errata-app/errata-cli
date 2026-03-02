@@ -43,9 +43,13 @@ func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 	store, err := datastore.New(datastore.Options{
 		HistoryPath:    sp.HistoryPath,
 		PromptHistPath: filepath.Join(tmp, "prompt_hist.jsonl"),
+		SessionPaths:   sp,
+		SessionID:      "session",
+		PrefPath:       filepath.Join(tmp, "pref.jsonl"),
+		Meta:           meta,
 	})
 	require.NoError(t, err)
-	a := New(ads, filepath.Join(tmp, "pref.jsonl"), "session", config.Config{}, nil, nil, nil, sp, meta, nil, nil, false, store)
+	a := New(ads, config.Config{}, nil, nil, nil, nil, nil, false, store)
 	return *a
 }
 
@@ -243,8 +247,7 @@ func TestHandleStatsCmd_NoData(t *testing.T) {
 
 func TestHandleStatsCmd_WithSessionCost(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionCostPerModel["claude-sonnet-4-6"] = 0.0042
-	a.totalCostUSD = 0.0042
+	a.store.AccumulateCost("claude-sonnet-4-6", 0.0042)
 	result, _ := a.handleStatsCmd()
 	app := result.(App)
 	if len(app.feed) == 0 {
