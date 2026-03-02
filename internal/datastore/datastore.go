@@ -472,16 +472,26 @@ func (s *Store) ClearLastReport() { s.lastReportPath = "" }
 // ── Recipe Snapshot ─────────────────────────────────────────────────────────
 
 // BuildRecipeSnapshot creates a RecipeSnapshot from the active recipe and
-// the last active tools.
+// the last active tools. All fields are mapped directly from the recipe
+// struct — no intermediate state.
 func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 	rec := s.ActiveRecipe()
 	snap := &recipestore.RecipeSnapshot{Name: "default"}
 	if rec != nil {
+		snap.Version = rec.Version
 		snap.Name = rec.Name
 		if snap.Name == "" {
 			snap.Name = "default"
 		}
 		snap.SystemPrompt = rec.SystemPrompt
+		snap.ToolGuidance = rec.ToolGuidance
+		snap.ToolDescriptions = rec.ToolDescriptions
+		snap.SummarizationPrompt = rec.SummarizationPrompt
+
+		if rec.Tools != nil {
+			snap.BashPrefixes = rec.Tools.BashPrefixes
+		}
+
 		if rec.Constraints.MaxSteps > 0 || rec.Constraints.Timeout > 0 {
 			snap.Constraints = &recipestore.ConstraintsConfig{
 				MaxSteps: rec.Constraints.MaxSteps,
@@ -490,11 +500,57 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 				snap.Constraints.Timeout = rec.Constraints.Timeout.String()
 			}
 		}
+
 		if rec.ModelParams.Temperature != nil || rec.ModelParams.MaxTokens != nil || rec.ModelParams.Seed != nil {
 			snap.ModelParams = &recipestore.ModelParamsConfig{
 				Temperature: rec.ModelParams.Temperature,
 				MaxTokens:   rec.ModelParams.MaxTokens,
 				Seed:        rec.ModelParams.Seed,
+			}
+		}
+
+		if rec.Context.MaxHistoryTurns > 0 || rec.Context.Strategy != "" ||
+			rec.Context.CompactThreshold > 0 || rec.Context.TaskMode != "" {
+			snap.Context = &recipestore.ContextConfig{
+				MaxHistoryTurns:  rec.Context.MaxHistoryTurns,
+				Strategy:         rec.Context.Strategy,
+				CompactThreshold: rec.Context.CompactThreshold,
+				TaskMode:         rec.Context.TaskMode,
+			}
+		}
+
+		if len(rec.SystemReminders) > 0 {
+			snap.SystemReminders = make([]recipestore.SystemReminderConfig, len(rec.SystemReminders))
+			for i, r := range rec.SystemReminders {
+				snap.SystemReminders[i] = recipestore.SystemReminderConfig{
+					Name:    r.Name,
+					Trigger: r.Trigger,
+					Content: r.Content,
+				}
+			}
+		}
+
+		if len(rec.OutputProcessing) > 0 {
+			snap.OutputProcessing = make(map[string]recipestore.OutputRuleConfig, len(rec.OutputProcessing))
+			for name, rule := range rec.OutputProcessing {
+				snap.OutputProcessing[name] = recipestore.OutputRuleConfig{
+					MaxLines:          rule.MaxLines,
+					MaxTokens:         rule.MaxTokens,
+					Truncation:        rule.Truncation,
+					TruncationMessage: rule.TruncationMessage,
+				}
+			}
+		}
+
+		if len(rec.ModelProfiles) > 0 {
+			snap.ModelProfiles = make(map[string]recipestore.ModelProfileConfig, len(rec.ModelProfiles))
+			for name, p := range rec.ModelProfiles {
+				snap.ModelProfiles[name] = recipestore.ModelProfileConfig{
+					ContextBudget:  p.ContextBudget,
+					ToolFormat:     p.ToolFormat,
+					SystemRole:     p.SystemRole,
+					MidConvoSystem: p.MidConvoSystem,
+				}
 			}
 		}
 	}
