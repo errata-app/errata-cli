@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -19,9 +18,7 @@ import (
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/datastore"
-	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/reminders"
 	"github.com/suarezc/errata/internal/runner"
@@ -39,7 +36,8 @@ type agentEventMsg struct {
 type runCompleteMsg struct {
 	responses          []models.ModelResponse
 	compactedHistories map[string][]models.ConversationTurn // non-nil if auto-compact ran
-	report             *output.Report                       // output report for selection recording
+	reportPath         string                               // path to saved output report (for selection recording)
+	toolNames          []string                             // active tool names during run (for recipe hash)
 }
 
 type modelDoneMsg struct {
@@ -78,16 +76,6 @@ type feedItem struct {
 	note      string                 // outcome: "Applied: foo.go" / "Skipped." / error
 }
 
-// ---- rewind ----
-
-// rewindEntry captures enough state to undo one run.
-type rewindEntry struct {
-	fileSnapshots  []tools.FileSnapshot // nil if no writes were applied
-	historyLengths map[string]int       // per-adapter history len BEFORE AppendHistory
-	feedIndex      int                  // index into a.feed for annotation
-	prompt         string               // original prompt (for RecordRewind)
-}
-
 // ---- model ----
 
 // App is the bubbletea model.
@@ -95,10 +83,7 @@ type App struct {
 	adapters       []models.ModelAdapter
 	activeAdapters []models.ModelAdapter // nil = use all adapters
 	disabledTools  map[string]bool       // tools excluded from runs; nil = all enabled
-	prefPath       string
-	sessionID      string
-	cfg            config.Config
-	recipeStore    *recipestore.Store // content-addressed config snapshot store
+	cfg config.Config
 
 	// MCP tool definitions and dispatchers (nil if no MCP servers configured)
 	mcpDefs        []tools.ToolDef
@@ -155,9 +140,6 @@ type App struct {
 	pastedText      string // full text from a bracketed paste
 	pastedLineCount int    // line count for badge display
 
-	// cumulative cost across all runs this session
-	totalCostUSD        float64
-	sessionCostPerModel map[string]float64 // per-model cumulative cost this session
 
 	// seed for reproducible model sampling; nil = not set
 	seed *int64
@@ -172,21 +154,6 @@ type App struct {
 	// reminderState tracks conditional mid-conversation injection state.
 	// nil when no reminders are configured in the recipe.
 	reminderState *reminders.State
-
-	// lastReport is the most recent output report; used by selection/rating
-	// handlers to call RecordSelection after the user picks a winner.
-	lastReport *output.Report
-
-	// rewind stack — each entry captures state for one undo step
-	rewindStack []rewindEntry
-
-	// per-session persistence paths and metadata
-	checkpointPath    string        // per-session checkpoint.json
-	feedPath          string        // per-session feed.json
-	sessionMetaPath   string        // per-session meta.json
-	sessionRecipePath string        // per-session recipe.md
-	sessionMeta       session.Meta  // in-memory metadata, updated after each run
-	sessionFeed       []session.FeedEntry // serialized feed for persistence
 
 	// debugLog is true when --debug-log is active; enables raw API request logging.
 	debugLog bool
@@ -212,7 +179,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, availableModels []string, cs *recipestore.Store, debugLog bool, store *datastore.Store) *App {
+func New(adapters []models.ModelAdapter, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, availableModels []string, debugLog bool, store *datastore.Store) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -236,27 +203,18 @@ func New(adapters []models.ModelAdapter, prefPath, sessionID string, cfg config.
 	cta.ShowLineNumbers = false
 
 	app := &App{
-		adapters:            adapters,
-		prefPath:            prefPath,
-		historyIdx:          -1,
-		sessionID:           sessionID,
-		input:               ta,
-		configTextArea:      cta,
-		panelIdx:            make(map[string]int),
-		sessionCostPerModel: make(map[string]float64),
-		cfg:                 cfg,
-		recipeStore:         cs,
-		mcpDefs:             mcpDefs,
-		mcpDispatchers:      mcpDispatchers,
-		availableModels:     availableModels,
-		seed:                cfg.Seed,
-		debugLog:            debugLog,
-		checkpointPath:      sp.CheckpointPath,
-		feedPath:            sp.FeedPath,
-		sessionMetaPath:     sp.MetaPath,
-		sessionRecipePath:   sp.RecipePath,
-		sessionMeta:         meta,
-		store:               store,
+		adapters:       adapters,
+		historyIdx:     -1,
+		input:          ta,
+		configTextArea: cta,
+		panelIdx:       make(map[string]int),
+		cfg:     cfg,
+		mcpDefs: mcpDefs,
+		mcpDispatchers: mcpDispatchers,
+		availableModels: availableModels,
+		seed:           cfg.Seed,
+		debugLog:       debugLog,
+		store:          store,
 	}
 	app.recipe = rec
 	if rec != nil {
@@ -475,12 +433,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactCompleteMsg:
 		a.store.SetHistories(msg.histories)
-		a.rewindStack = nil // compaction invalidates stored history lengths
+		a.store.ClearRewindStack() // compaction invalidates stored history lengths
 		return a.withMessage("History compacted.")
 
 	case runCompleteMsg:
 		a.cancelRun = nil
-		a.lastReport = msg.report
+		a.store.SetLastReportInfo(msg.reportPath, msg.toolNames)
 
 		// Mark panels done. runner.RunAll preserves adapter order, so results[i] == panels[i].
 		for i, resp := range msg.responses {
@@ -493,8 +451,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.inputTokens = resp.InputTokens
 			p.outputTokens = resp.OutputTokens
 			p.costUSD = resp.CostUSD
-			a.totalCostUSD += resp.CostUSD
-			a.sessionCostPerModel[resp.ModelID] += resp.CostUSD
+			a.store.AccumulateCost(resp.ModelID, resp.CostUSD)
 			if resp.Interrupted {
 				p.errMsg = "interrupted"
 			} else if resp.Error != "" {
@@ -518,13 +475,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		preHistLengths := a.store.AppendHistories(panelIDs, msg.responses, a.lastPrompt)
 
 		// Persist session metadata and feed.
-		a.persistSessionState(msg.responses)
+		activeRecipe := a.sessionRecipe
+		if activeRecipe == nil {
+			activeRecipe = a.recipe
+		}
+		a.store.PersistRunState(a.lastPrompt, msg.responses, activeRecipe)
 
 		// Push rewind entry (fileSnapshots populated later by applySelection if writes happen).
-		a.rewindStack = append(a.rewindStack, rewindEntry{
-			historyLengths: preHistLengths,
-			feedIndex:      len(a.feed) - 1,
-			prompt:         a.lastPrompt,
+		a.store.PushRewindEntry(datastore.RewindEntry{
+			HistoryLengths: preHistLengths,
+			FeedIndex:      len(a.feed) - 1,
+			Prompt:         a.lastPrompt,
 		})
 
 		// Sort by latency ascending (fastest first) for display. Must happen after
@@ -567,7 +528,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Successful completion — clear any stale checkpoint.
-		clearCheckpoint(a.checkpointPath)
+		a.store.ClearCheckpoint()
 
 		hasWrites := false
 		for _, resp := range msg.responses {
@@ -753,8 +714,8 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string, cs *recipestore.Store, debugLog bool, store *datastore.Store) error {
-	app := New(adapters, prefPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels, cs, debugLog, store)
+func Run(adapters []models.ModelAdapter, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, resuming bool, availableModels []string, debugLog bool, store *datastore.Store) error {
+	app := New(adapters, cfg, mcpDefs, mcpDispatchers, rec, availableModels, debugLog, store)
 
 	p := tea.NewProgram(app)
 	app.SetProgram(p)
@@ -770,12 +731,12 @@ func Run(adapters []models.ModelAdapter, prefPath, sessionID string, cfg config.
 
 	// On resume: replay saved feed as visual history.
 	if resuming {
-		feedEntries, err := session.LoadFeed(sp.FeedPath)
+		feedEntries, err := session.LoadFeed(store.FeedPath())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not load feed: %v\n", err)
 		}
-		app.sessionFeed = feedEntries
-		app.feed = append(app.feed, feedItem{kind: "message", text: fmt.Sprintf("Resumed session %s", sessionID)})
+		store.SetSessionFeed(feedEntries)
+		app.feed = append(app.feed, feedItem{kind: "message", text: fmt.Sprintf("Resumed session %s", store.SessionID())})
 		app.feed = append(app.feed, replayFeed(feedEntries)...)
 	}
 
@@ -784,76 +745,12 @@ func Run(adapters []models.ModelAdapter, prefPath, sessionID string, cfg config.
 	}
 
 	// Write initial session metadata.
-	if err := session.SaveMeta(sp.MetaPath, meta); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
-	}
+	store.SaveInitialMeta()
 
 	_, err := p.Run()
 	return err
 }
 
-// persistSessionState updates and saves session metadata, feed, and recipe
-// after a run completes. Called from the runCompleteMsg handler.
-func (a *App) persistSessionState(responses []models.ModelResponse) {
-	now := time.Now()
-	a.sessionMeta.LastActiveAt = now
-	a.sessionMeta.PromptCount++
-	if a.sessionMeta.FirstPrompt == "" {
-		a.sessionMeta.FirstPrompt = truncateStr(a.lastPrompt, 120)
-	}
-	a.sessionMeta.LastPrompt = truncateStr(a.lastPrompt, 120)
-
-	if err := session.SaveMeta(a.sessionMetaPath, a.sessionMeta); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
-	}
-
-	// Build and append feed entry.
-	entry := buildFeedEntry(a.lastPrompt, responses)
-	a.sessionFeed = append(a.sessionFeed, entry)
-	if err := session.SaveFeed(a.feedPath, a.sessionFeed); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
-	}
-
-	// Persist session recipe (captures the exact config used for this run).
-	a.persistSessionRecipe()
-}
-
-// persistSessionRecipe writes the current session recipe to the per-session
-// recipe.md. This is the single save point for config changes — called after
-// every run completion.
-func (a *App) persistSessionRecipe() {
-	if a.sessionRecipePath == "" {
-		return
-	}
-	rec := a.sessionRecipe
-	if rec == nil {
-		rec = a.recipe
-	}
-	if rec == nil {
-		return
-	}
-	md := rec.MarshalMarkdown()
-	_ = os.MkdirAll(filepath.Dir(a.sessionRecipePath), 0o750)
-	_ = os.WriteFile(a.sessionRecipePath, []byte(md), 0o600)
-}
-
-// updateLastFeedNote updates the note on the most recent session feed entry
-// and re-saves feed.json. Called after selection/rating.
-func (a *App) updateLastFeedNote(note string) {
-	if len(a.sessionFeed) == 0 {
-		return
-	}
-	a.sessionFeed[len(a.sessionFeed)-1].Note = note
-	if err := session.SaveFeed(a.feedPath, a.sessionFeed); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
-	}
-}
-
-// clearCheckpoint removes the checkpoint file at the given path. Used instead
-// of checkpoint.Clear to avoid importing the checkpoint package for a single call.
-func clearCheckpoint(path string) {
-	_ = os.Remove(path)
-}
 
 // activeModelIDs returns the IDs of the adapters that will run on the next prompt.
 func (a App) activeModelIDs() []string { //nolint:gocritic // called from bubbletea value-receiver methods

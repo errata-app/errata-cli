@@ -186,7 +186,7 @@ func TestHandleLoadCommand_BadPathShowsError(t *testing.T) {
 
 func TestHandleExportCommand_NoReport(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.lastReport = nil
+	// No report path set — should show error.
 	result, _ := a.handleExportCommand("")
 	app := result.(App)
 	last := app.feed[len(app.feed)-1].text
@@ -195,18 +195,24 @@ func TestHandleExportCommand_NoReport(t *testing.T) {
 
 func TestHandleExportCommand_WithReport(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.lastReport = &output.Report{
+
+	// Create a report on disk and tell the store about it.
+	report := &output.Report{
 		ID:     "abc123",
 		Prompt: "test prompt",
 		Recipe: output.RecipeSnapshot{Name: "test"},
 	}
-	dir := filepath.Join(t.TempDir(), "outputs")
+	tmpDir := t.TempDir()
+	reportPath, err := output.Save(tmpDir, report)
+	require.NoError(t, err)
+	a.store.SetLastReportInfo(reportPath, nil)
 
-	result, _ := a.handleExportCommand(dir)
+	exportDir := filepath.Join(t.TempDir(), "exports")
+	result, _ := a.handleExportCommand(exportDir)
 	app := result.(App)
 	last := app.feed[len(app.feed)-1].text
 	assert.Contains(t, last, "Output exported to")
-	assert.Contains(t, last, dir)
+	assert.Contains(t, last, exportDir)
 }
 
 // ── nextAvailablePath tests ──────────────────────────────────────────────────

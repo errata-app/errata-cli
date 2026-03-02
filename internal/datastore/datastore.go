@@ -5,7 +5,9 @@
 package datastore
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,9 +15,11 @@ import (
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/tools"
@@ -64,6 +68,13 @@ type Store struct {
 	// Cost tracking.
 	costPerModel map[string]float64
 	totalCost    float64
+
+	// Recipe store for content-addressed config snapshots.
+	recipeStore *recipestore.Store
+
+	// Report tracking — path-based (not pointer) so /export works after selection.
+	lastReportPath  string
+	lastActiveTools []string
 }
 
 // Options configures a new Store.
@@ -74,6 +85,7 @@ type Options struct {
 	SessionID      string
 	PrefPath       string
 	Meta           session.Meta
+	RecipeStore    *recipestore.Store
 }
 
 // New creates a Store, loading existing data from disk.
@@ -102,6 +114,7 @@ func New(opts Options) (*Store, error) {
 		prefPath:          opts.PrefPath,
 		sessionMeta:       opts.Meta,
 		costPerModel:      make(map[string]float64),
+		recipeStore:       opts.RecipeStore,
 	}, nil
 }
 
@@ -392,3 +405,119 @@ func (s *Store) SessionRecipePath() string { return s.sessionRecipePath }
 
 // RewindStackLen returns the number of entries in the rewind stack (used by tests).
 func (s *Store) RewindStackLen() int { return len(s.rewindStack) }
+
+// RecipeStore returns the recipe store (for /stats filter).
+func (s *Store) RecipeStore() *recipestore.Store { return s.recipeStore }
+
+// ── Report Tracking ─────────────────────────────────────────────────────────
+
+// SetLastReportInfo records the saved report path and active tool names
+// from the most recent run. Called from the runCompleteMsg handler.
+func (s *Store) SetLastReportInfo(reportPath string, toolNames []string) {
+	s.lastReportPath = reportPath
+	s.lastActiveTools = toolNames
+}
+
+// LastReportPath returns the path to the last saved report.
+func (s *Store) LastReportPath() string { return s.lastReportPath }
+
+// ErrNoReport is returned when no report path is set.
+var ErrNoReport = errors.New("no report available")
+
+// LoadLastReport loads the last report from disk.
+// Returns ErrNoReport if no report path is set.
+func (s *Store) LoadLastReport() (*output.Report, error) {
+	if s.lastReportPath == "" {
+		return nil, ErrNoReport
+	}
+	return output.Load(s.lastReportPath)
+}
+
+// ClearLastReport clears the last report path (called on skip).
+func (s *Store) ClearLastReport() { s.lastReportPath = "" }
+
+// ── Recipe Snapshot ─────────────────────────────────────────────────────────
+
+// BuildRecipeSnapshot creates a RecipeSnapshot from a recipe and the last
+// active tools. The recipe parameter should be the active recipe (session
+// recipe if set, otherwise base recipe).
+func (s *Store) BuildRecipeSnapshot(rec *recipe.Recipe) *recipestore.RecipeSnapshot {
+	snap := &recipestore.RecipeSnapshot{Name: "default"}
+	if rec != nil {
+		snap.Name = rec.Name
+		if snap.Name == "" {
+			snap.Name = "default"
+		}
+		snap.SystemPrompt = rec.SystemPrompt
+		if rec.Constraints.MaxSteps > 0 || rec.Constraints.Timeout > 0 {
+			snap.Constraints = &recipestore.ConstraintsConfig{
+				MaxSteps: rec.Constraints.MaxSteps,
+			}
+			if rec.Constraints.Timeout > 0 {
+				snap.Constraints.Timeout = rec.Constraints.Timeout.String()
+			}
+		}
+		if rec.ModelParams.Temperature != nil || rec.ModelParams.MaxTokens != nil || rec.ModelParams.Seed != nil {
+			snap.ModelParams = &recipestore.ModelParamsConfig{
+				Temperature: rec.ModelParams.Temperature,
+				MaxTokens:   rec.ModelParams.MaxTokens,
+				Seed:        rec.ModelParams.Seed,
+			}
+		}
+	}
+
+	// Populate tools from the last run's active tool list.
+	snap.Tools = s.lastActiveTools
+
+	return snap
+}
+
+// RecipeHash computes a content-addressed hash for the recipe snapshot.
+// Returns "" if no recipe store is configured.
+func (s *Store) RecipeHash(rec *recipe.Recipe) string {
+	if s.recipeStore == nil {
+		return ""
+	}
+	snap := s.BuildRecipeSnapshot(rec)
+	return s.recipeStore.Put(snap)
+}
+
+// ── Selection / Rating Recording ────────────────────────────────────────────
+
+// SelectionParams captures the information needed to record a selection or rating.
+type SelectionParams struct {
+	Prompt          string
+	SelectedModelID string
+	Responses       []models.ModelResponse
+	AppliedFiles    []string // nil for text-only votes / ratings
+	Rating          string   // "" for selection, "good" or "bad" for rating
+	ActiveRecipe    *recipe.Recipe
+}
+
+// RecordSelection records a preference entry and updates the output report
+// with the selection outcome.
+func (s *Store) RecordSelection(p SelectionParams) {
+	hash := s.RecipeHash(p.ActiveRecipe)
+
+	if p.Rating == "bad" {
+		if err := preferences.RecordBad(s.prefPath, p.Prompt, p.SelectedModelID, hash, s.sessionID, p.Responses); err != nil {
+			log.Printf("warning: failed to record preference: %v", err)
+		}
+	} else {
+		if err := preferences.Record(s.prefPath, p.Prompt, p.SelectedModelID, hash, s.sessionID, p.Responses); err != nil {
+			log.Printf("warning: failed to record preference: %v", err)
+		}
+	}
+
+	// Update the on-disk report with selection outcome.
+	if s.lastReportPath != "" {
+		report, err := output.Load(s.lastReportPath)
+		if err != nil {
+			log.Printf("warning: could not load report for selection recording: %v", err)
+			return
+		}
+		if err := output.RecordSelection(filepath.Dir(s.lastReportPath), report, p.SelectedModelID, p.AppliedFiles, p.Rating); err != nil {
+			log.Printf("warning: failed to record selection in report: %v", err)
+		}
+	}
+}

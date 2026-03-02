@@ -49,7 +49,7 @@ func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 		Meta:           meta,
 	})
 	require.NoError(t, err)
-	a := New(ads, config.Config{}, nil, nil, nil, nil, nil, false, store)
+	a := New(ads, config.Config{}, nil, nil, nil, nil, false, store)
 	return *a
 }
 

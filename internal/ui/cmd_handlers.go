@@ -22,7 +22,6 @@ import (
 	"github.com/suarezc/errata/internal/prompt"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
-	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/subagent"
 	"github.com/suarezc/errata/internal/tools"
 )
@@ -106,7 +105,7 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
-	a.rewindStack = nil
+	a.store.ClearRewindStack()
 	a.pastedText = ""
 	a.pastedLineCount = 0
 	return a, nil
@@ -114,7 +113,7 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 
 func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
-	a.rewindStack = nil
+	a.store.ClearRewindStack()
 	a.pastedText = ""
 	a.pastedLineCount = 0
 	a.store.ClearHistories()
@@ -153,13 +152,17 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 	// Filter stats by current config when a config store is available.
 	var filter *preferences.StatsFilter
 	var recipeName string
-	if a.recipeStore != nil {
-		snap := a.buildRecipeSnapshot()
-		h := a.recipeStore.Put(snap)
+	if a.store.RecipeStore() != nil {
+		activeRecipe := a.sessionRecipe
+		if activeRecipe == nil {
+			activeRecipe = a.recipe
+		}
+		snap := a.store.BuildRecipeSnapshot(activeRecipe)
+		h := a.store.RecipeStore().Put(snap)
 		filter = &preferences.StatsFilter{ConfigHash: h}
 		recipeName = snap.Name
 	}
-	stats := preferences.SummarizeDetailed(a.prefPath, filter)
+	stats := preferences.SummarizeDetailed(a.store.PrefPath(), filter)
 	var sb strings.Builder
 	if recipeName != "" {
 		fmt.Fprintf(&sb, "Stats (recipe: %s):\n", recipeName)
@@ -203,19 +206,20 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 			)
 		}
 	}
-	if len(a.sessionCostPerModel) > 0 {
+	costPerModel := a.store.CostPerModel()
+	if len(costPerModel) > 0 {
 		sb.WriteString("  Session cost:\n")
-		ids := make([]string, 0, len(a.sessionCostPerModel))
-		for id := range a.sessionCostPerModel {
+		ids := make([]string, 0, len(costPerModel))
+		for id := range costPerModel {
 			ids = append(ids, id)
 		}
 		sort.Slice(ids, func(i, j int) bool {
-			return a.sessionCostPerModel[ids[i]] > a.sessionCostPerModel[ids[j]]
+			return costPerModel[ids[i]] > costPerModel[ids[j]]
 		})
 		for _, id := range ids {
-			fmt.Fprintf(&sb, "    %s: $%.4f\n", id, a.sessionCostPerModel[id])
+			fmt.Fprintf(&sb, "    %s: $%.4f\n", id, costPerModel[id])
 		}
-		fmt.Fprintf(&sb, "  Total: $%.4f\n", a.totalCostUSD)
+		fmt.Fprintf(&sb, "  Total: $%.4f\n", a.store.TotalCost())
 	}
 	return a.withMessage(strings.TrimRight(sb.String(), "\n"))
 }
@@ -301,9 +305,9 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	projectRoot := a.projectRoot
 	cfg := a.cfg
 	seed := a.seed
-	sessionID := a.sessionID
+	sessionID := a.store.SessionID()
 	rec := a.recipe
-	cpPath := a.checkpointPath
+	cpPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
@@ -389,16 +393,17 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			toolNames[i] = d.Name
 		}
 		report := output.BuildReport(sessionID, rec, trimmed, responses, collector, toolNames)
-		if _, err := output.Save(output.DefaultDir, report); err != nil {
+		reportPath, err := output.Save(output.DefaultDir, report)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
 		}
 
-		return runCompleteMsg{responses: responses, compactedHistories: compacted, report: report}
+		return runCompleteMsg{responses: responses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
 	})
 }
 
 func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	cp, err := checkpoint.Load(a.checkpointPath)
+	cp, err := a.store.LoadCheckpoint()
 	if err != nil {
 		return a.withMessage(fmt.Sprintf("Error loading checkpoint: %v", err))
 	}
@@ -417,9 +422,7 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 	}
 
 	if len(toRerunIDs) == 0 {
-		if err := checkpoint.Clear(a.checkpointPath); err != nil {
-			log.Printf("warning: failed to clear checkpoint: %v", err)
-		}
+		a.store.ClearCheckpoint()
 		return a.withMessage("All models from the last run completed. No resume needed.")
 	}
 
@@ -442,56 +445,26 @@ func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 		rerunAdapters = append(rerunAdapters, found)
 	}
 
-	if err := checkpoint.Clear(a.checkpointPath); err != nil {
-		log.Printf("warning: failed to clear checkpoint: %v", err)
-	}
+	a.store.ClearCheckpoint()
 	return a.launchResumeRun(cp.Prompt, rerunAdapters, completedResponses, cp.Verbose)
 }
 
 func (a App) handleRewindCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if len(a.rewindStack) == 0 {
+	if !a.store.CanRewind() {
 		return a.withMessage("Nothing to rewind.")
 	}
 
-	// Pop entry.
-	entry := a.rewindStack[len(a.rewindStack)-1]
-	a.rewindStack = a.rewindStack[:len(a.rewindStack)-1]
-
-	// Restore files.
-	var fileMsg string
-	if len(entry.fileSnapshots) > 0 {
-		if err := tools.RestoreSnapshots(entry.fileSnapshots); err != nil {
-			log.Printf("warning: rewind file restore error: %v", err)
-			fileMsg = fmt.Sprintf(" (file restore warning: %v)", err)
-		}
+	result, err := a.store.Rewind()
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Rewind failed: %v", err))
 	}
 
-	// Truncate conversation histories to pre-run lengths.
-	a.store.TruncateHistories(entry.historyLengths)
-
-	// Record rewind marker in preferences.
-	if err := preferences.RecordRewind(a.prefPath, entry.prompt, a.sessionID); err != nil {
-		log.Printf("warning: failed to record rewind preference: %v", err)
+	// Annotate the UI display feed.
+	if result.FeedIndex >= 0 && result.FeedIndex < len(a.feed) {
+		a.feed[result.FeedIndex].note = result.Note
 	}
 
-	// Annotate feed item.
-	if entry.feedIndex >= 0 && entry.feedIndex < len(a.feed) {
-		item := &a.feed[entry.feedIndex]
-		if item.note != "" {
-			item.note = "[rewound] " + item.note
-		} else {
-			item.note = "[rewound]"
-		}
-		// Persist the annotation to session feed so it survives resume.
-		if entry.feedIndex < len(a.sessionFeed) {
-			a.sessionFeed[entry.feedIndex].Note = item.note
-			if err := session.SaveFeed(a.feedPath, a.sessionFeed); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
-			}
-		}
-	}
-
-	return a.withMessage("Rewound last run." + fileMsg)
+	return a.withMessage("Rewound last run." + result.FileMsg)
 }
 
 func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -565,9 +538,9 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	projectRoot := a.projectRoot
 	cfg := a.cfg
 	seed := a.seed
-	sessionID := a.sessionID
+	sessionID := a.store.SessionID()
 	rec := a.recipe
-	resumeCPPath := a.checkpointPath
+	resumeCPPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
@@ -657,11 +630,12 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			toolNames[i] = d.Name
 		}
 		report := output.BuildReport(sessionID, rec, userPrompt, allResponses, collector, toolNames)
-		if _, err := output.Save(output.DefaultDir, report); err != nil {
+		reportPath, err := output.Save(output.DefaultDir, report)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
 		}
 
-		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, report: report}
+		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
 	})
 }
 
@@ -791,7 +765,8 @@ func (a App) handleLoadCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocr
 }
 
 func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if a.lastReport == nil {
+	report, err := a.store.LoadLastReport()
+	if err != nil {
 		return a.withMessage("No run output to export. Run a prompt first.")
 	}
 
@@ -800,7 +775,7 @@ func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 		dir = args
 	}
 
-	path, err := output.Save(dir, a.lastReport)
+	path, err := output.Save(dir, report)
 	if err != nil {
 		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
 	}
