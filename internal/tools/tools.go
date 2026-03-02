@@ -440,6 +440,40 @@ func SubagentDepthFromContext(ctx context.Context) int {
 	return v
 }
 
+// systemPromptExtraKey is the context key for per-run system prompt extra text.
+type systemPromptExtraKey struct{}
+
+// WithSystemPromptExtra returns a context carrying the given system prompt extra text.
+// Adapters read this via SystemPromptSuffix; it takes priority over the global set
+// by SetSystemPromptExtra.
+func WithSystemPromptExtra(ctx context.Context, s string) context.Context {
+	return context.WithValue(ctx, systemPromptExtraKey{}, s)
+}
+
+// SystemPromptExtraFromContext returns the system prompt extra text stored in ctx.
+// The bool is false if no value was set via WithSystemPromptExtra.
+func SystemPromptExtraFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(systemPromptExtraKey{}).(string)
+	return v, ok
+}
+
+// toolGuidanceKey is the context key for per-run tool guidance override.
+type toolGuidanceKey struct{}
+
+// WithToolGuidance returns a context carrying the given tool guidance text.
+// effectiveGuidanceForCtx reads this; it takes priority over the global set
+// by SetToolGuidance.
+func WithToolGuidance(ctx context.Context, s string) context.Context {
+	return context.WithValue(ctx, toolGuidanceKey{}, s)
+}
+
+// ToolGuidanceFromContext returns the tool guidance override stored in ctx.
+// The bool is false if no value was set via WithToolGuidance.
+func ToolGuidanceFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(toolGuidanceKey{}).(string)
+	return v, ok
+}
+
 // ActiveDefinitions returns the subset of Definitions not in disabled.
 // An empty or nil disabled map returns all Definitions unchanged.
 func ActiveDefinitions(disabled map[string]bool) []ToolDef {
@@ -615,11 +649,17 @@ func effectiveGuidance() string {
 }
 
 // effectiveGuidanceForCtx returns guidance filtered to active tools from ctx.
-// Custom guidance (toolGuidanceOverride) is never filtered — the user wrote it
-// intentionally and it may reference tools by any name.
+// Custom guidance is checked in priority order: context value → global override.
+// Custom guidance is never filtered — the user wrote it intentionally and it
+// may reference tools by any name.
 func effectiveGuidanceForCtx(ctx context.Context) string {
-	if toolGuidanceOverride != "" {
-		base := toolGuidanceOverride
+	// Context-scoped override takes priority over the global.
+	override := toolGuidanceOverride
+	if ctxG, ok := ToolGuidanceFromContext(ctx); ok && ctxG != "" {
+		override = ctxG
+	}
+	if override != "" {
+		base := override
 		if SubagentEnabled {
 			return base + spawnAgentGuidance + "\n"
 		}
@@ -656,10 +696,15 @@ func SystemPromptGuidance() string {
 // built-in guidance so project-specific context reaches every model.
 func SystemPromptSuffix(ctx context.Context) string {
 	g := effectiveGuidanceForCtx(ctx)
-	if systemPromptExtra == "" {
+	// Context-scoped extra takes priority over the global.
+	extra := systemPromptExtra
+	if ctxExtra, ok := SystemPromptExtraFromContext(ctx); ok {
+		extra = ctxExtra
+	}
+	if extra == "" {
 		return g
 	}
-	return g + "\n" + systemPromptExtra
+	return g + "\n" + extra
 }
 
 // validatePath resolves path relative to cwd and rejects paths that escape it.

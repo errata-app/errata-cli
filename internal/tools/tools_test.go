@@ -1383,6 +1383,53 @@ func TestSnapshotFiles_PathTraversal(t *testing.T) {
 	assert.Contains(t, err.Error(), "outside the working directory")
 }
 
+// ─── Context-based system prompt / tool guidance accessors ───────────────────
+
+func TestWithSystemPromptExtra_ContextOverridesGlobal(t *testing.T) {
+	tools.SetSystemPromptExtra("global extra")
+	defer tools.SetSystemPromptExtra("")
+
+	ctx := tools.WithSystemPromptExtra(context.Background(), "context extra")
+	s := tools.SystemPromptSuffix(ctx)
+	assert.Contains(t, s, "context extra")
+	assert.NotContains(t, s, "global extra")
+}
+
+func TestWithToolGuidance_ContextOverridesGlobal(t *testing.T) {
+	tools.SetToolGuidance("global guidance")
+	defer tools.SetToolGuidance("")
+
+	ctx := tools.WithToolGuidance(context.Background(), "context guidance")
+	s := tools.SystemPromptSuffix(ctx)
+	assert.Contains(t, s, "context guidance")
+	assert.NotContains(t, s, "global guidance")
+	// Default guidance should also be absent (overridden by context guidance).
+	assert.NotContains(t, s, "list_directory")
+}
+
+func TestSystemPromptSuffix_ContextFallsBackToGlobal(t *testing.T) {
+	tools.SetSystemPromptExtra("global extra")
+	defer tools.SetSystemPromptExtra("")
+
+	// No WithSystemPromptExtra on context — should fall back to global.
+	s := tools.SystemPromptSuffix(context.Background())
+	assert.Contains(t, s, "global extra")
+}
+
+func TestSystemPromptSuffix_NoContextNoGlobal_UsesDefault(t *testing.T) {
+	// Ensure globals are clear.
+	tools.SetSystemPromptExtra("")
+	tools.SetToolGuidance("")
+
+	s := tools.SystemPromptSuffix(context.Background())
+	// Default guidance should be present.
+	assert.Contains(t, s, "Tool use guidance")
+	assert.Contains(t, s, "list_directory")
+	// No extra text appended.
+	assert.NotContains(t, s, "global")
+	assert.NotContains(t, s, "context")
+}
+
 // ─── Combined recipe flow regression test ───────────────────────────────────
 
 func TestSystemPromptSuffix_CombinedRecipeFlow(t *testing.T) {

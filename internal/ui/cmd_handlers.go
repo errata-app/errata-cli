@@ -281,9 +281,12 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
 	var sumPrompt string
+	var recSystemPrompt, recToolGuidance string
 	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
 		activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.ToolDescriptions)
 		sumPrompt = activeRec.SummarizationPrompt
+		recSystemPrompt = activeRec.SystemPrompt
+		recToolGuidance = activeRec.ToolGuidance
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
@@ -338,6 +341,8 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
 			CheckpointPath:   cpPath,
 		})
+		runCtx = tools.WithSystemPromptExtra(runCtx, recSystemPrompt)
+		runCtx = tools.WithToolGuidance(runCtx, recToolGuidance)
 		if tools.SubagentEnabled {
 			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
 				ads, cfg, mcpDispatchers,
@@ -510,9 +515,12 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
 	var resumeSumPrompt string
+	var resumeSystemPrompt, resumeToolGuidance string
 	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
 		activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.ToolDescriptions)
 		resumeSumPrompt = resumeRec.SummarizationPrompt
+		resumeSystemPrompt = resumeRec.SystemPrompt
+		resumeToolGuidance = resumeRec.ToolGuidance
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
@@ -566,6 +574,8 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
 			CheckpointPath:   resumeCPPath,
 		})
+		runCtx = tools.WithSystemPromptExtra(runCtx, resumeSystemPrompt)
+		runCtx = tools.WithToolGuidance(runCtx, resumeToolGuidance)
 		if tools.SubagentEnabled {
 			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
 				ads, cfg, mcpDispatchers,
