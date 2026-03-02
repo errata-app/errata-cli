@@ -13,6 +13,7 @@ import (
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/datastore"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/session"
 )
 
@@ -29,6 +30,11 @@ func (s uiStub) RunAgent(_ context.Context, _ []models.ConversationTurn, _ strin
 }
 
 func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
+	t.Helper()
+	return newAppForTestWithRecipe(t, ads, nil)
+}
+
+func newAppForTestWithRecipe(t *testing.T, ads []models.ModelAdapter, rec *recipe.Recipe) App {
 	t.Helper()
 	tmp := t.TempDir()
 	sp := session.Paths{
@@ -47,9 +53,10 @@ func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 		SessionID:      "session",
 		PrefPath:       filepath.Join(tmp, "pref.jsonl"),
 		Meta:           meta,
+		Recipe:         rec,
 	})
 	require.NoError(t, err)
-	a := New(ads, config.Config{}, nil, nil, nil, nil, false, store)
+	a := New(ads, config.Config{}, nil, nil, nil, false, store)
 	return *a
 }
 

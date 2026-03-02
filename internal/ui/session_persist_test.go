@@ -247,7 +247,7 @@ func TestReplayPanels_NilEntries(t *testing.T) {
 
 func TestSyncToolAllowlist_NilSessionRecipeNoop(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionRecipe = nil
+	// sessionRecipe is nil by default in newAppForTest
 	assert.NotPanics(t, func() {
 		a.syncToolAllowlist()
 	})
@@ -255,7 +255,7 @@ func TestSyncToolAllowlist_NilSessionRecipeNoop(t *testing.T) {
 
 func TestSyncToolAllowlist_BuildsFromActiveItems(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionRecipe = &recipe.Recipe{}
+	a.store.SetSessionRecipe(&recipe.Recipe{})
 	a.configListItems = []listItem{
 		{Label: "read_file", Active: true},
 		{Label: "bash", Active: false},
@@ -264,26 +264,26 @@ func TestSyncToolAllowlist_BuildsFromActiveItems(t *testing.T) {
 
 	a.syncToolAllowlist()
 
-	require.NotNil(t, a.sessionRecipe.Tools)
-	assert.Equal(t, []string{"read_file", "write_file"}, a.sessionRecipe.Tools.Allowlist)
+	require.NotNil(t, a.store.SessionRecipe().Tools)
+	assert.Equal(t, []string{"read_file", "write_file"}, a.store.SessionRecipe().Tools.Allowlist)
 }
 
 func TestSyncToolAllowlist_CreatesToolsConfig(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionRecipe = &recipe.Recipe{} // Tools is nil
+	a.store.SetSessionRecipe(&recipe.Recipe{}) // Tools is nil
 	a.configListItems = []listItem{
 		{Label: "bash", Active: true},
 	}
 
 	a.syncToolAllowlist()
 
-	require.NotNil(t, a.sessionRecipe.Tools)
-	assert.Equal(t, []string{"bash"}, a.sessionRecipe.Tools.Allowlist)
+	require.NotNil(t, a.store.SessionRecipe().Tools)
+	assert.Equal(t, []string{"bash"}, a.store.SessionRecipe().Tools.Allowlist)
 }
 
 func TestSyncToolAllowlist_SyncsToAppField(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionRecipe = &recipe.Recipe{}
+	a.store.SetSessionRecipe(&recipe.Recipe{})
 	a.configListItems = []listItem{
 		{Label: "read_file", Active: true},
 		{Label: "bash", Active: true},
@@ -291,12 +291,12 @@ func TestSyncToolAllowlist_SyncsToAppField(t *testing.T) {
 
 	a.syncToolAllowlist()
 
-	assert.Equal(t, a.sessionRecipe.Tools.Allowlist, a.toolAllowlist)
+	assert.Equal(t, a.store.SessionRecipe().Tools.Allowlist, a.toolAllowlist)
 }
 
 func TestSyncToolAllowlist_AllInactiveEmptiesAllowlist(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionRecipe = &recipe.Recipe{}
+	a.store.SetSessionRecipe(&recipe.Recipe{})
 	a.configListItems = []listItem{
 		{Label: "read_file", Active: false},
 		{Label: "bash", Active: false},
@@ -304,7 +304,7 @@ func TestSyncToolAllowlist_AllInactiveEmptiesAllowlist(t *testing.T) {
 
 	a.syncToolAllowlist()
 
-	assert.Nil(t, a.sessionRecipe.Tools.Allowlist)
+	assert.Nil(t, a.store.SessionRecipe().Tools.Allowlist)
 	assert.Nil(t, a.toolAllowlist)
 }
 

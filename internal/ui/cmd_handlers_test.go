@@ -53,8 +53,7 @@ func TestHandleWipeCmd_ClearsConversationHistories(t *testing.T) {
 // ── /save command tests ──────────────────────────────────────────────────────
 
 func TestHandleSaveCommand_DefaultPath(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.recipe = &recipe.Recipe{Name: "test-recipe", Models: []string{"m1"}}
+	a := newAppForTestWithRecipe(t, nil, &recipe.Recipe{Name: "test-recipe", Models: []string{"m1"}})
 	dir := t.TempDir()
 	orig, _ := os.Getwd()
 	require.NoError(t, os.Chdir(dir))
@@ -72,8 +71,7 @@ func TestHandleSaveCommand_DefaultPath(t *testing.T) {
 }
 
 func TestHandleSaveCommand_DefaultPathNoOverwrite(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.recipe = &recipe.Recipe{Name: "second-save", Models: []string{"m2"}}
+	a := newAppForTestWithRecipe(t, nil, &recipe.Recipe{Name: "second-save", Models: []string{"m2"}})
 	dir := t.TempDir()
 	orig, _ := os.Getwd()
 	require.NoError(t, os.Chdir(dir))
@@ -105,8 +103,7 @@ func TestHandleSaveCommand_DefaultPathNoOverwrite(t *testing.T) {
 }
 
 func TestHandleSaveCommand_CustomPath(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.recipe = &recipe.Recipe{Name: "my-recipe"}
+	a := newAppForTestWithRecipe(t, nil, &recipe.Recipe{Name: "my-recipe"})
 	path := filepath.Join(t.TempDir(), "custom.md")
 
 	result, _ := a.handleSaveCommand(path)
@@ -120,9 +117,8 @@ func TestHandleSaveCommand_CustomPath(t *testing.T) {
 }
 
 func TestHandleSaveCommand_SessionRecipeTakesPrecedence(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.recipe = &recipe.Recipe{Name: "base"}
-	a.sessionRecipe = &recipe.Recipe{Name: "session-modified"}
+	a := newAppForTestWithRecipe(t, nil, &recipe.Recipe{Name: "base"})
+	a.store.SetSessionRecipe(&recipe.Recipe{Name: "session-modified"})
 	path := filepath.Join(t.TempDir(), "out.md")
 
 	result, _ := a.handleSaveCommand(path)
@@ -137,8 +133,7 @@ func TestHandleSaveCommand_SessionRecipeTakesPrecedence(t *testing.T) {
 
 func TestHandleSaveCommand_NoRecipe(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.recipe = nil
-	a.sessionRecipe = nil
+	// No recipe set (nil base and session).
 	result, _ := a.handleSaveCommand("")
 	app := result.(App)
 	last := app.feed[len(app.feed)-1].text
@@ -168,10 +163,10 @@ func TestHandleLoadCommand_LoadsRecipe(t *testing.T) {
 	last := app.feed[len(app.feed)-1].text
 	assert.Contains(t, last, "Loaded recipe")
 	assert.Contains(t, last, "Loaded Recipe")
-	assert.True(t, app.recipeModified)
-	require.NotNil(t, app.sessionRecipe)
-	assert.Equal(t, []string{"alpha", "beta"}, app.sessionRecipe.Models)
-	assert.Equal(t, "You are helpful.", app.sessionRecipe.SystemPrompt)
+	assert.True(t, app.store.RecipeModified())
+	require.NotNil(t, app.store.SessionRecipe())
+	assert.Equal(t, []string{"alpha", "beta"}, app.store.SessionRecipe().Models)
+	assert.Equal(t, "You are helpful.", app.store.SessionRecipe().SystemPrompt)
 }
 
 func TestHandleLoadCommand_BadPathShowsError(t *testing.T) {

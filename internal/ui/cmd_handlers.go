@@ -127,13 +127,9 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	}
 	histories := a.store.Histories()
 	prog := a.prog
-	compactRecipe := a.recipe
-	if a.sessionRecipe != nil {
-		compactRecipe = a.sessionRecipe
-	}
 	var compactSumPrompt string
-	if compactRecipe != nil {
-		compactSumPrompt = compactRecipe.SummarizationPrompt
+	if compactRec := a.store.ActiveRecipe(); compactRec != nil {
+		compactSumPrompt = compactRec.SummarizationPrompt
 	}
 	app, printCmd := a.withMessage("Compacting conversation history…")
 	return app, tea.Batch(printCmd, func() tea.Msg {
@@ -153,11 +149,7 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 	var filter *preferences.StatsFilter
 	var recipeName string
 	if a.store.RecipeStore() != nil {
-		activeRecipe := a.sessionRecipe
-		if activeRecipe == nil {
-			activeRecipe = a.recipe
-		}
-		snap := a.store.BuildRecipeSnapshot(activeRecipe)
+		snap := a.store.BuildRecipeSnapshot()
 		h := a.store.RecipeStore().Put(snap)
 		filter = &preferences.StatsFilter{ConfigHash: h}
 		recipeName = snap.Name
@@ -288,14 +280,10 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		})
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
-	activeRecipe := a.recipe
-	if a.sessionRecipe != nil {
-		activeRecipe = a.sessionRecipe
-	}
 	var sumPrompt string
-	if activeRecipe != nil {
-		activeDefs = tools.ApplyDescriptions(activeDefs, activeRecipe.ToolDescriptions)
-		sumPrompt = activeRecipe.SummarizationPrompt
+	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
+		activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.ToolDescriptions)
+		sumPrompt = activeRec.SummarizationPrompt
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
@@ -306,7 +294,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	cfg := a.cfg
 	seed := a.seed
 	sessionID := a.store.SessionID()
-	rec := a.recipe
+	rec := a.store.BaseRecipe()
 	cpPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
@@ -521,14 +509,10 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		})
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
-	resumeRecipe := a.recipe
-	if a.sessionRecipe != nil {
-		resumeRecipe = a.sessionRecipe
-	}
 	var resumeSumPrompt string
-	if resumeRecipe != nil {
-		activeDefs = tools.ApplyDescriptions(activeDefs, resumeRecipe.ToolDescriptions)
-		resumeSumPrompt = resumeRecipe.SummarizationPrompt
+	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
+		activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.ToolDescriptions)
+		resumeSumPrompt = resumeRec.SummarizationPrompt
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
@@ -539,7 +523,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	cfg := a.cfg
 	seed := a.seed
 	sessionID := a.store.SessionID()
-	rec := a.recipe
+	rec := a.store.BaseRecipe()
 	resumeCPPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
@@ -640,10 +624,11 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 }
 
 func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if a.sessionRecipe == nil {
-		a.sessionRecipe = cloneRecipe(a.recipe)
+	if a.store.SessionRecipe() == nil {
+		a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
 	}
-	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	sessRec := a.store.SessionRecipe()
+	a.configSections = buildConfigSections(sessRec, a.adapters, a.disabledTools)
 	a.configOverlayActive = true
 	a.configSelectedIdx = 0
 	a.configExpandedIdx = -1
@@ -651,8 +636,8 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 	if args != "" {
 		lowerArgs := strings.ToLower(args)
 		if lowerArgs == "reset" {
-			a.sessionRecipe = cloneRecipe(a.recipe)
-			a.recipeModified = false
+			a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
+			a.store.SetRecipeModified(false)
 			a.applySessionRecipe()
 			a.configOverlayActive = false
 			return a.withMessage("Configuration reset to recipe defaults.")
@@ -666,28 +651,28 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 				case "list":
 					switch sec.Name {
 					case "models":
-						a.configListItems = buildModelsList(a.sessionRecipe, a.adapters, a.activeAdapters)
+						a.configListItems = buildModelsList(sessRec, a.adapters, a.activeAdapters)
 					case "tools":
 						a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
 					case "mcp-servers":
 						var items []listItem
-						for _, s := range a.sessionRecipe.MCPServers {
+						for _, s := range sessRec.MCPServers {
 							items = append(items, listItem{Label: s.Name + ": " + s.Command, Active: true})
 						}
 						a.configListItems = items
 					}
 					a.configListCursor = 0
 				case "scalar":
-					a.configScalarFields = buildScalarFields(sec.Name, a.sessionRecipe)
+					a.configScalarFields = buildScalarFields(sec.Name, sessRec)
 					a.configScalarCursor = 0
 					a.configEditBuf = ""
 				case "text":
 					var content string
 					switch sec.Name {
 					case "system-prompt":
-						content = a.sessionRecipe.SystemPrompt
+						content = sessRec.SystemPrompt
 					case "context-summarization":
-						content = a.sessionRecipe.SummarizationPrompt
+						content = sessRec.SummarizationPrompt
 					}
 					a.configTextArea.SetValue(content)
 					a.configTextArea.Focus()
@@ -712,10 +697,7 @@ func helpText() string {
 // ── save/load/export handlers ────────────────────────────────────────────────
 
 func (a App) handleSaveCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	rec := a.sessionRecipe
-	if rec == nil {
-		rec = a.recipe
-	}
+	rec := a.store.ActiveRecipe()
 	if rec == nil {
 		return a.withMessage("No recipe to save.")
 	}
@@ -744,8 +726,8 @@ func (a App) handleLoadCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocr
 		return a.withMessage(fmt.Sprintf("Load failed: %v", err))
 	}
 
-	a.sessionRecipe = cloneRecipe(rec)
-	a.recipeModified = true
+	a.store.SetSessionRecipe(cloneRecipe(rec))
+	a.store.SetRecipeModified(true)
 	a.applySessionRecipe()
 
 	name := rec.Name

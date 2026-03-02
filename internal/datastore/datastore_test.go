@@ -368,7 +368,7 @@ func TestPersistRunState_UpdatesMetadata(t *testing.T) {
 	before := time.Now().Truncate(time.Second)
 
 	responses := []models.ModelResponse{{ModelID: "m1", Text: "done"}}
-	s.PersistRunState("fix bug", responses, nil)
+	s.PersistRunState("fix bug", responses)
 
 	meta := s.SessionMeta()
 	assert.Equal(t, 1, meta.PromptCount)
@@ -380,8 +380,8 @@ func TestPersistRunState_UpdatesMetadata(t *testing.T) {
 func TestPersistRunState_SecondCallPreservesFirst(t *testing.T) {
 	s := tempStoreWithSession(t)
 
-	s.PersistRunState("first prompt", []models.ModelResponse{{ModelID: "m1", Text: "r1"}}, nil)
-	s.PersistRunState("second prompt", []models.ModelResponse{{ModelID: "m1", Text: "r2"}}, nil)
+	s.PersistRunState("first prompt", []models.ModelResponse{{ModelID: "m1", Text: "r1"}})
+	s.PersistRunState("second prompt", []models.ModelResponse{{ModelID: "m1", Text: "r2"}})
 
 	meta := s.SessionMeta()
 	assert.Equal(t, 2, meta.PromptCount)
@@ -391,7 +391,7 @@ func TestPersistRunState_SecondCallPreservesFirst(t *testing.T) {
 
 func TestPersistRunState_MetaSavedToDisk(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.PersistRunState("disk test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil)
+	s.PersistRunState("disk test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
 
 	loaded, err := session.LoadMeta(s.SessionMetaPath())
 	require.NoError(t, err)
@@ -402,7 +402,7 @@ func TestPersistRunState_MetaSavedToDisk(t *testing.T) {
 
 func TestPersistRunState_FeedSavedToDisk(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.PersistRunState("feed test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil)
+	s.PersistRunState("feed test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
 
 	entries, err := session.LoadFeed(s.FeedPath())
 	require.NoError(t, err)
@@ -413,8 +413,8 @@ func TestPersistRunState_FeedSavedToDisk(t *testing.T) {
 func TestPersistRunState_FeedAccumulates(t *testing.T) {
 	s := tempStoreWithSession(t)
 
-	s.PersistRunState("prompt 1", []models.ModelResponse{{ModelID: "m1", Text: "r1"}}, nil)
-	s.PersistRunState("prompt 2", []models.ModelResponse{{ModelID: "m1", Text: "r2"}}, nil)
+	s.PersistRunState("prompt 1", []models.ModelResponse{{ModelID: "m1", Text: "r1"}})
+	s.PersistRunState("prompt 2", []models.ModelResponse{{ModelID: "m1", Text: "r2"}})
 
 	assert.Len(t, s.SessionFeed(), 2)
 
@@ -425,7 +425,7 @@ func TestPersistRunState_FeedAccumulates(t *testing.T) {
 
 func TestPersistRunState_LongPromptTruncated(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.PersistRunState(strings.Repeat("x", 200), []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil)
+	s.PersistRunState(strings.Repeat("x", 200), []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
 
 	meta := s.SessionMeta()
 	assert.LessOrEqual(t, len([]rune(meta.FirstPrompt)), 120)
@@ -436,8 +436,8 @@ func TestPersistRunState_LongPromptTruncated(t *testing.T) {
 
 func TestPersistRunState_RecipeWrittenToDisk(t *testing.T) {
 	s := tempStoreWithSession(t)
-	rec := &recipe.Recipe{Name: "session-recipe"}
-	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, rec)
+	s.SetSessionRecipe(&recipe.Recipe{Name: "session-recipe"})
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
 
 	data, err := os.ReadFile(s.SessionRecipePath())
 	require.NoError(t, err)
@@ -446,7 +446,7 @@ func TestPersistRunState_RecipeWrittenToDisk(t *testing.T) {
 
 func TestPersistRunState_NilRecipeNoFile(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil)
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
 
 	_, err := os.Stat(s.SessionRecipePath())
 	assert.True(t, os.IsNotExist(err))

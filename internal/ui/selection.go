@@ -33,11 +33,6 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 	}
 
 	if len(msg.Text) > 0 {
-		activeRec := a.sessionRecipe
-		if activeRec == nil {
-			activeRec = a.recipe
-		}
-
 		switch strings.ToLower(msg.Text) {
 		case "y":
 			// Find the single OK response and record it as the winner.
@@ -48,7 +43,6 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 						SelectedModelID: resp.ModelID,
 						Responses:       a.responses,
 						Rating:          "good",
-						ActiveRecipe:    activeRec,
 					})
 					setNote(fmt.Sprintf("Rated good: %s", resp.ModelID))
 					break
@@ -66,7 +60,6 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 						SelectedModelID: resp.ModelID,
 						Responses:       a.responses,
 						Rating:          "bad",
-						ActiveRecipe:    activeRec,
 					})
 					setNote(fmt.Sprintf("Rated bad: %s", resp.ModelID))
 					break
@@ -183,16 +176,11 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 		}
 	}
 
-	activeRec := a.sessionRecipe
-	if activeRec == nil {
-		activeRec = a.recipe
-	}
 	a.store.RecordSelection(datastore.SelectionParams{
 		Prompt:          a.lastPrompt,
 		SelectedModelID: selected.ModelID,
 		Responses:       a.responses,
 		AppliedFiles:    appliedPaths,
-		ActiveRecipe:    activeRec,
 	})
 
 	a.responses = nil

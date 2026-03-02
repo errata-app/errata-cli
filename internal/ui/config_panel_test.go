@@ -492,7 +492,7 @@ func TestHandleConfigCommand_OpensOverlay(t *testing.T) {
 	result, _ := a.handleConfigCommand("")
 	app := result.(App)
 	assert.True(t, app.configOverlayActive)
-	assert.NotNil(t, app.sessionRecipe)
+	assert.NotNil(t, app.store.SessionRecipe())
 	require.Len(t, app.configSections, len(interactiveSections))
 	assert.Equal(t, -1, app.configExpandedIdx)
 }
@@ -519,12 +519,12 @@ func TestHandleConfigCommand_JumpsToSection(t *testing.T) {
 func TestHandleConfigCommand_Reset(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}}
 	a := newAppForTest(t, ads)
-	a.sessionRecipe = cloneRecipe(a.recipe)
-	a.recipeModified = true
+	a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
+	a.store.SetRecipeModified(true)
 	result, _ := a.handleConfigCommand("reset")
 	app := result.(App)
 	assert.False(t, app.configOverlayActive)
-	assert.False(t, app.recipeModified)
+	assert.False(t, app.store.RecipeModified())
 }
 
 // ── /config overlay key navigation ──────────────────────────────────────────
@@ -570,14 +570,14 @@ func TestTryArgComplete_ConfigSection(t *testing.T) {
 
 func TestModifiedBadge_ShownWhenModified(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.recipeModified = true
+	a.store.SetRecipeModified(true)
 	view := a.View().Content
 	assert.Contains(t, view, "[modified]")
 }
 
 func TestModifiedBadge_HiddenWhenClean(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.recipeModified = false
+	a.store.SetRecipeModified(false)
 	view := a.View().Content
 	assert.NotContains(t, view, "[modified]")
 }
@@ -652,9 +652,9 @@ func TestSectionDescriptions_ExpandedViewShowsDetail(t *testing.T) {
 
 func TestHandleConfigTextKey_CtrlSSavesSystemPrompt(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionRecipe = cloneRecipe(a.recipe)
+	a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
 	a.configOverlayActive = true
-	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 	// Expand system-prompt (index 1).
 	a.configExpandedIdx = 1
 	a.configTextEditing = true
@@ -662,17 +662,17 @@ func TestHandleConfigTextKey_CtrlSSavesSystemPrompt(t *testing.T) {
 
 	result, _ := a.handleConfigTextKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	app := result.(App)
-	assert.Equal(t, "New system prompt content", app.sessionRecipe.SystemPrompt)
-	assert.True(t, app.recipeModified)
+	assert.Equal(t, "New system prompt content", app.store.SessionRecipe().SystemPrompt)
+	assert.True(t, app.store.RecipeModified())
 	assert.False(t, app.configTextEditing)
 	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after save")
 }
 
 func TestHandleConfigTextKey_EscapeCancelsEditing(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionRecipe = cloneRecipe(a.recipe)
+	a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
 	a.configOverlayActive = true
-	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 	a.configExpandedIdx = 1
 	a.configTextEditing = true
 	a.configTextArea.SetValue("Unsaved content")
@@ -681,15 +681,15 @@ func TestHandleConfigTextKey_EscapeCancelsEditing(t *testing.T) {
 	app := result.(App)
 	assert.False(t, app.configTextEditing)
 	// Original prompt should be unchanged.
-	assert.Equal(t, a.sessionRecipe.SystemPrompt, app.sessionRecipe.SystemPrompt)
+	assert.Equal(t, a.store.SessionRecipe().SystemPrompt, app.store.SessionRecipe().SystemPrompt)
 	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after cancel")
 }
 
 func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.sessionRecipe = cloneRecipe(a.recipe)
+	a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
 	a.configOverlayActive = true
-	a.configSections = buildConfigSections(a.sessionRecipe, a.adapters, a.disabledTools)
+	a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 	// Find context-summarization section dynamically (index varies with SubagentEnabled).
 	csIdx := -1
 	for i, sec := range a.configSections {
@@ -705,8 +705,8 @@ func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
 
 	result, _ := a.handleConfigTextKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	app := result.(App)
-	assert.Equal(t, "Custom summarization prompt", app.sessionRecipe.SummarizationPrompt)
-	assert.True(t, app.recipeModified)
+	assert.Equal(t, "Custom summarization prompt", app.store.SessionRecipe().SummarizationPrompt)
+	assert.True(t, app.store.RecipeModified())
 	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after save")
 }
 

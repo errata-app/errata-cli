@@ -262,11 +262,12 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		PrefPath:       cfg.PreferencesPath,
 		Meta:           meta,
 		RecipeStore:    recipestore.New("data/configs.json"),
+		Recipe:         rec,
 	})
 	if err != nil {
 		return fmt.Errorf("datastore init: %w", err)
 	}
-	err = ui.Run(ads, cfg, warnings, mcpDefs, mcpDispatchers, rec, resuming, availableModels, debugLogPath != "", store)
+	err = ui.Run(ads, cfg, warnings, mcpDefs, mcpDispatchers, resuming, availableModels, debugLogPath != "", store)
 	fmt.Fprintf(os.Stderr, "To continue this session: errata --resume %s\n", sessionID)
 	return err
 }

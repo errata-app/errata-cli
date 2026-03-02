@@ -69,6 +69,11 @@ type Store struct {
 	costPerModel map[string]float64
 	totalCost    float64
 
+	// Recipe state.
+	baseRecipe     *recipe.Recipe // immutable base recipe from startup
+	sessionRecipe  *recipe.Recipe // working copy; nil until first /config or /load
+	recipeModified bool           // true when sessionRecipe differs from baseRecipe
+
 	// Recipe store for content-addressed config snapshots.
 	recipeStore *recipestore.Store
 
@@ -86,6 +91,7 @@ type Options struct {
 	PrefPath       string
 	Meta           session.Meta
 	RecipeStore    *recipestore.Store
+	Recipe         *recipe.Recipe // base recipe loaded at startup
 }
 
 // New creates a Store, loading existing data from disk.
@@ -114,6 +120,7 @@ func New(opts Options) (*Store, error) {
 		prefPath:          opts.PrefPath,
 		sessionMeta:       opts.Meta,
 		costPerModel:      make(map[string]float64),
+		baseRecipe:        opts.Recipe,
 		recipeStore:       opts.RecipeStore,
 	}, nil
 }
@@ -221,7 +228,8 @@ func (s *Store) SaveInitialMeta() {
 
 // PersistRunState updates session metadata, appends a feed entry, and persists
 // the session recipe. Called from the run-complete handler.
-func (s *Store) PersistRunState(lastPrompt string, responses []models.ModelResponse, rec *recipe.Recipe) {
+func (s *Store) PersistRunState(lastPrompt string, responses []models.ModelResponse) {
+	rec := s.ActiveRecipe()
 	now := time.Now()
 	s.sessionMeta.LastActiveAt = now
 	s.sessionMeta.PromptCount++
@@ -409,6 +417,31 @@ func (s *Store) RewindStackLen() int { return len(s.rewindStack) }
 // RecipeStore returns the recipe store (for /stats filter).
 func (s *Store) RecipeStore() *recipestore.Store { return s.recipeStore }
 
+// ── Recipe State ────────────────────────────────────────────────────────────
+
+// BaseRecipe returns the immutable base recipe from startup.
+func (s *Store) BaseRecipe() *recipe.Recipe { return s.baseRecipe }
+
+// SessionRecipe returns the working copy of the recipe (nil if unmodified).
+func (s *Store) SessionRecipe() *recipe.Recipe { return s.sessionRecipe }
+
+// SetSessionRecipe sets the working copy of the recipe.
+func (s *Store) SetSessionRecipe(r *recipe.Recipe) { s.sessionRecipe = r }
+
+// ActiveRecipe returns the session recipe if set, otherwise the base recipe.
+func (s *Store) ActiveRecipe() *recipe.Recipe {
+	if s.sessionRecipe != nil {
+		return s.sessionRecipe
+	}
+	return s.baseRecipe
+}
+
+// RecipeModified returns whether the session recipe has been modified.
+func (s *Store) RecipeModified() bool { return s.recipeModified }
+
+// SetRecipeModified sets the recipe modified flag.
+func (s *Store) SetRecipeModified(v bool) { s.recipeModified = v }
+
 // ── Report Tracking ─────────────────────────────────────────────────────────
 
 // SetLastReportInfo records the saved report path and active tool names
@@ -438,10 +471,10 @@ func (s *Store) ClearLastReport() { s.lastReportPath = "" }
 
 // ── Recipe Snapshot ─────────────────────────────────────────────────────────
 
-// BuildRecipeSnapshot creates a RecipeSnapshot from a recipe and the last
-// active tools. The recipe parameter should be the active recipe (session
-// recipe if set, otherwise base recipe).
-func (s *Store) BuildRecipeSnapshot(rec *recipe.Recipe) *recipestore.RecipeSnapshot {
+// BuildRecipeSnapshot creates a RecipeSnapshot from the active recipe and
+// the last active tools.
+func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
+	rec := s.ActiveRecipe()
 	snap := &recipestore.RecipeSnapshot{Name: "default"}
 	if rec != nil {
 		snap.Name = rec.Name
@@ -472,13 +505,13 @@ func (s *Store) BuildRecipeSnapshot(rec *recipe.Recipe) *recipestore.RecipeSnaps
 	return snap
 }
 
-// RecipeHash computes a content-addressed hash for the recipe snapshot.
+// RecipeHash computes a content-addressed hash for the active recipe snapshot.
 // Returns "" if no recipe store is configured.
-func (s *Store) RecipeHash(rec *recipe.Recipe) string {
+func (s *Store) RecipeHash() string {
 	if s.recipeStore == nil {
 		return ""
 	}
-	snap := s.BuildRecipeSnapshot(rec)
+	snap := s.BuildRecipeSnapshot()
 	return s.recipeStore.Put(snap)
 }
 
@@ -491,13 +524,12 @@ type SelectionParams struct {
 	Responses       []models.ModelResponse
 	AppliedFiles    []string // nil for text-only votes / ratings
 	Rating          string   // "" for selection, "good" or "bad" for rating
-	ActiveRecipe    *recipe.Recipe
 }
 
 // RecordSelection records a preference entry and updates the output report
 // with the selection outcome.
 func (s *Store) RecordSelection(p SelectionParams) {
-	hash := s.RecipeHash(p.ActiveRecipe)
+	hash := s.RecipeHash()
 
 	if p.Rating == "bad" {
 		if err := preferences.RecordBad(s.prefPath, p.Prompt, p.SelectedModelID, hash, s.sessionID, p.Responses); err != nil {

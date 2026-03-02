@@ -19,7 +19,6 @@ import (
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/datastore"
 	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/reminders"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/session"
@@ -148,9 +147,6 @@ type App struct {
 	// providers (fetched at startup). Used by @mention autocomplete.
 	availableModels []string
 
-	// recipe holds the full recipe configuration; used for output reports.
-	recipe *recipe.Recipe
-
 	// reminderState tracks conditional mid-conversation injection state.
 	// nil when no reminders are configured in the recipe.
 	reminderState *reminders.State
@@ -172,14 +168,12 @@ type App struct {
 	configScalarFields  []scalarField
 	configScalarCursor  int
 	configEditBuf       string
-	configTextArea      textarea.Model // textarea for text section editing
-	configTextEditing   bool           // true when textarea is active in a text section
-	sessionRecipe       *recipe.Recipe // working copy; nil until first /config or /set
-	recipeModified      bool
+	configTextArea    textarea.Model // textarea for text section editing
+	configTextEditing bool           // true when textarea is active in a text section
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, availableModels []string, debugLog bool, store *datastore.Store) *App {
+func New(adapters []models.ModelAdapter, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, availableModels []string, debugLog bool, store *datastore.Store) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -216,8 +210,7 @@ func New(adapters []models.ModelAdapter, cfg config.Config, mcpDefs []tools.Tool
 		debugLog:       debugLog,
 		store:          store,
 	}
-	app.recipe = rec
-	if rec != nil {
+	if rec := store.BaseRecipe(); rec != nil {
 		if rec.Tools != nil {
 			app.toolAllowlist = rec.Tools.Allowlist
 			app.bashPrefixes = rec.Tools.BashPrefixes
@@ -475,11 +468,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		preHistLengths := a.store.AppendHistories(panelIDs, msg.responses, a.lastPrompt)
 
 		// Persist session metadata and feed.
-		activeRecipe := a.sessionRecipe
-		if activeRecipe == nil {
-			activeRecipe = a.recipe
-		}
-		a.store.PersistRunState(a.lastPrompt, msg.responses, activeRecipe)
+		a.store.PersistRunState(a.lastPrompt, msg.responses)
 
 		// Push rewind entry (fileSnapshots populated later by applySelection if writes happen).
 		a.store.PushRewindEntry(datastore.RewindEntry{
@@ -618,7 +607,7 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 			overlayHeight := max(a.height-1, 5)
 			sb.WriteString(renderConfigOverlay(
 				a.configSections, a.configSelectedIdx, a.configExpandedIdx,
-				a.recipeModified, a.width, overlayHeight,
+				a.store.RecipeModified(), a.width, overlayHeight,
 				a.configListItems, a.configListCursor, a.configListOffset,
 				a.configScalarFields, a.configScalarCursor,
 				a.configEditBuf,
@@ -628,7 +617,7 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 			v.AltScreen = true
 			return v
 		}
-		if a.recipeModified {
+		if a.store.RecipeModified() {
 			modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
 			sb.WriteString(modStyle.Render("  [modified]"))
 			sb.WriteByte('\n')
@@ -714,8 +703,8 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, resuming bool, availableModels []string, debugLog bool, store *datastore.Store) error {
-	app := New(adapters, cfg, mcpDefs, mcpDispatchers, rec, availableModels, debugLog, store)
+func Run(adapters []models.ModelAdapter, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, resuming bool, availableModels []string, debugLog bool, store *datastore.Store) error {
+	app := New(adapters, cfg, mcpDefs, mcpDispatchers, availableModels, debugLog, store)
 
 	p := tea.NewProgram(app)
 	app.SetProgram(p)
