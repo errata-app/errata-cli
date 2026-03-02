@@ -18,11 +18,10 @@ import (
 	"github.com/rivo/uniseg"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/datastore"
 	"github.com/suarezc/errata/internal/recipestore"
-	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
-	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/reminders"
 	"github.com/suarezc/errata/internal/runner"
@@ -136,15 +135,12 @@ type App struct {
 	selectionErr string
 	lastPrompt   string
 
-	// per-model conversation history; keyed by adapter ID
-	conversationHistories map[string][]models.ConversationTurn
-	histPath              string
+	// store owns conversation histories and prompt history (persisted on mutation).
+	store *datastore.Store
 
-	// prompt history (Up-arrow cycling and Ctrl-R search)
-	promptHistory   []string // newest-first; loaded from disk + this session
-	historyIdx      int      // -1 = not navigating; 0..N-1 = position in promptHistory
-	historyInputBuf string   // typed text saved when navigation starts
-	promptHistPath  string
+	// prompt history navigation state (UI-only; the actual data lives in store)
+	historyIdx      int    // -1 = not navigating; 0..N-1 = position in store.PromptHistory()
+	historyInputBuf string // typed text saved when navigation starts
 
 	// ctrl-r reverse search
 	searchActive    bool
@@ -216,7 +212,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, availableModels []string, cs *recipestore.Store, debugLog bool) *App {
+func New(adapters []models.ModelAdapter, prefPath, sessionID string, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, availableModels []string, cs *recipestore.Store, debugLog bool, store *datastore.Store) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -232,16 +228,6 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 		ta.KeyMap.InsertNewline.Keys(), "shift+enter", "alt+enter",
 	)...)
 
-	h, err := history.Load(sp.HistoryPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load history: %v\n", err)
-	}
-
-	ph, err := prompthistory.Load(promptHistPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load prompt history: %v\n", err)
-	}
-
 	cta := textarea.New()
 	cta.Placeholder = "Enter text…"
 	cta.SetHeight(8)
@@ -250,30 +236,27 @@ func New(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID str
 	cta.ShowLineNumbers = false
 
 	app := &App{
-		adapters:              adapters,
-		prefPath:              prefPath,
-		histPath:              sp.HistoryPath,
-		promptHistPath:        promptHistPath,
-		promptHistory:         ph,
-		historyIdx:            -1,
-		sessionID:             sessionID,
-		input:                 ta,
-		configTextArea:        cta,
-		panelIdx:              make(map[string]int),
-		conversationHistories: h,
-		sessionCostPerModel:   make(map[string]float64),
-		cfg:                   cfg,
-		recipeStore:           cs,
-		mcpDefs:               mcpDefs,
-		mcpDispatchers:        mcpDispatchers,
-		availableModels:       availableModels,
-		seed:                  cfg.Seed,
-		debugLog:              debugLog,
-		checkpointPath:        sp.CheckpointPath,
-		feedPath:              sp.FeedPath,
-		sessionMetaPath:       sp.MetaPath,
-		sessionRecipePath:     sp.RecipePath,
-		sessionMeta:           meta,
+		adapters:            adapters,
+		prefPath:            prefPath,
+		historyIdx:          -1,
+		sessionID:           sessionID,
+		input:               ta,
+		configTextArea:      cta,
+		panelIdx:            make(map[string]int),
+		sessionCostPerModel: make(map[string]float64),
+		cfg:                 cfg,
+		recipeStore:         cs,
+		mcpDefs:             mcpDefs,
+		mcpDispatchers:      mcpDispatchers,
+		availableModels:     availableModels,
+		seed:                cfg.Seed,
+		debugLog:            debugLog,
+		checkpointPath:      sp.CheckpointPath,
+		feedPath:            sp.FeedPath,
+		sessionMetaPath:     sp.MetaPath,
+		sessionRecipePath:   sp.RecipePath,
+		sessionMeta:         meta,
+		store:               store,
 	}
 	app.recipe = rec
 	if rec != nil {
@@ -491,11 +474,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case compactCompleteMsg:
-		a.conversationHistories = msg.histories
+		a.store.SetHistories(msg.histories)
 		a.rewindStack = nil // compaction invalidates stored history lengths
-		if err := history.Save(a.histPath, a.conversationHistories); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
-		}
 		return a.withMessage("History compacted.")
 
 	case runCompleteMsg:
@@ -531,19 +511,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			panelIDs[i] = p.modelID
 		}
 		if msg.compactedHistories != nil {
-			a.conversationHistories = msg.compactedHistories
+			a.store.SetHistories(msg.compactedHistories)
 		}
 
-		// Capture pre-history lengths for rewind before AppendHistory mutates them.
-		preHistLengths := make(map[string]int, len(panelIDs))
-		for _, id := range panelIDs {
-			preHistLengths[id] = len(a.conversationHistories[id])
-		}
-
-		a.conversationHistories = runner.AppendHistory(a.conversationHistories, panelIDs, msg.responses, a.lastPrompt)
-		if err := history.Save(a.histPath, a.conversationHistories); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
-		}
+		// Append histories (captures pre-lengths internally for rewind).
+		preHistLengths := a.store.AppendHistories(panelIDs, msg.responses, a.lastPrompt)
 
 		// Persist session metadata and feed.
 		a.persistSessionState(msg.responses)
@@ -748,26 +720,6 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 					}
 					hw.flush()
 
-				case strings.HasPrefix(lower, "/export "):
-					partial := lastWord(val[len("/export "):])
-					lp := strings.ToLower(partial)
-					for _, sub := range []string{"recipe", "output"} {
-						if strings.HasPrefix(sub, lp) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render("  " + sub))
-						}
-					}
-
-				case strings.HasPrefix(lower, "/import "):
-					partial := lastWord(val[len("/import "):])
-					lp := strings.ToLower(partial)
-					for _, sub := range []string{"recipe"} {
-						if strings.HasPrefix(sub, lp) {
-							sb.WriteByte('\n')
-							sb.WriteString(nameStyle.Render("  " + sub))
-						}
-					}
-
 				default:
 					prefix := strings.ToLower(strings.SplitN(val, " ", 2)[0])
 					hw := newHintWriter(&sb, descStyle)
@@ -801,8 +753,8 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, prefPath, promptHistPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string, cs *recipestore.Store, debugLog bool) error {
-	app := New(adapters, prefPath, promptHistPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels, cs, debugLog)
+func Run(adapters []models.ModelAdapter, prefPath, sessionID string, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, rec *recipe.Recipe, sp session.Paths, meta session.Meta, resuming bool, availableModels []string, cs *recipestore.Store, debugLog bool, store *datastore.Store) error {
+	app := New(adapters, prefPath, sessionID, cfg, mcpDefs, mcpDispatchers, rec, sp, meta, availableModels, cs, debugLog, store)
 
 	p := tea.NewProgram(app)
 	app.SetProgram(p)

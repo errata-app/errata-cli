@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -14,13 +15,11 @@ import (
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/checkpoint"
 	"github.com/suarezc/errata/internal/commands"
-	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/prompt"
-	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
 	"github.com/suarezc/errata/internal/session"
@@ -35,11 +34,14 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 	if lower == "/config" || strings.HasPrefix(lower, "/config ") {
 		return a.handleConfigCommand(strings.TrimSpace(trimmed[len("/config"):]))
 	}
+	if lower == "/save" || strings.HasPrefix(lower, "/save ") {
+		return a.handleSaveCommand(strings.TrimSpace(trimmed[len("/save"):]))
+	}
+	if lower == "/load" || strings.HasPrefix(lower, "/load ") {
+		return a.handleLoadCommand(strings.TrimSpace(trimmed[len("/load"):]))
+	}
 	if lower == "/export" || strings.HasPrefix(lower, "/export ") {
 		return a.handleExportCommand(strings.TrimSpace(trimmed[len("/export"):]))
-	}
-	if lower == "/import" || strings.HasPrefix(lower, "/import ") {
-		return a.handleImportCommand(strings.TrimSpace(trimmed[len("/import"):]))
 	}
 	switch lower {
 	case "/exit", "/quit":
@@ -115,10 +117,7 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubblet
 	a.rewindStack = nil
 	a.pastedText = ""
 	a.pastedLineCount = 0
-	a.conversationHistories = nil
-	if err := history.Clear(a.histPath); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
-	}
+	a.store.ClearHistories()
 	return a, nil
 }
 
@@ -127,7 +126,7 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	if a.activeAdapters != nil {
 		toCompact = a.activeAdapters
 	}
-	histories := a.conversationHistories
+	histories := a.store.Histories()
 	prog := a.prog
 	compactRecipe := a.recipe
 	if a.sessionRecipe != nil {
@@ -240,12 +239,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	// Record in prompt history (deduplicate consecutive identical entries).
 	a.historyIdx = -1
 	a.historyInputBuf = ""
-	if len(a.promptHistory) == 0 || a.promptHistory[0] != trimmed {
-		a.promptHistory = append([]string{trimmed}, a.promptHistory...)
-		if err := prompthistory.Append(a.promptHistPath, trimmed); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save prompt history: %v\n", err)
-		}
-	}
+	a.store.RecordPrompt(trimmed)
 
 	a.lastPrompt = trimmed
 	a.mode = modeRunning
@@ -253,7 +247,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	a.panelIdx = make(map[string]int)
 	for i, ad := range toRun {
 		ps := newPanelState(ad.ID(), i)
-		ps.histTokens = runner.EstimateHistoryTokens(a.conversationHistories[ad.ID()])
+		ps.histTokens = runner.EstimateHistoryTokens(a.store.Histories()[ad.ID()])
 		a.panels = append(a.panels, ps)
 		a.panelIdx[ad.ID()] = i
 	}
@@ -273,7 +267,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	ads := toRun
 	verbose := a.verbose
 	prog := a.prog
-	histories := a.conversationHistories // read-only in goroutine; written only by main loop
+	histories := a.store.Histories() // read-only in goroutine; written only by main loop
 	activeDefs := tools.DefinitionsAllowed(a.toolAllowlist, a.disabledTools)
 	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
 	// Apply sandbox restrictions from recipe.
@@ -473,18 +467,7 @@ func (a App) handleRewindCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 	}
 
 	// Truncate conversation histories to pre-run lengths.
-	for adapterID, prevLen := range entry.historyLengths {
-		h := a.conversationHistories[adapterID]
-		if prevLen < len(h) {
-			a.conversationHistories[adapterID] = h[:prevLen]
-		}
-		if len(a.conversationHistories[adapterID]) == 0 {
-			delete(a.conversationHistories, adapterID)
-		}
-	}
-	if err := history.Save(a.histPath, a.conversationHistories); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
-	}
+	a.store.TruncateHistories(entry.historyLengths)
 
 	// Record rewind marker in preferences.
 	if err := preferences.RecordRewind(a.prefPath, entry.prompt, a.sessionID); err != nil {
@@ -532,7 +515,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	for j, ad := range rerunAdapters {
 		idx := len(completedResponses) + j
 		ps := newPanelState(ad.ID(), idx)
-		ps.histTokens = runner.EstimateHistoryTokens(a.conversationHistories[ad.ID()])
+		ps.histTokens = runner.EstimateHistoryTokens(a.store.Histories()[ad.ID()])
 		a.panels = append(a.panels, ps)
 		a.panelIdx[ad.ID()] = idx
 	}
@@ -549,7 +532,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 
 	ads := rerunAdapters
 	prog := a.prog
-	histories := a.conversationHistories
+	histories := a.store.Histories()
 	activeDefs := tools.DefinitionsAllowed(a.toolAllowlist, a.disabledTools)
 	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
 	if a.sandboxFilesystem == "read_only" {
@@ -752,79 +735,39 @@ func helpText() string {
 	return sb.String()
 }
 
-// ── export/import handlers ──────────────────────────────────────────────────
+// ── save/load/export handlers ────────────────────────────────────────────────
 
-func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	parts := strings.SplitN(args, " ", 2)
-	sub := strings.ToLower(parts[0])
-
-	switch sub {
-	case "recipe":
-		return a.handleExportRecipe(parts)
-	case "output":
-		return a.handleExportOutput(parts)
-	default:
-		return a.withMessage("Usage: /export recipe [path] | /export output [path]")
-	}
-}
-
-func (a App) handleExportRecipe(parts []string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+func (a App) handleSaveCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	rec := a.sessionRecipe
 	if rec == nil {
 		rec = a.recipe
 	}
 	if rec == nil {
-		return a.withMessage("No recipe to export.")
+		return a.withMessage("No recipe to save.")
 	}
 
-	path := "recipe_export.md"
-	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
-		path = strings.TrimSpace(parts[1])
+	var path string
+	if args != "" {
+		path = args
+	} else {
+		path = nextAvailablePath("recipe.md")
 	}
 
 	md := rec.MarshalMarkdown()
 	if err := os.WriteFile(path, []byte(md), 0o600); err != nil {
-		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
+		return a.withMessage(fmt.Sprintf("Save failed: %v", err))
 	}
-	return a.withMessage(fmt.Sprintf("Recipe exported to %s", path))
+	return a.withMessage(fmt.Sprintf("Recipe saved to %s", path))
 }
 
-func (a App) handleExportOutput(parts []string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if a.lastReport == nil {
-		return a.withMessage("No run output to export. Run a prompt first.")
+func (a App) handleLoadCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if args == "" {
+		return a.withMessage("Usage: /load <path>")
 	}
 
-	dir := output.DefaultDir
-	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
-		dir = strings.TrimSpace(parts[1])
-	}
-
-	path, err := output.Save(dir, a.lastReport)
+	rec, err := recipe.Parse(args)
 	if err != nil {
-		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
-	}
-	return a.withMessage(fmt.Sprintf("Output exported to %s", path))
-}
-
-func (a App) handleImportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	parts := strings.SplitN(args, " ", 2)
-	sub := strings.ToLower(parts[0])
-
-	switch sub {
-	case "recipe":
-		if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-			return a.withMessage("Usage: /import recipe <path>")
-		}
-		return a.handleImportRecipe(strings.TrimSpace(parts[1]))
-	default:
-		return a.withMessage("Usage: /import recipe <path>")
-	}
-}
-
-func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	rec, err := recipe.Parse(path)
-	if err != nil {
-		return a.withMessage(fmt.Sprintf("Import failed: %v", err))
+		return a.withMessage(fmt.Sprintf("Load failed: %v", err))
 	}
 
 	a.sessionRecipe = cloneRecipe(rec)
@@ -833,9 +776,9 @@ func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:goc
 
 	name := rec.Name
 	if name == "" {
-		name = path
+		name = args
 	}
-	return a.withMessage(fmt.Sprintf("Imported recipe %q (%d models, %d tools)",
+	return a.withMessage(fmt.Sprintf("Loaded recipe %q (%d models, %d tools)",
 		name,
 		len(rec.Models),
 		func() int {
@@ -845,4 +788,43 @@ func (a App) handleImportRecipe(path string) (tea.Model, tea.Cmd) { //nolint:goc
 			return len(rec.Tools.Allowlist)
 		}(),
 	))
+}
+
+func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if a.lastReport == nil {
+		return a.withMessage("No run output to export. Run a prompt first.")
+	}
+
+	dir := output.DefaultDir
+	if args != "" {
+		dir = args
+	}
+
+	path, err := output.Save(dir, a.lastReport)
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
+	}
+	return a.withMessage(fmt.Sprintf("Output exported to %s", path))
+}
+
+// maxSaveSuffix is the highest numeric suffix nextAvailablePath will try
+// before giving up and falling back to overwriting the base path.
+const maxSaveSuffix = 100
+
+// nextAvailablePath returns base if it doesn't exist, otherwise tries
+// base_1.ext, base_2.ext, … up to maxSaveSuffix. Falls back to base if
+// all slots are taken.
+func nextAvailablePath(base string) string {
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		return base
+	}
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 1; i <= maxSaveSuffix; i++ {
+		candidate := fmt.Sprintf("%s_%d%s", stem, i, ext)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+	return base
 }

@@ -175,18 +175,19 @@ func (a App) handlePaste(text string) (tea.Model, tea.Cmd) { //nolint:gocritic /
 
 // historyBack moves one step backward (older) through prompt history.
 func (a App) historyBack() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	if len(a.promptHistory) == 0 {
+	ph := a.store.PromptHistory()
+	if len(ph) == 0 {
 		return a, nil
 	}
 	if a.historyIdx == -1 {
 		a.historyInputBuf = a.input.Value()
 		a.historyIdx = 0
-	} else if a.historyIdx < len(a.promptHistory)-1 {
+	} else if a.historyIdx < len(ph)-1 {
 		a.historyIdx++
 	} else {
 		return a, nil // already at oldest entry
 	}
-	a.input.SetValue(a.promptHistory[a.historyIdx])
+	a.input.SetValue(ph[a.historyIdx])
 	a.input.CursorEnd()
 	a.resizeInput()
 	return a, nil
@@ -205,7 +206,7 @@ func (a App) historyForward() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 		a.historyInputBuf = ""
 	} else {
 		a.historyIdx--
-		a.input.SetValue(a.promptHistory[a.historyIdx])
+		a.input.SetValue(a.store.PromptHistory()[a.historyIdx])
 		a.input.CursorEnd()
 	}
 	a.resizeInput()
@@ -215,12 +216,13 @@ func (a App) historyForward() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 // searchResults returns prompts matching searchQuery, newest-first.
 // An empty query returns the full history.
 func (a App) searchResults() []string { //nolint:gocritic // called from bubbletea value-receiver methods
+	ph := a.store.PromptHistory()
 	if a.searchQuery == "" {
-		return a.promptHistory
+		return ph
 	}
 	q := strings.ToLower(a.searchQuery)
 	var out []string
-	for _, p := range a.promptHistory {
+	for _, p := range ph {
 		if strings.Contains(strings.ToLower(p), q) {
 			out = append(out, p)
 		}

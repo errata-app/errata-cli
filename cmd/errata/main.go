@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/internal/datastore"
 	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/headless"
 	"github.com/suarezc/errata/internal/logging"
@@ -254,7 +255,14 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	}
 
 	cs := recipestore.New("data/configs.json")
-	err := ui.Run(ads, cfg.PreferencesPath, cfg.PromptHistoryPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming, availableModels, cs, debugLogPath != "")
+	store, err := datastore.New(datastore.Options{
+		HistoryPath:    sp.HistoryPath,
+		PromptHistPath: cfg.PromptHistoryPath,
+	})
+	if err != nil {
+		return fmt.Errorf("datastore init: %w", err)
+	}
+	err = ui.Run(ads, cfg.PreferencesPath, sessionID, cfg, warnings, mcpDefs, mcpDispatchers, rec, sp, meta, resuming, availableModels, cs, debugLogPath != "", store)
 	fmt.Fprintf(os.Stderr, "To continue this session: errata --resume %s\n", sessionID)
 	return err
 }
