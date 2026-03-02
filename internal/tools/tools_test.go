@@ -1382,3 +1382,44 @@ func TestSnapshotFiles_PathTraversal(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "outside the working directory")
 }
+
+// ─── Combined recipe flow regression test ───────────────────────────────────
+
+func TestSystemPromptSuffix_CombinedRecipeFlow(t *testing.T) {
+	// Pins the exact composition rules adapters depend on:
+	// 1. Custom guidance replaces default guidance
+	// 2. Extra text is appended after guidance
+	// 3. Clearing restores original behavior
+
+	// Capture original state.
+	original := tools.SystemPromptSuffix(context.Background())
+
+	// Set custom guidance and extra prompt (simulates recipe ## Tool Guidance + ## System Prompt).
+	tools.SetToolGuidance("custom guidance")
+	tools.SetSystemPromptExtra("custom extra")
+	defer func() {
+		tools.SetToolGuidance("")
+		tools.SetSystemPromptExtra("")
+	}()
+
+	combined := tools.SystemPromptSuffix(context.Background())
+
+	// Both must be present.
+	assert.Contains(t, combined, "custom guidance")
+	assert.Contains(t, combined, "custom extra")
+
+	// Guidance must come before extra (guidance is the base, extra is appended).
+	guidanceIdx := strings.Index(combined, "custom guidance")
+	extraIdx := strings.Index(combined, "custom extra")
+	assert.Less(t, guidanceIdx, extraIdx, "guidance should appear before extra in SystemPromptSuffix")
+
+	// Default guidance must be absent (overridden by custom).
+	assert.NotContains(t, combined, "list_directory")
+
+	// Clean up and verify original is restored.
+	tools.SetToolGuidance("")
+	tools.SetSystemPromptExtra("")
+
+	restored := tools.SystemPromptSuffix(context.Background())
+	assert.Equal(t, original, restored)
+}

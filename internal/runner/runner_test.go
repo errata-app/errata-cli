@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -836,6 +837,73 @@ func TestRunAll_CheckpointPreservedOnInterrupt(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, cp, "checkpoint should be preserved when responses are interrupted")
 	assert.Equal(t, "test prompt", cp.Prompt)
+}
+
+// slowAdapter blocks until context is cancelled, simulating a slow model.
+type slowAdapter struct {
+	id string
+}
+
+func (s *slowAdapter) ID() string { return s.id }
+func (s *slowAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
+func (s *slowAdapter) RunAgent(
+	ctx context.Context,
+	history []models.ConversationTurn,
+	prompt string,
+	onEvent func(models.AgentEvent),
+) (models.ModelResponse, error) {
+	<-ctx.Done()
+	return models.ModelResponse{
+		ModelID:     s.id,
+		Interrupted: true,
+		Error:       ctx.Err().Error(),
+	}, ctx.Err()
+}
+
+func TestWithRunOptions_TimeoutEnforcedOnSlowAdapter(t *testing.T) {
+	// Create a slowAdapter that blocks until context cancelled.
+	// Set RunOptions with a very short timeout (200ms).
+	// Assert response has Interrupted or error mentioning deadline/context.
+	slow := &slowAdapter{id: "slow"}
+
+	ctx := runner.WithRunOptions(context.Background(), runner.RunOptions{
+		Timeout: 200 * time.Millisecond,
+	})
+
+	results := runner.RunAll(ctx, []models.ModelAdapter{slow}, nil, "test",
+		func(string, models.AgentEvent) {}, nil, false)
+
+	require.Len(t, results, 1)
+	resp := results[0]
+	// The adapter should have been interrupted by the timeout.
+	assert.True(t, resp.Interrupted || resp.Error != "",
+		"expected interrupted or error, got: interrupted=%v error=%q", resp.Interrupted, resp.Error)
+	if resp.Error != "" {
+		assert.True(t,
+			strings.Contains(resp.Error, "deadline") || strings.Contains(resp.Error, "context"),
+			"error should mention deadline or context: %q", resp.Error)
+	}
+}
+
+func TestWithRunOptions_DefaultsFillZeroFields(t *testing.T) {
+	// Pass RunOptions{} (all zero) with 24 history turns.
+	// Assert adapter receives exactly 20 turns (default MaxHistoryTurns applied).
+	var received []models.ConversationTurn
+	a := &historyCapturingAdapter{id: "m", capture: &received}
+	bigHistory := map[string][]models.ConversationTurn{
+		"m": turns(24), // 24 turns
+	}
+
+	// Zero RunOptions → defaults should be applied (MaxHistoryTurns=20).
+	ctx := runner.WithRunOptions(context.Background(), runner.RunOptions{})
+	runner.RunAll(ctx, []models.ModelAdapter{a}, bigHistory, "p",
+		func(string, models.AgentEvent) {}, nil, false)
+
+	// Default MaxHistoryTurns=20, which is even, so 20 turns should be kept.
+	assert.Len(t, received, 20,
+		"zero RunOptions should default MaxHistoryTurns to 20")
 }
 
 func TestCompactHistories_FallsBackToDefaultSummarizationPrompt(t *testing.T) {

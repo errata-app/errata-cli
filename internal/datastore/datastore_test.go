@@ -718,6 +718,60 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 	assert.True(t, *snap.ModelProfiles["claude"].SystemRole)
 }
 
+func TestBuildRecipeSnapshot_UsesActiveRecipe(t *testing.T) {
+	// Set base recipe with "base prompt", set session recipe with "session prompt".
+	// Assert BuildRecipeSnapshot().SystemPrompt == "session prompt".
+	// Pins that snapshot reads ActiveRecipe (session over base).
+	s := tempStore(t)
+
+	s.baseRecipe = &recipe.Recipe{
+		Version:      1,
+		Name:         "base",
+		SystemPrompt: "base prompt",
+		ToolGuidance: "base guidance",
+	}
+
+	sessionRec := &recipe.Recipe{
+		Version:      1,
+		Name:         "session",
+		SystemPrompt: "session prompt",
+		ToolGuidance: "session guidance",
+	}
+	s.SetSessionRecipe(sessionRec)
+
+	snap := s.BuildRecipeSnapshot()
+	assert.Equal(t, "session prompt", snap.SystemPrompt)
+	assert.Equal(t, "session guidance", snap.ToolGuidance)
+	assert.Equal(t, "session", snap.Name)
+}
+
+func TestBuildRecipeSnapshot_SessionOverride_NoFieldMerge(t *testing.T) {
+	// Base has SystemPrompt + ToolGuidance; session has only SystemPrompt.
+	// Assert snapshot.ToolGuidance is empty (no fallthrough from base).
+	// Prevents accidental merge semantics during refactor.
+	s := tempStore(t)
+
+	s.baseRecipe = &recipe.Recipe{
+		Version:      1,
+		Name:         "base",
+		SystemPrompt: "base prompt",
+		ToolGuidance: "base guidance",
+	}
+
+	sessionRec := &recipe.Recipe{
+		Version:      1,
+		Name:         "session-only-prompt",
+		SystemPrompt: "session prompt",
+		// ToolGuidance intentionally left empty
+	}
+	s.SetSessionRecipe(sessionRec)
+
+	snap := s.BuildRecipeSnapshot()
+	// Session recipe is active, so snapshot reads from session recipe only.
+	assert.Equal(t, "session prompt", snap.SystemPrompt)
+	assert.Empty(t, snap.ToolGuidance, "ToolGuidance should be empty — no fallthrough from base")
+}
+
 func TestBuildRecipeSnapshot_NilOptionalFields(t *testing.T) {
 	s := tempStore(t)
 	s.baseRecipe = &recipe.Recipe{
