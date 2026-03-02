@@ -648,3 +648,93 @@ func TestRewindStackLen(t *testing.T) {
 	s.ClearRewindStack()
 	assert.Equal(t, 0, s.RewindStackLen())
 }
+
+// ── BuildRecipeSnapshot ─────────────────────────────────────────────────────
+
+func TestBuildRecipeSnapshot_DefaultRecipe(t *testing.T) {
+	s := tempStore(t)
+	snap := s.BuildRecipeSnapshot()
+	assert.Equal(t, "default", snap.Name)
+}
+
+func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
+	s := tempStore(t)
+	temp := 0.7
+	sysRole := true
+	s.baseRecipe = &recipe.Recipe{
+		Version:      1,
+		Name:         "test-recipe",
+		SystemPrompt: "be helpful",
+		ToolGuidance: "use tools wisely",
+		Tools:        &recipe.ToolsConfig{Allowlist: []string{"bash"}, BashPrefixes: []string{"go test"}},
+		ToolDescriptions: map[string]string{"bash": "run commands"},
+		ModelParams:      recipe.ModelParamsConfig{Temperature: &temp},
+		Constraints:      recipe.ConstraintsConfig{MaxSteps: 5, Timeout: 3 * time.Minute},
+		Context:          recipe.ContextConfig{MaxHistoryTurns: 10, Strategy: "auto_compact", CompactThreshold: 0.8, TaskMode: "sequential"},
+		SystemReminders:  []recipe.SystemReminderConfig{{Name: "warn", Trigger: "context_usage > 0.75", Content: "heads up"}},
+		OutputProcessing: map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
+		ModelProfiles:    map[string]recipe.ModelProfileConfig{"claude": {ContextBudget: 100000, SystemRole: &sysRole}},
+		SummarizationPrompt: "summarize it",
+	}
+	s.lastActiveTools = []string{"bash", "read_file"}
+
+	snap := s.BuildRecipeSnapshot()
+
+	assert.Equal(t, 1, snap.Version)
+	assert.Equal(t, "test-recipe", snap.Name)
+	assert.Equal(t, "be helpful", snap.SystemPrompt)
+	assert.Equal(t, "use tools wisely", snap.ToolGuidance)
+	assert.Equal(t, []string{"go test"}, snap.BashPrefixes)
+	assert.Equal(t, map[string]string{"bash": "run commands"}, snap.ToolDescriptions)
+	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
+	assert.Equal(t, "summarize it", snap.SummarizationPrompt)
+
+	require.NotNil(t, snap.ModelParams)
+	require.NotNil(t, snap.ModelParams.Temperature)
+	assert.InDelta(t, 0.7, *snap.ModelParams.Temperature, 1e-9)
+
+	require.NotNil(t, snap.Constraints)
+	assert.Equal(t, 5, snap.Constraints.MaxSteps)
+	assert.Equal(t, "3m0s", snap.Constraints.Timeout)
+
+	require.NotNil(t, snap.Context)
+	assert.Equal(t, 10, snap.Context.MaxHistoryTurns)
+	assert.Equal(t, "auto_compact", snap.Context.Strategy)
+	assert.InDelta(t, 0.8, snap.Context.CompactThreshold, 1e-9)
+	assert.Equal(t, "sequential", snap.Context.TaskMode)
+
+	require.Len(t, snap.SystemReminders, 1)
+	assert.Equal(t, "warn", snap.SystemReminders[0].Name)
+	assert.Equal(t, "context_usage > 0.75", snap.SystemReminders[0].Trigger)
+	assert.Equal(t, "heads up", snap.SystemReminders[0].Content)
+
+	require.Contains(t, snap.OutputProcessing, "bash")
+	assert.Equal(t, 50, snap.OutputProcessing["bash"].MaxLines)
+	assert.Equal(t, "tail", snap.OutputProcessing["bash"].Truncation)
+
+	require.Contains(t, snap.ModelProfiles, "claude")
+	assert.Equal(t, 100000, snap.ModelProfiles["claude"].ContextBudget)
+	require.NotNil(t, snap.ModelProfiles["claude"].SystemRole)
+	assert.True(t, *snap.ModelProfiles["claude"].SystemRole)
+}
+
+func TestBuildRecipeSnapshot_NilOptionalFields(t *testing.T) {
+	s := tempStore(t)
+	s.baseRecipe = &recipe.Recipe{
+		Version: 1,
+		Name:    "minimal",
+	}
+
+	snap := s.BuildRecipeSnapshot()
+	assert.Equal(t, "minimal", snap.Name)
+	assert.Nil(t, snap.Constraints)
+	assert.Nil(t, snap.ModelParams)
+	assert.Nil(t, snap.Context)
+	assert.Nil(t, snap.SystemReminders)
+	assert.Nil(t, snap.OutputProcessing)
+	assert.Nil(t, snap.ModelProfiles)
+	assert.Empty(t, snap.ToolGuidance)
+	assert.Nil(t, snap.BashPrefixes)
+	assert.Nil(t, snap.ToolDescriptions)
+	assert.Empty(t, snap.SummarizationPrompt)
+}

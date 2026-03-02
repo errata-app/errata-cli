@@ -17,12 +17,25 @@ import (
 // RecipeSnapshot captures the active recipe/configuration at the time of a
 // preference recording. It mirrors the fields relevant for comparing
 // experimental setups.
+//
+// Name and Version are stored for display and diagnostics but excluded from
+// the content-addressed hash — they are metadata about the recipe, not
+// settings that affect model behavior.
 type RecipeSnapshot struct {
-	Name         string             `json:"name"`
-	SystemPrompt string             `json:"system_prompt,omitempty"`
-	Tools        []string           `json:"tools,omitempty"`
-	Constraints  *ConstraintsConfig `json:"constraints,omitempty"`
-	ModelParams  *ModelParamsConfig `json:"model_params,omitempty"`
+	Version             int                           `json:"version,omitempty"`
+	Name                string                        `json:"name"`
+	SystemPrompt        string                        `json:"system_prompt,omitempty"`
+	ToolGuidance        string                        `json:"tool_guidance,omitempty"`
+	Tools               []string                      `json:"tools,omitempty"`
+	BashPrefixes        []string                      `json:"bash_prefixes,omitempty"`
+	ToolDescriptions    map[string]string             `json:"tool_descriptions,omitempty"`
+	Constraints         *ConstraintsConfig            `json:"constraints,omitempty"`
+	ModelParams         *ModelParamsConfig             `json:"model_params,omitempty"`
+	Context             *ContextConfig                `json:"context,omitempty"`
+	SystemReminders     []SystemReminderConfig        `json:"system_reminders,omitempty"`
+	OutputProcessing    map[string]OutputRuleConfig   `json:"output_processing,omitempty"`
+	SummarizationPrompt string                        `json:"summarization_prompt,omitempty"`
+	ModelProfiles       map[string]ModelProfileConfig `json:"model_profiles,omitempty"`
 }
 
 // ConstraintsConfig captures constraint settings relevant to preference comparison.
@@ -38,13 +51,48 @@ type ModelParamsConfig struct {
 	Seed        *int64   `json:"seed,omitempty"`
 }
 
+// ContextConfig captures conversation history management settings.
+type ContextConfig struct {
+	MaxHistoryTurns  int     `json:"max_history_turns,omitempty"`
+	Strategy         string  `json:"strategy,omitempty"`
+	CompactThreshold float64 `json:"compact_threshold,omitempty"`
+	TaskMode         string  `json:"task_mode,omitempty"`
+}
+
+// SystemReminderConfig captures a conditional mid-conversation injection.
+type SystemReminderConfig struct {
+	Name    string `json:"name"`
+	Trigger string `json:"trigger,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
+// OutputRuleConfig captures deterministic output processing for a tool.
+type OutputRuleConfig struct {
+	MaxLines          int    `json:"max_lines,omitempty"`
+	MaxTokens         int    `json:"max_tokens,omitempty"`
+	Truncation        string `json:"truncation,omitempty"`
+	TruncationMessage string `json:"truncation_message,omitempty"`
+}
+
+// ModelProfileConfig captures capability overrides for a model.
+type ModelProfileConfig struct {
+	ContextBudget  int    `json:"context_budget,omitempty"`
+	ToolFormat     string `json:"tool_format,omitempty"`
+	SystemRole     *bool  `json:"system_role,omitempty"`
+	MidConvoSystem *bool  `json:"mid_convo_system,omitempty"`
+}
+
 // Hash returns the content-addressed key for a RecipeSnapshot.
 // The hash is SHA-256 of the canonical JSON representation, prefixed with "sha256:".
-// Name is included because it is part of the recipe's identity from the user's
-// perspective — distinct recipes should produce distinct hashes even if their
-// settings happen to overlap.
+//
+// Name and Version are excluded — they are metadata about the recipe format,
+// not settings that affect model behavior. Two recipes with identical behavioral
+// fields produce the same hash regardless of name or schema version.
 func Hash(cfg *RecipeSnapshot) string {
-	data, _ := json.Marshal(cfg)
+	hashable := *cfg
+	hashable.Name = ""
+	hashable.Version = 0
+	data, _ := json.Marshal(hashable)
 	h := sha256.Sum256(data)
 	return fmt.Sprintf("sha256:%x", h)
 }
