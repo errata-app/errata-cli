@@ -444,8 +444,7 @@ func SubagentDepthFromContext(ctx context.Context) int {
 type systemPromptExtraKey struct{}
 
 // WithSystemPromptExtra returns a context carrying the given system prompt extra text.
-// Adapters read this via SystemPromptSuffix; it takes priority over the global set
-// by SetSystemPromptExtra.
+// Adapters read this via SystemPromptSuffix.
 func WithSystemPromptExtra(ctx context.Context, s string) context.Context {
 	return context.WithValue(ctx, systemPromptExtraKey{}, s)
 }
@@ -461,8 +460,7 @@ func SystemPromptExtraFromContext(ctx context.Context) (string, bool) {
 type toolGuidanceKey struct{}
 
 // WithToolGuidance returns a context carrying the given tool guidance text.
-// effectiveGuidanceForCtx reads this; it takes priority over the global set
-// by SetToolGuidance.
+// effectiveGuidanceForCtx reads this to override the built-in guidance.
 func WithToolGuidance(ctx context.Context, s string) context.Context {
 	return context.WithValue(ctx, toolGuidanceKey{}, s)
 }
@@ -550,23 +548,6 @@ func ApplyDescriptions(defs []ToolDef, descs map[string]string) []ToolDef {
 	return out
 }
 
-// systemPromptExtra holds optional user-supplied text appended after the
-// built-in tool guidance. Set once at startup via SetSystemPromptExtra.
-var systemPromptExtra string
-
-// SetSystemPromptExtra stores additional text to be appended to every adapter's
-// system prompt. Call once at startup (e.g. from ERRATA_SYSTEM_PROMPT).
-// Subsequent calls overwrite the previous value.
-func SetSystemPromptExtra(s string) { systemPromptExtra = s }
-
-// toolGuidanceOverride, when non-empty, replaces the built-in toolUseGuidance const.
-// Set via recipe ## Tool Guidance or /config tool-guidance.
-var toolGuidanceOverride string
-
-// SetToolGuidance overrides the built-in tool-use guidance with custom text.
-// Pass "" to restore the default.
-func SetToolGuidance(s string) { toolGuidanceOverride = s }
-
 // DefaultToolGuidance returns the built-in tool-use guidance text.
 // Useful for documentation and as a starting point for customization.
 func DefaultToolGuidance() string { return toolUseGuidance }
@@ -635,13 +616,10 @@ func buildGuidance(activeNames map[string]bool) string {
 // spawnAgentGuidance is appended to toolUseGuidance only when SubagentEnabled is true.
 const spawnAgentGuidance = `- Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.`
 
-// effectiveGuidance returns toolUseGuidance (or its override) with spawn_agent line
-// included only when enabled. Used when no context is available.
+// effectiveGuidance returns toolUseGuidance with spawn_agent line
+// included only when enabled. Used when no context is available (e.g. tests).
 func effectiveGuidance() string {
 	base := toolUseGuidance
-	if toolGuidanceOverride != "" {
-		base = toolGuidanceOverride
-	}
 	if SubagentEnabled {
 		return base + spawnAgentGuidance + "\n"
 	}
@@ -649,16 +627,10 @@ func effectiveGuidance() string {
 }
 
 // effectiveGuidanceForCtx returns guidance filtered to active tools from ctx.
-// Custom guidance is checked in priority order: context value → global override.
-// Custom guidance is never filtered — the user wrote it intentionally and it
-// may reference tools by any name.
+// Custom guidance from context is never filtered — the user wrote it
+// intentionally and it may reference tools by any name.
 func effectiveGuidanceForCtx(ctx context.Context) string {
-	// Context-scoped override takes priority over the global.
-	override := toolGuidanceOverride
-	if ctxG, ok := ToolGuidanceFromContext(ctx); ok && ctxG != "" {
-		override = ctxG
-	}
-	if override != "" {
+	if override, ok := ToolGuidanceFromContext(ctx); ok && override != "" {
 		base := override
 		if SubagentEnabled {
 			return base + spawnAgentGuidance + "\n"
@@ -692,19 +664,14 @@ func SystemPromptGuidance() string {
 // When ctx carries an active tool set (via WithActiveTools), only guidance lines
 // relevant to those tools are included. If no active tools are in context, the
 // full unfiltered guidance is returned for backward compatibility.
-// If SetSystemPromptExtra has been called, that text is appended after the
+// If WithSystemPromptExtra was called on ctx, that text is appended after the
 // built-in guidance so project-specific context reaches every model.
 func SystemPromptSuffix(ctx context.Context) string {
 	g := effectiveGuidanceForCtx(ctx)
-	// Context-scoped extra takes priority over the global.
-	extra := systemPromptExtra
-	if ctxExtra, ok := SystemPromptExtraFromContext(ctx); ok {
-		extra = ctxExtra
+	if extra, ok := SystemPromptExtraFromContext(ctx); ok && extra != "" {
+		return g + "\n" + extra
 	}
-	if extra == "" {
-		return g
-	}
-	return g + "\n" + extra
+	return g
 }
 
 // validatePath resolves path relative to cwd and rejects paths that escape it.

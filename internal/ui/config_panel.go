@@ -653,7 +653,6 @@ var configPaths = map[string]configPathEntry{
 		Get: func(r *recipe.Recipe) string { return r.SystemPrompt },
 		Set: func(r *recipe.Recipe, v string) error {
 			r.SystemPrompt = v
-			tools.SetSystemPromptExtra(v)
 			return nil
 		},
 	},
@@ -661,7 +660,6 @@ var configPaths = map[string]configPathEntry{
 		Get: func(r *recipe.Recipe) string { return r.ToolGuidance },
 		Set: func(r *recipe.Recipe, v string) error {
 			r.ToolGuidance = v
-			tools.SetToolGuidance(v)
 			return nil
 		},
 	},

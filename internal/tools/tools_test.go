@@ -1096,14 +1096,12 @@ func TestFilterDefs_NilDisabled(t *testing.T) {
 
 // ─── SystemPrompt ───────────────────────────────────────────────────────────
 
-func TestSetSystemPromptExtra_AffectsSuffix(t *testing.T) {
+func TestWithSystemPromptExtra_AffectsSuffix(t *testing.T) {
 	original := tools.SystemPromptSuffix(context.Background())
-	tools.SetSystemPromptExtra("TEST_EXTRA_CONTENT")
-	modified := tools.SystemPromptSuffix(context.Background())
+	ctx := tools.WithSystemPromptExtra(context.Background(), "TEST_EXTRA_CONTENT")
+	modified := tools.SystemPromptSuffix(ctx)
 	assert.Contains(t, modified, "TEST_EXTRA_CONTENT")
 	assert.NotEqual(t, original, modified)
-	// Cleanup
-	tools.SetSystemPromptExtra("")
 }
 
 func TestSystemPromptGuidance_IsSubsetOfSuffix(t *testing.T) {
@@ -1142,47 +1140,40 @@ func TestDefaultToolGuidance_ContainsKeyTools(t *testing.T) {
 	assert.Contains(t, g, "search_code")
 }
 
-func TestSetToolGuidance_OverridesEffectiveGuidance(t *testing.T) {
+func TestWithToolGuidance_OverridesEffectiveGuidance(t *testing.T) {
 	original := tools.SystemPromptSuffix(context.Background())
-	tools.SetToolGuidance("Custom guidance: use tools wisely.")
-	defer tools.SetToolGuidance("")
+	ctx := tools.WithToolGuidance(context.Background(), "Custom guidance: use tools wisely.")
 
-	modified := tools.SystemPromptSuffix(context.Background())
+	modified := tools.SystemPromptSuffix(ctx)
 	assert.Contains(t, modified, "Custom guidance: use tools wisely.")
 	assert.NotContains(t, modified, "list_directory")
 	assert.NotEqual(t, original, modified)
 }
 
-func TestSetToolGuidance_ClearRestoresDefault(t *testing.T) {
+func TestWithToolGuidance_EmptyUsesDefault(t *testing.T) {
 	original := tools.SystemPromptSuffix(context.Background())
-	tools.SetToolGuidance("temporary override")
-	tools.SetToolGuidance("")
-
-	restored := tools.SystemPromptSuffix(context.Background())
+	// An empty tool guidance in context should not override the default.
+	ctx := tools.WithToolGuidance(context.Background(), "")
+	restored := tools.SystemPromptSuffix(ctx)
 	assert.Equal(t, original, restored)
 }
 
-func TestSetToolGuidance_WithSystemPromptExtra(t *testing.T) {
-	tools.SetToolGuidance("Custom guidance.")
-	tools.SetSystemPromptExtra("Extra context.")
-	defer func() {
-		tools.SetToolGuidance("")
-		tools.SetSystemPromptExtra("")
-	}()
+func TestWithToolGuidance_WithSystemPromptExtra(t *testing.T) {
+	ctx := tools.WithToolGuidance(context.Background(), "Custom guidance.")
+	ctx = tools.WithSystemPromptExtra(ctx, "Extra context.")
 
-	s := tools.SystemPromptSuffix(context.Background())
+	s := tools.SystemPromptSuffix(ctx)
 	assert.Contains(t, s, "Custom guidance.")
 	assert.Contains(t, s, "Extra context.")
 	assert.NotContains(t, s, "list_directory")
 }
 
-func TestSystemPromptGuidance_ReflectsOverride(t *testing.T) {
-	tools.SetToolGuidance("Overridden guidance.")
-	defer tools.SetToolGuidance("")
-
+func TestSystemPromptGuidance_AlwaysReturnsDefault(t *testing.T) {
+	// SystemPromptGuidance() always returns the built-in default guidance
+	// (no context, no overrides).
 	g := tools.SystemPromptGuidance()
-	assert.Contains(t, g, "Overridden guidance.")
-	assert.NotContains(t, g, "list_directory")
+	assert.Contains(t, g, "list_directory")
+	assert.Contains(t, g, "Tool use guidance")
 }
 
 // ─── Guidance Filtering (context-aware SystemPromptSuffix) ──────────────────
@@ -1263,11 +1254,9 @@ func TestSystemPromptSuffix_PartialOverlap_EditWithoutWrite(t *testing.T) {
 
 func TestSystemPromptSuffix_CustomGuidance_NotFiltered(t *testing.T) {
 	// Custom guidance override is never filtered — user wrote it intentionally.
-	tools.SetToolGuidance("Custom: always use all the things.")
-	defer tools.SetToolGuidance("")
-
 	bashDef := tools.ToolDef{Name: "bash"}
 	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{bashDef})
+	ctx = tools.WithToolGuidance(ctx, "Custom: always use all the things.")
 	s := tools.SystemPromptSuffix(ctx)
 	assert.Contains(t, s, "Custom: always use all the things.")
 	// Should NOT contain built-in guidance since it's overridden.
@@ -1275,12 +1264,10 @@ func TestSystemPromptSuffix_CustomGuidance_NotFiltered(t *testing.T) {
 }
 
 func TestSystemPromptSuffix_WithContextAndExtra(t *testing.T) {
-	// Filtered guidance + systemPromptExtra both present.
-	tools.SetSystemPromptExtra("Extra project context.")
-	defer tools.SetSystemPromptExtra("")
-
+	// Filtered guidance + system prompt extra both present via context.
 	bashDef := tools.ToolDef{Name: "bash"}
 	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{bashDef})
+	ctx = tools.WithSystemPromptExtra(ctx, "Extra project context.")
 	s := tools.SystemPromptSuffix(ctx)
 	assert.Contains(t, s, "bash")
 	assert.Contains(t, s, "Extra project context.")
@@ -1385,42 +1372,28 @@ func TestSnapshotFiles_PathTraversal(t *testing.T) {
 
 // ─── Context-based system prompt / tool guidance accessors ───────────────────
 
-func TestWithSystemPromptExtra_ContextOverridesGlobal(t *testing.T) {
-	tools.SetSystemPromptExtra("global extra")
-	defer tools.SetSystemPromptExtra("")
-
+func TestWithSystemPromptExtra_ContextSetsExtra(t *testing.T) {
 	ctx := tools.WithSystemPromptExtra(context.Background(), "context extra")
 	s := tools.SystemPromptSuffix(ctx)
 	assert.Contains(t, s, "context extra")
-	assert.NotContains(t, s, "global extra")
 }
 
-func TestWithToolGuidance_ContextOverridesGlobal(t *testing.T) {
-	tools.SetToolGuidance("global guidance")
-	defer tools.SetToolGuidance("")
-
+func TestWithToolGuidance_ContextSetsGuidance(t *testing.T) {
 	ctx := tools.WithToolGuidance(context.Background(), "context guidance")
 	s := tools.SystemPromptSuffix(ctx)
 	assert.Contains(t, s, "context guidance")
-	assert.NotContains(t, s, "global guidance")
-	// Default guidance should also be absent (overridden by context guidance).
+	// Default guidance should be absent (overridden by context guidance).
 	assert.NotContains(t, s, "list_directory")
 }
 
-func TestSystemPromptSuffix_ContextFallsBackToGlobal(t *testing.T) {
-	tools.SetSystemPromptExtra("global extra")
-	defer tools.SetSystemPromptExtra("")
-
-	// No WithSystemPromptExtra on context — should fall back to global.
+func TestSystemPromptSuffix_NoContextMeansNoExtra(t *testing.T) {
+	// Without WithSystemPromptExtra on context, no extra text is appended.
 	s := tools.SystemPromptSuffix(context.Background())
-	assert.Contains(t, s, "global extra")
+	assert.Contains(t, s, "Tool use guidance")
+	assert.NotContains(t, s, "extra")
 }
 
-func TestSystemPromptSuffix_NoContextNoGlobal_UsesDefault(t *testing.T) {
-	// Ensure globals are clear.
-	tools.SetSystemPromptExtra("")
-	tools.SetToolGuidance("")
-
+func TestSystemPromptSuffix_NoContextUsesDefault(t *testing.T) {
 	s := tools.SystemPromptSuffix(context.Background())
 	// Default guidance should be present.
 	assert.Contains(t, s, "Tool use guidance")
@@ -1436,20 +1409,16 @@ func TestSystemPromptSuffix_CombinedRecipeFlow(t *testing.T) {
 	// Pins the exact composition rules adapters depend on:
 	// 1. Custom guidance replaces default guidance
 	// 2. Extra text is appended after guidance
-	// 3. Clearing restores original behavior
+	// 3. Without context values, default behavior is used
 
-	// Capture original state.
+	// Capture original state (no context values).
 	original := tools.SystemPromptSuffix(context.Background())
 
-	// Set custom guidance and extra prompt (simulates recipe ## Tool Guidance + ## System Prompt).
-	tools.SetToolGuidance("custom guidance")
-	tools.SetSystemPromptExtra("custom extra")
-	defer func() {
-		tools.SetToolGuidance("")
-		tools.SetSystemPromptExtra("")
-	}()
+	// Set custom guidance and extra prompt via context (simulates recipe flow).
+	ctx := tools.WithToolGuidance(context.Background(), "custom guidance")
+	ctx = tools.WithSystemPromptExtra(ctx, "custom extra")
 
-	combined := tools.SystemPromptSuffix(context.Background())
+	combined := tools.SystemPromptSuffix(ctx)
 
 	// Both must be present.
 	assert.Contains(t, combined, "custom guidance")
@@ -1463,10 +1432,7 @@ func TestSystemPromptSuffix_CombinedRecipeFlow(t *testing.T) {
 	// Default guidance must be absent (overridden by custom).
 	assert.NotContains(t, combined, "list_directory")
 
-	// Clean up and verify original is restored.
-	tools.SetToolGuidance("")
-	tools.SetSystemPromptExtra("")
-
+	// A fresh context without values should return the original default.
 	restored := tools.SystemPromptSuffix(context.Background())
 	assert.Equal(t, original, restored)
 }

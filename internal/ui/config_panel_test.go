@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -781,57 +780,24 @@ func TestRenderConfigOverlay_ListWindowedWithOffset(t *testing.T) {
 
 // ── setConfigValue side-effect regression tests ─────────────────────────────
 
-func TestSetConfigValue_SystemPrompt_SetsToolsGlobal(t *testing.T) {
-	// Pins the side-effect: setConfigValue("system_prompt") must call
-	// tools.SetSystemPromptExtra so SystemPromptSuffix reflects the change.
-
-	// Clear any leftover state from other tests sharing this global.
-	tools.SetSystemPromptExtra("")
-	defer tools.SetSystemPromptExtra("")
-
+func TestSetConfigValue_SystemPrompt_SetsRecipeField(t *testing.T) {
+	// Pins that setConfigValue("system_prompt") sets the recipe field.
+	// The value flows to adapters at run time via context injection.
 	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
 	err := setConfigValue(rec, "system_prompt", "Test prompt from config")
 	require.NoError(t, err)
 
-	// Recipe field must be set.
 	assert.Equal(t, "Test prompt from config", rec.SystemPrompt)
-
-	// The tools global must reflect the change.
-	suffix := tools.SystemPromptSuffix(context.Background())
-	assert.Contains(t, suffix, "Test prompt from config")
-
-	// Clean up and verify it's gone.
-	tools.SetSystemPromptExtra("")
-	cleaned := tools.SystemPromptSuffix(context.Background())
-	assert.NotContains(t, cleaned, "Test prompt from config")
 }
 
-func TestSetConfigValue_ToolGuidance_SetsToolsGlobal(t *testing.T) {
-	// Pins the side-effect: setConfigValue("tool_guidance") must call
-	// tools.SetToolGuidance so SystemPromptSuffix reflects the change.
-
-	// Clear any leftover state from other tests sharing this global.
-	tools.SetToolGuidance("")
-	defer tools.SetToolGuidance("")
-
+func TestSetConfigValue_ToolGuidance_SetsRecipeField(t *testing.T) {
+	// Pins that setConfigValue("tool_guidance") sets the recipe field.
+	// The value flows to adapters at run time via context injection.
 	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
 	err := setConfigValue(rec, "tool_guidance", "Custom tool guidance from config")
 	require.NoError(t, err)
 
-	// Recipe field must be set.
 	assert.Equal(t, "Custom tool guidance from config", rec.ToolGuidance)
-
-	// The tools global must reflect the override.
-	suffix := tools.SystemPromptSuffix(context.Background())
-	assert.Contains(t, suffix, "Custom tool guidance from config")
-	// Default guidance must be replaced.
-	assert.NotContains(t, suffix, "list_directory")
-
-	// Clean up and verify default guidance is restored.
-	tools.SetToolGuidance("")
-	cleaned := tools.SystemPromptSuffix(context.Background())
-	assert.Contains(t, cleaned, "list_directory")
-	assert.NotContains(t, cleaned, "Custom tool guidance from config")
 }
 
 // ── applySessionRecipe regression tests ─────────────────────────────────────
