@@ -267,6 +267,8 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	ctx = tools.WithActiveTools(ctx, activeDefs)
 	ctx = tools.WithMCPDispatchers(ctx, opts.MCPDispatchers)
 	ctx = tools.WithBashPrefixes(ctx, bashPrefixes)
+	ctx = tools.WithSystemPromptExtra(ctx, rec.SystemPrompt)
+	ctx = tools.WithToolGuidance(ctx, rec.ToolGuidance)
 	ctx = prompt.WithSummarizationPrompt(ctx, rec.SummarizationPrompt)
 	ctx = sandbox.WithConfig(ctx, sandbox.Config{
 		Filesystem:  rec.Sandbox.Filesystem,

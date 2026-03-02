@@ -778,6 +778,143 @@ func TestRenderConfigOverlay_ListWindowedWithOffset(t *testing.T) {
 	assert.Contains(t, out, "↓")
 }
 
+// ── setConfigValue side-effect regression tests ─────────────────────────────
+
+func TestSetConfigValue_SystemPrompt_SetsRecipeField(t *testing.T) {
+	// Pins that setConfigValue("system_prompt") sets the recipe field.
+	// The value flows to adapters at run time via context injection.
+	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
+	err := setConfigValue(rec, "system_prompt", "Test prompt from config")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Test prompt from config", rec.SystemPrompt)
+}
+
+func TestSetConfigValue_ToolGuidance_SetsRecipeField(t *testing.T) {
+	// Pins that setConfigValue("tool_guidance") sets the recipe field.
+	// The value flows to adapters at run time via context injection.
+	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
+	err := setConfigValue(rec, "tool_guidance", "Custom tool guidance from config")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Custom tool guidance from config", rec.ToolGuidance)
+}
+
+// ── applySessionRecipe regression tests ─────────────────────────────────────
+
+func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
+	// Pins the full sync path from session recipe to runtime state.
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+
+	seed := int64(42)
+	sessionRec := &recipe.Recipe{
+		Tools: &recipe.ToolsConfig{
+			Allowlist:    []string{"read_file", "bash"},
+			BashPrefixes: []string{"go test", "go vet"},
+		},
+		Context: recipe.ContextConfig{
+			Strategy:         "manual",
+			MaxHistoryTurns:  30,
+			CompactThreshold: 0.75,
+		},
+		Sandbox: recipe.SandboxConfig{
+			Filesystem: "project_only",
+			Network:    "none",
+		},
+		Metadata: recipe.MetadataConfig{
+			ProjectRoot: "/opt/project",
+		},
+		ModelParams: recipe.ModelParamsConfig{
+			Seed: &seed,
+		},
+		Constraints: recipe.ConstraintsConfig{
+			Timeout: 10 * time.Minute,
+		},
+	}
+	a.store.SetSessionRecipe(sessionRec)
+	a.applySessionRecipe()
+
+	// App fields.
+	assert.Equal(t, []string{"read_file", "bash"}, a.toolAllowlist)
+	assert.Equal(t, []string{"go test", "go vet"}, a.bashPrefixes)
+	assert.Equal(t, "manual", a.contextStrategy)
+	assert.Equal(t, "project_only", a.sandboxFilesystem)
+	assert.Equal(t, "none", a.sandboxNetwork)
+	assert.Equal(t, "/opt/project", a.projectRoot)
+	require.NotNil(t, a.seed)
+	assert.Equal(t, int64(42), *a.seed)
+
+	// Config fields.
+	assert.Equal(t, 10*time.Minute, a.cfg.AgentTimeout)
+	assert.Equal(t, 30, a.cfg.MaxHistoryTurns)
+	assert.InDelta(t, 0.75, a.cfg.CompactThreshold, 1e-9)
+}
+
+func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
+	// Pre-populate App/cfg with non-default values.
+	// Session recipe with only Tools set, everything else zero.
+	// Pins the `if > 0` / `if != nil` guards.
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+
+	// Pre-populate with non-default values.
+	a.contextStrategy = "auto_compact"
+	a.sandboxFilesystem = "read_only"
+	a.sandboxNetwork = "full"
+	a.projectRoot = "/existing/root"
+	existingSeed := int64(99)
+	a.seed = &existingSeed
+	a.cfg.AgentTimeout = 7 * time.Minute
+	a.cfg.MaxHistoryTurns = 40
+	a.cfg.CompactThreshold = 0.90
+
+	// Session recipe with only Tools set.
+	sessionRec := &recipe.Recipe{
+		Tools: &recipe.ToolsConfig{
+			Allowlist: []string{"write_file"},
+		},
+	}
+	a.store.SetSessionRecipe(sessionRec)
+	a.applySessionRecipe()
+
+	// Tools should have changed.
+	assert.Equal(t, []string{"write_file"}, a.toolAllowlist)
+
+	// All other fields should be preserved (zero values in recipe don't overwrite).
+	// Note: contextStrategy is always synced (even when zero), so it becomes "".
+	// sandboxFilesystem and sandboxNetwork are always synced too.
+	// projectRoot is only synced when non-empty.
+	assert.Equal(t, "/existing/root", a.projectRoot)
+	require.NotNil(t, a.seed)
+	assert.Equal(t, int64(99), *a.seed)
+	assert.Equal(t, 7*time.Minute, a.cfg.AgentTimeout)
+	assert.Equal(t, 40, a.cfg.MaxHistoryTurns)
+	assert.InDelta(t, 0.90, a.cfg.CompactThreshold, 1e-9)
+}
+
+func TestApplySessionRecipe_NilRecipeIsNoop(t *testing.T) {
+	// No session recipe set, call applySessionRecipe(), assert no panic and no field changes.
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+
+	// Pre-populate.
+	a.contextStrategy = "manual"
+	a.cfg.MaxHistoryTurns = 25
+
+	// Ensure no session recipe is set.
+	assert.Nil(t, a.store.SessionRecipe())
+
+	// Should not panic.
+	assert.NotPanics(t, func() {
+		a.applySessionRecipe()
+	})
+
+	// Fields should be unchanged.
+	assert.Equal(t, "manual", a.contextStrategy)
+	assert.Equal(t, 25, a.cfg.MaxHistoryTurns)
+}
+
 func TestRenderConfigOverlay_ListFitsHeight(t *testing.T) {
 	// Few items with large maxHeight → all should be rendered, no indicators.
 	sections := []configSection{{Name: "tools", Summary: "3 enabled", Kind: "list", DetailDesc: "Toggle tools"}}

@@ -134,16 +134,6 @@ func setupAdapters(cfg config.Config, debugLog, sessionID string) (
 	ads, warnings = adapters.ListAdapters(cfg)
 	cleanup = func() {}
 
-	// Apply custom system prompt if configured.
-	if cfg.SystemPromptExtra != "" {
-		tools.SetSystemPromptExtra(cfg.SystemPromptExtra)
-	}
-
-	// Apply custom tool guidance if configured.
-	if cfg.ToolGuidance != "" {
-		tools.SetToolGuidance(cfg.ToolGuidance)
-	}
-
 	if debugLog != "" {
 		logger, err := logging.NewLogger(debugLog)
 		if err != nil {

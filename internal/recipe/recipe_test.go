@@ -1251,3 +1251,92 @@ func TestMarshalMarkdown_ToolGuidance_Empty(t *testing.T) {
 	md := r.MarshalMarkdown()
 	assert.NotContains(t, md, "## Tool Guidance")
 }
+
+// ─── ApplyTo regression tests ─────────────────────────────────────────────────
+
+func TestApplyTo_AllFields_Simultaneous(t *testing.T) {
+	// Construct a recipe with ALL 10 ApplyTo-mapped fields set simultaneously.
+	// Pins field-interaction behavior — setting all at once must not interfere.
+	seed := int64(42)
+	r := &recipe.Recipe{
+		Models:       []string{"m1", "m2"},
+		SystemPrompt: "Custom system prompt",
+		MCPServers: []recipe.MCPServerEntry{
+			{Name: "exa", Command: "npx exa-server"},
+		},
+		SubAgent: recipe.SubAgentConfig{
+			Model:    "gpt-4o",
+			MaxDepth: 3,
+		},
+		Context: recipe.ContextConfig{
+			MaxHistoryTurns:  30,
+			CompactThreshold: 0.65,
+		},
+		Constraints: recipe.ConstraintsConfig{
+			Timeout: 10 * time.Minute,
+		},
+		ModelParams: recipe.ModelParamsConfig{
+			Seed: &seed,
+		},
+		ToolGuidance: "Custom tool guidance",
+	}
+
+	cfg := defaultCfg()
+	r.ApplyTo(&cfg)
+
+	assert.Equal(t, []string{"m1", "m2"}, cfg.ActiveModels)
+	assert.Equal(t, "Custom system prompt", cfg.SystemPromptExtra)
+	assert.Contains(t, cfg.MCPServers, "exa")
+	assert.Contains(t, cfg.MCPServers, "npx exa-server")
+	assert.Equal(t, "gpt-4o", cfg.SubagentModel)
+	assert.Equal(t, 3, cfg.SubagentMaxDepth)
+	assert.Equal(t, 30, cfg.MaxHistoryTurns)
+	assert.Equal(t, 10*time.Minute, cfg.AgentTimeout)
+	assert.InDelta(t, 0.65, cfg.CompactThreshold, 1e-9)
+	require.NotNil(t, cfg.Seed)
+	assert.Equal(t, int64(42), *cfg.Seed)
+	assert.Equal(t, "Custom tool guidance", cfg.ToolGuidance)
+}
+
+func TestApplyTo_UnsetFields_PreserveAll(t *testing.T) {
+	// Pre-populate Config with non-default values for all 9 non-Models fields.
+	// Parse a recipe with only ## Models set.
+	// Assert cfg.ActiveModels changed, all 9 others retained pre-populated values.
+	// Pins the zero-value guard logic (if r.Field != zero).
+	existingSeed := int64(99)
+	cfg := config.Config{
+		ActiveModels:      []string{"old-model"},
+		SystemPromptExtra: "existing prompt",
+		MCPServers:        "existing:server",
+		SubagentModel:     "existing-subagent",
+		SubagentMaxDepth:  5,
+		MaxHistoryTurns:   40,
+		AgentTimeout:      7 * time.Minute,
+		CompactThreshold:  0.90,
+		Seed:              &existingSeed,
+		ToolGuidance:      "existing guidance",
+	}
+
+	// Recipe with only Models set; all other fields at zero values.
+	r := &recipe.Recipe{
+		Models:   []string{"new-model-1", "new-model-2"},
+		SubAgent: recipe.SubAgentConfig{MaxDepth: -1}, // sentinel: not set
+	}
+
+	r.ApplyTo(&cfg)
+
+	// Models should have changed.
+	assert.Equal(t, []string{"new-model-1", "new-model-2"}, cfg.ActiveModels)
+
+	// All other fields should be preserved.
+	assert.Equal(t, "existing prompt", cfg.SystemPromptExtra)
+	assert.Equal(t, "existing:server", cfg.MCPServers)
+	assert.Equal(t, "existing-subagent", cfg.SubagentModel)
+	assert.Equal(t, 5, cfg.SubagentMaxDepth)
+	assert.Equal(t, 40, cfg.MaxHistoryTurns)
+	assert.Equal(t, 7*time.Minute, cfg.AgentTimeout)
+	assert.InDelta(t, 0.90, cfg.CompactThreshold, 1e-9)
+	require.NotNil(t, cfg.Seed)
+	assert.Equal(t, int64(99), *cfg.Seed)
+	assert.Equal(t, "existing guidance", cfg.ToolGuidance)
+}
