@@ -51,14 +51,13 @@ var interactiveSections = func() []string {
 	if tools.SubagentEnabled {
 		s = append(s, "sub-agent")
 	}
-	s = append(s, "sandbox", "tool-guidance")
+	s = append(s, "sandbox")
 	if tools.RemindersEnabled {
 		s = append(s, "reminders")
 	}
 	if tools.HooksEnabled {
 		s = append(s, "hooks")
 	}
-	s = append(s, "output-processing", "context-summarization")
 	return s
 }()
 
@@ -115,18 +114,6 @@ var sectionDescriptions = map[string]sectionDesc{
 		Brief:  "Lifecycle event hooks (shell commands)",
 		Detail: "Hooks run shell commands in response to lifecycle events (e.g. before_run, after_run). Each hook has an event type, optional matcher pattern, and a command to execute.",
 	},
-	"output-processing": {
-		Brief:  "Rules for truncating tool output",
-		Detail: "Output processing rules control how tool output is truncated before being sent back to the model. Set max_lines and truncation strategy (head, tail, middle) per tool.",
-	},
-	"tool-guidance": {
-		Brief:  "Tool-use guidance included in every system prompt",
-		Detail: "Replaces the built-in tool-use guidance that teaches models how to use the available tools. When empty, the default guidance is used. Use /config tool-guidance to view and edit.",
-	},
-	"context-summarization": {
-		Brief:  "Prompt used when compacting conversation history",
-		Detail: "The summarization prompt is sent to the model when compacting conversation history via /compact or auto-compact. Customize to control what information is preserved in summaries.",
-	},
 }
 
 // ── section builders ────────────────────────────────────────────────────────
@@ -149,7 +136,6 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 	}
 	sections = append(sections,
 		configSection{Name: "sandbox", Summary: summarizeSandbox(rec), Kind: "scalar"},
-		configSection{Name: "tool-guidance", Summary: summarizeToolGuidance(rec), Kind: "text", Path: "tool_guidance"},
 	)
 	if tools.RemindersEnabled {
 		sections = append(sections, configSection{Name: "reminders", Summary: summarizeReminders(rec), Kind: "list"})
@@ -157,10 +143,6 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 	if tools.HooksEnabled {
 		sections = append(sections, configSection{Name: "hooks", Summary: summarizeHooks(rec), Kind: "list"})
 	}
-	sections = append(sections,
-		configSection{Name: "output-processing", Summary: summarizeOutputProcessing(rec), Kind: "scalar"},
-		configSection{Name: "context-summarization", Summary: summarizeContextSummarization(rec), Kind: "text", Path: "context_summarization.prompt"},
-	)
 	for i := range sections {
 		if desc, ok := sectionDescriptions[sections[i].Name]; ok {
 			sections[i].Desc = desc.Brief
@@ -307,18 +289,6 @@ func summarizeSandbox(rec *recipe.Recipe) string {
 	return strings.Join(parts, ", ")
 }
 
-func summarizeToolGuidance(rec *recipe.Recipe) string {
-	if rec.ToolGuidance == "" {
-		return "(default: built-in guidance)"
-	}
-	preview := rec.ToolGuidance
-	if runes := []rune(preview); len(runes) > 50 {
-		preview = string(runes[:50]) + "..."
-	}
-	preview = strings.ReplaceAll(preview, "\n", " ")
-	return fmt.Sprintf("%q (%d chars)", preview, len(rec.ToolGuidance))
-}
-
 func summarizeReminders(rec *recipe.Recipe) string {
 	if len(rec.SystemReminders) == 0 {
 		return "(none)"
@@ -339,29 +309,6 @@ func summarizeHooks(rec *recipe.Recipe) string {
 		names = append(names, h.Name)
 	}
 	return fmt.Sprintf("%d configured (%s)", len(names), strings.Join(names, ", "))
-}
-
-func summarizeOutputProcessing(rec *recipe.Recipe) string {
-	if len(rec.OutputProcessing) == 0 {
-		return "(none)"
-	}
-	var names []string
-	for name := range rec.OutputProcessing {
-		names = append(names, name)
-	}
-	return fmt.Sprintf("%d rules (%s)", len(names), strings.Join(names, ", "))
-}
-
-func summarizeContextSummarization(rec *recipe.Recipe) string {
-	if rec.SummarizationPrompt == "" {
-		return "(default: built-in prompt)"
-	}
-	preview := rec.SummarizationPrompt
-	if runes := []rune(preview); len(runes) > 50 {
-		preview = string(runes[:50]) + "..."
-	}
-	preview = strings.ReplaceAll(preview, "\n", " ")
-	return fmt.Sprintf("%q (%d chars)", preview, len(rec.SummarizationPrompt))
 }
 
 // ── list/scalar data builders ───────────────────────────────────────────────
@@ -721,24 +668,10 @@ var configPaths = map[string]configPathEntry{
 			return nil
 		},
 	},
-	"context_summarization.prompt": {
-		Get: func(r *recipe.Recipe) string { return r.SummarizationPrompt },
-		Set: func(r *recipe.Recipe, v string) error {
-			r.SummarizationPrompt = v
-			return nil
-		},
-	},
 	"system_prompt": {
 		Get: func(r *recipe.Recipe) string { return r.SystemPrompt },
 		Set: func(r *recipe.Recipe, v string) error {
 			r.SystemPrompt = v
-			return nil
-		},
-	},
-	"tool_guidance": {
-		Get: func(r *recipe.Recipe) string { return r.ToolGuidance },
-		Set: func(r *recipe.Recipe, v string) error {
-			r.ToolGuidance = v
 			return nil
 		},
 	},
@@ -824,9 +757,7 @@ var configPathDefaults = map[string]string{
 	"parameters.seed":             "none",
 	"parameters.temperature":      "provider default",
 	"parameters.max_tokens":       "provider default",
-	"context_summarization.prompt": "built-in prompt",
 	"system_prompt":                "none",
-	"tool_guidance":                "built-in guidance",
 }
 
 // configPathCandidates returns all valid config dot-paths for tab-completion.

@@ -657,12 +657,6 @@ func TestSummarizeSandbox_ShowsDefaults(t *testing.T) {
 	assert.Contains(t, s, "network=full")
 }
 
-func TestSummarizeContextSummarization_ShowsDefault(t *testing.T) {
-	rec := &recipe.Recipe{}
-	s := summarizeContextSummarization(rec)
-	assert.Contains(t, s, "built-in prompt")
-}
-
 // ── section descriptions tests ───────────────────────────────────────────────
 
 func TestSectionDescriptions_AllSectionsHaveDescriptions(t *testing.T) {
@@ -726,30 +720,6 @@ func TestHandleConfigTextKey_EscapeCancelsEditing(t *testing.T) {
 	// Original prompt should be unchanged.
 	assert.Equal(t, a.store.SessionRecipe().SystemPrompt, app.store.SessionRecipe().SystemPrompt)
 	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after cancel")
-}
-
-func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
-	a.configOverlayActive = true
-	a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
-	// Find context-summarization section dynamically (index varies with SubagentEnabled).
-	csIdx := -1
-	for i, sec := range a.configSections {
-		if sec.Name == "context-summarization" {
-			csIdx = i
-			break
-		}
-	}
-	require.NotEqual(t, -1, csIdx, "context-summarization section must exist")
-	a.configExpandedIdx = csIdx
-	a.configTextEditing = true
-	a.configTextArea.SetValue("Custom summarization prompt")
-
-	result, _ := a.handleConfigTextKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
-	app := result.(App)
-	assert.Equal(t, "Custom summarization prompt", app.store.SessionRecipe().SummarizationPrompt)
-	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after save")
 }
 
 func TestTextSections_HavePaths(t *testing.T) {
@@ -830,16 +800,6 @@ func TestSetConfigValue_SystemPrompt_SetsRecipeField(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Test prompt from config", rec.SystemPrompt)
-}
-
-func TestSetConfigValue_ToolGuidance_SetsRecipeField(t *testing.T) {
-	// Pins that setConfigValue("tool_guidance") sets the recipe field.
-	// The value flows to adapters at run time via context injection.
-	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
-	err := setConfigValue(rec, "tool_guidance", "Custom tool guidance from config")
-	require.NoError(t, err)
-
-	assert.Equal(t, "Custom tool guidance from config", rec.ToolGuidance)
 }
 
 // ── applySessionRecipe regression tests ─────────────────────────────────────
