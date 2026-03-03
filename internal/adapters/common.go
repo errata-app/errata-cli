@@ -40,13 +40,21 @@ func join(parts []string) string {
 //
 // ctx is checked for MCP dispatchers (registered at startup via tools.WithMCPDispatchers)
 // which take priority over built-in tool names.
+//
+// toolCalls, if non-nil, is incremented for the tool name on successful dispatch.
 func DispatchTool(
 	ctx context.Context,
 	name string,
 	args map[string]string,
 	onEvent func(models.AgentEvent),
 	proposed *[]tools.FileWrite,
+	toolCalls *map[string]int,
 ) (result string, ok bool) {
+	defer func() {
+		if ok && toolCalls != nil && *toolCalls != nil {
+			(*toolCalls)[name]++
+		}
+	}()
 	// MCP-dispatched tools take priority over built-in tool names.
 	if dispatchers := tools.MCPDispatchersFromContext(ctx); len(dispatchers) > 0 {
 		if dispatcher, found := dispatchers[name]; found {
@@ -162,7 +170,7 @@ func DispatchTool(
 // checkpoint persistence. Called at each turn boundary inside the agentic loop.
 func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
 	textParts []string, start time.Time, totalInput, totalOutput int64,
-	proposed []tools.FileWrite) {
+	proposed []tools.FileWrite, toolCalls map[string]int) {
 	snap := models.PartialSnapshot{
 		Text:         join(textParts),
 		InputTokens:  totalInput,
@@ -170,6 +178,7 @@ func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
 		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, totalOutput),
 		LatencyMS:    time.Since(start).Milliseconds(),
 		Writes:       proposed,
+		ToolCalls:    toolCalls,
 	}
 	data, err := json.Marshal(snap)
 	if err != nil {
@@ -236,7 +245,7 @@ func BuildErrorResponse(modelID, qualifiedID string, start time.Time, totalInput
 // It preserves the partial text, proposed writes, and token counts accumulated before cancellation.
 func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
 	start time.Time, totalInput, totalOutput int64,
-	proposed []tools.FileWrite, err error) models.ModelResponse {
+	proposed []tools.FileWrite, toolCalls map[string]int, err error) models.ModelResponse {
 	return models.ModelResponse{
 		ModelID:        modelID,
 		Text:           join(textParts),
@@ -245,6 +254,7 @@ func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
 		OutputTokens:   totalOutput,
 		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, totalOutput),
 		ProposedWrites: proposed,
+		ToolCalls:      toolCalls,
 		Error:          err.Error(),
 		Interrupted:    true,
 	}
@@ -254,7 +264,7 @@ func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
 // qualifiedID is the provider-prefixed model ID passed to CostUSD.
 func BuildSuccessResponse(modelID, qualifiedID string, textParts []string, start time.Time,
 	totalInput, totalOutput int64,
-	proposed []tools.FileWrite) models.ModelResponse {
+	proposed []tools.FileWrite, toolCalls map[string]int) models.ModelResponse {
 	return models.ModelResponse{
 		ModelID:        modelID,
 		Text:           join(textParts),
@@ -263,5 +273,6 @@ func BuildSuccessResponse(modelID, qualifiedID string, textParts []string, start
 		OutputTokens:   totalOutput,
 		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, totalOutput),
 		ProposedWrites: proposed,
+		ToolCalls:      toolCalls,
 	}
 }

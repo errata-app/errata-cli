@@ -58,6 +58,7 @@ func runGeminiAgentLoop(
 
 	var textParts []string
 	var proposed []tools.FileWrite
+	toolCalls := map[string]int{}
 	var totalInput, totalOutput int64
 
 	for {
@@ -69,7 +70,7 @@ func runGeminiAgentLoop(
 		resp, err := cfg.client.Models.GenerateContent(ctx, cfg.apiModelID, contents, config)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, err), err
+				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err), err
 			}
 			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err), err
 		}
@@ -94,7 +95,7 @@ func runGeminiAgentLoop(
 
 			if part.FunctionCall != nil {
 				fc := part.FunctionCall
-				result, ok := DispatchTool(ctx, fc.Name, extractStringMap(fc.Args), onEvent, &proposed)
+				result, ok := DispatchTool(ctx, fc.Name, extractStringMap(fc.Args), onEvent, &proposed, &toolCalls)
 				if ok {
 					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"result": result}))
 				} else {
@@ -107,10 +108,10 @@ func runGeminiAgentLoop(
 			break
 		}
 		contents = append(contents, genai.NewContentFromParts(toolResults, genai.RoleUser))
-		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed)
+		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
 	}
 
-	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed), nil
+	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls), nil
 }
 
 // queryGeminiCapabilities queries the Gemini/Vertex models API for token

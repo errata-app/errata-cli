@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/preferences"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 func TestRecordAndLoadAll(t *testing.T) {
@@ -346,15 +347,14 @@ func TestRecord_StoresCostUSD(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prefs.jsonl")
 	responses := []models.ModelResponse{
 		{ModelID: "a", LatencyMS: 100, CostUSD: 0.0042},
-		{ModelID: "b", LatencyMS: 200, CostUSD: 0.0}, // zero cost → omitted
+		{ModelID: "b", LatencyMS: 200, CostUSD: 0.0},
 	}
 	require.NoError(t, preferences.Record(path, "p", "a", "", "s", responses))
 
 	entries := preferences.LoadAll(path)
 	require.Len(t, entries, 1)
 	assert.InDelta(t, 0.0042, entries[0].CostsUSD["a"], 1e-9)
-	_, hasB := entries[0].CostsUSD["b"]
-	assert.False(t, hasB, "zero-cost model should not be stored in CostsUSD")
+	assert.Zero(t, entries[0].CostsUSD["b"])
 }
 
 // ─── RecordRewind & filterRewound ────────────────────────────────────────────
@@ -569,4 +569,124 @@ func TestSummarizeDetailed_EmptyFilterMatchesAll(t *testing.T) {
 	assert.Len(t, stats, 2)
 	assert.Equal(t, 1, stats["a"].Wins)
 	assert.Equal(t, 1, stats["b"].Wins)
+}
+
+// ─── New metrics: tokens, tool calls, proposed writes ─────────────────────
+
+func TestRecord_NewMetrics(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{
+		{
+			ModelID:      "a",
+			LatencyMS:    100,
+			InputTokens:  5200,
+			OutputTokens: 1800,
+			ToolCalls:    map[string]int{"read_file": 3, "write_file": 2},
+			ProposedWrites: []tools.FileWrite{
+				{Path: "f1.go", Content: "c1"},
+				{Path: "f2.go", Content: "c2"},
+			},
+		},
+		{
+			ModelID:      "b",
+			LatencyMS:    200,
+			InputTokens:  6100,
+			OutputTokens: 3200,
+			ToolCalls:    map[string]int{"bash": 1},
+			ProposedWrites: []tools.FileWrite{
+				{Path: "f3.go", Content: "c3"},
+			},
+		},
+	}
+	require.NoError(t, preferences.Record(path, "p", "a", "", "s", responses))
+
+	entries := preferences.LoadAll(path)
+	require.Len(t, entries, 1)
+	e := entries[0]
+
+	// Input/output tokens.
+	assert.Equal(t, int64(5200), e.InputTokens["a"])
+	assert.Equal(t, int64(6100), e.InputTokens["b"])
+	assert.Equal(t, int64(1800), e.OutputTokens["a"])
+	assert.Equal(t, int64(3200), e.OutputTokens["b"])
+
+	// Tool calls.
+	require.Contains(t, e.ToolCalls, "a")
+	assert.Equal(t, 3, e.ToolCalls["a"]["read_file"])
+	assert.Equal(t, 2, e.ToolCalls["a"]["write_file"])
+	require.Contains(t, e.ToolCalls, "b")
+	assert.Equal(t, 1, e.ToolCalls["b"]["bash"])
+
+	// Proposed writes count.
+	assert.Equal(t, 2, e.ProposedWritesCount["a"])
+	assert.Equal(t, 1, e.ProposedWritesCount["b"])
+}
+
+func TestRecord_ZeroMetricsStored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	responses := []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100}, // zero tokens, no tool calls, no writes
+	}
+	require.NoError(t, preferences.Record(path, "p", "a", "", "s", responses))
+
+	entries := preferences.LoadAll(path)
+	require.Len(t, entries, 1)
+	e := entries[0]
+	assert.Zero(t, e.InputTokens["a"])
+	assert.Zero(t, e.OutputTokens["a"])
+	assert.Nil(t, e.ToolCalls["a"])
+	assert.Zero(t, e.ProposedWritesCount["a"])
+}
+
+func TestBackwardCompat_LegacyEntries(t *testing.T) {
+	// Legacy entry without new fields should load fine.
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	content := `{"ts":"2026-01-01","prompt_hash":"sha256:abc","prompt_preview":"ok","models":["a"],"selected":"a","latencies_ms":{"a":100},"session_id":"s"}
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	entries := preferences.LoadAll(path)
+	require.Len(t, entries, 1)
+	assert.Nil(t, entries[0].InputTokens)
+	assert.Nil(t, entries[0].OutputTokens)
+	assert.Nil(t, entries[0].ToolCalls)
+	assert.Nil(t, entries[0].ProposedWritesCount)
+}
+
+func TestSummarizeDetailed_NewAverages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+
+	// Entry 1: a has 1000 input, 500 output, 4 tool calls (read_file:3+bash:1), 2 writes.
+	require.NoError(t, preferences.Record(path, "p1", "a", "", "s1", []models.ModelResponse{
+		{
+			ModelID:      "a",
+			LatencyMS:    100,
+			InputTokens:  1000,
+			OutputTokens: 500,
+			ToolCalls:    map[string]int{"read_file": 3, "bash": 1},
+			ProposedWrites: []tools.FileWrite{
+				{Path: "f1.go", Content: "c1"},
+				{Path: "f2.go", Content: "c2"},
+			},
+		},
+	}))
+
+	// Entry 2: a has 3000 input, 1500 output, 6 tool calls (read_file:4+write_file:2), 0 writes.
+	require.NoError(t, preferences.Record(path, "p2", "a", "", "s2", []models.ModelResponse{
+		{
+			ModelID:      "a",
+			LatencyMS:    200,
+			InputTokens:  3000,
+			OutputTokens: 1500,
+			ToolCalls:    map[string]int{"read_file": 4, "write_file": 2},
+		},
+	}))
+
+	stats := preferences.SummarizeDetailed(path, nil)
+	require.Contains(t, stats, "a")
+	sa := stats["a"]
+	assert.InDelta(t, 2000.0, sa.AvgInputTokens, 0.1)   // (1000+3000)/2
+	assert.InDelta(t, 1000.0, sa.AvgOutputTokens, 0.1)   // (500+1500)/2
+	assert.InDelta(t, 5.0, sa.AvgToolCalls, 0.1)         // (4+6)/2
+	assert.InDelta(t, 1.0, sa.AvgProposedWrites, 0.1)    // (2+0)/2
 }

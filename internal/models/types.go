@@ -44,6 +44,7 @@ type PartialSnapshot struct {
 	CostUSD      float64           `json:"cost_usd"`
 	LatencyMS    int64             `json:"latency_ms"`
 	Writes       []tools.FileWrite `json:"writes,omitempty"`
+	ToolCalls    map[string]int    `json:"tool_calls,omitempty"`
 }
 
 // ModelResponse is the final result from one agent run.
@@ -55,6 +56,7 @@ type ModelResponse struct {
 	OutputTokens int64
 	CostUSD             float64
 	ProposedWrites      []tools.FileWrite
+	ToolCalls           map[string]int // tool_name → call count across all turns
 	Error               string // empty = success
 	Interrupted         bool   // true when run was cancelled mid-flight (partial data preserved)
 }
