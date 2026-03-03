@@ -102,6 +102,29 @@ func geminiFunctionCallResponse(name string, args map[string]any, promptTokens, 
 
 // ─── tests ───────────────────────────────────────────────────────────────────
 
+func TestGeminiLoop_NoTools(t *testing.T) {
+	ts := newGeminiMockServer(t, []string{
+		geminiTextResponse("No tools here.", 80, 15),
+	})
+	defer ts.Close()
+
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	cfg := testGeminiConfig(t, ts)
+	resp, err := runGeminiAgentLoop(ctx, cfg, nil, "hello",
+		func(models.AgentEvent) {})
+
+	require.NoError(t, err)
+	assert.Equal(t, "No tools here.", resp.Text)
+	assert.Empty(t, resp.ProposedWrites)
+	assert.True(t, resp.OK())
+}
+
+func TestBuildGeminiTools_Empty(t *testing.T) {
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	result := buildGeminiTools(ctx)
+	assert.Nil(t, result)
+}
+
 func TestGeminiLoop_TextOnly(t *testing.T) {
 	ts := newGeminiMockServer(t, []string{
 		geminiTextResponse("Hello from Gemini!", 120, 30),

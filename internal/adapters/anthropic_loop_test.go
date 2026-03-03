@@ -111,6 +111,22 @@ func anthropicToolUseResponseWithCache(toolUseID, name, argsJSON string, inputTo
 
 // ─── tests ───────────────────────────────────────────────────────────────────
 
+func TestAnthropicLoop_NoTools(t *testing.T) {
+	ts := newAnthropicMockServer(t, []string{
+		anthropicTextResponse("No tools here.", 100, 20),
+	})
+	defer ts.Close()
+
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	resp, err := runAnthropicAgentLoop(ctx, testAnthropicConfig(ts), nil, "hello",
+		func(models.AgentEvent) {})
+
+	require.NoError(t, err)
+	assert.Equal(t, "No tools here.", resp.Text)
+	assert.Empty(t, resp.ProposedWrites)
+	assert.True(t, resp.OK())
+}
+
 func TestAnthropicLoop_TextOnly(t *testing.T) {
 	ts := newAnthropicMockServer(t, []string{
 		anthropicTextResponse("Hello from Claude!", 150, 25),

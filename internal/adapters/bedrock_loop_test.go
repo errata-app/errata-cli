@@ -98,6 +98,23 @@ func bedrockToolUseOutput(toolUseID, name string, inputMap map[string]any, input
 
 // ─── tests ───────────────────────────────────────────────────────────────────
 
+func TestBedrockLoop_NoTools(t *testing.T) {
+	stub := &stubBedrockConverser{
+		responses: []*bedrockruntime.ConverseOutput{
+			bedrockTextOutput("No tools here.", 100, 20),
+		},
+	}
+
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	resp, err := runBedrockAgentLoop(ctx, testBedrockConfig(stub), nil, "hello",
+		func(models.AgentEvent) {})
+
+	require.NoError(t, err)
+	assert.Equal(t, "No tools here.", resp.Text)
+	assert.Empty(t, resp.ProposedWrites)
+	assert.True(t, resp.OK())
+}
+
 func TestBedrockLoop_TextOnly(t *testing.T) {
 	stub := &stubBedrockConverser{
 		responses: []*bedrockruntime.ConverseOutput{

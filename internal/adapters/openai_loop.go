@@ -33,7 +33,9 @@ func runOpenAIAgentLoop(
 
 	toolParams := buildOpenAITools(ctx)
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+2)
-	messages = append(messages, openai.SystemMessage(systemMsg))
+	if systemMsg != "" {
+		messages = append(messages, openai.SystemMessage(systemMsg))
+	}
 	for _, turn := range history {
 		switch turn.Role {
 		case "user":
@@ -99,6 +101,8 @@ func runOpenAIAgentLoop(
 			result, ok := DispatchTool(ctx, tc.Function.Name, extractStringMap(input), onEvent, &proposed)
 			if ok {
 				messages = append(messages, openai.ToolMessage(result, tc.ID))
+			} else {
+				messages = append(messages, openai.ToolMessage(fmt.Sprintf("error: unrecognized tool %q", tc.Function.Name), tc.ID))
 			}
 		}
 		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed)
@@ -111,6 +115,9 @@ func runOpenAIAgentLoop(
 // OpenAI-compatible tool parameters.
 func buildOpenAITools(ctx context.Context) []openai.ChatCompletionToolParam {
 	active := tools.ActiveToolsFromContext(ctx)
+	if len(active) == 0 {
+		return nil
+	}
 	out := make([]openai.ChatCompletionToolParam, 0, len(active))
 	for _, def := range active {
 		props, required := def.JSONSchemaProps()

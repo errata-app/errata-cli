@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math"
 	"time"
@@ -34,8 +35,10 @@ func runGeminiAgentLoop(
 	systemMsg := tools.SystemPromptSuffix(ctx)
 
 	config := &genai.GenerateContentConfig{
-		Tools:             buildGeminiTools(ctx),
-		SystemInstruction: genai.NewContentFromText(systemMsg, ""),
+		Tools: buildGeminiTools(ctx),
+	}
+	if systemMsg != "" {
+		config.SystemInstruction = genai.NewContentFromText(systemMsg, "")
 	}
 	if seed, ok := tools.SeedFromContext(ctx); ok {
 		s := int32(min(max(seed, math.MinInt32), math.MaxInt32)) //nolint:gosec // G115: overflow prevented by min/max clamping
@@ -94,6 +97,8 @@ func runGeminiAgentLoop(
 				result, ok := DispatchTool(ctx, fc.Name, extractStringMap(fc.Args), onEvent, &proposed)
 				if ok {
 					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"result": result}))
+				} else {
+					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"error": fmt.Sprintf("unrecognized tool %q", fc.Name)}))
 				}
 			}
 		}
@@ -131,6 +136,9 @@ func queryGeminiCapabilities(ctx context.Context, client *genai.Client, apiModel
 // Gemini FunctionDeclarations.
 func buildGeminiTools(ctx context.Context) []*genai.Tool {
 	active := tools.ActiveToolsFromContext(ctx)
+	if len(active) == 0 {
+		return nil
+	}
 	decls := make([]*genai.FunctionDeclaration, 0, len(active))
 	for _, def := range active {
 		props := map[string]*genai.Schema{}
