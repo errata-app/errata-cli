@@ -29,13 +29,14 @@ import (
 
 // Options controls headless execution behaviour.
 type Options struct {
-	Recipe     *recipe.Recipe
-	Adapters   []models.ModelAdapter
-	SessionID  string
-	Cfg        config.Config
-	OutputDir  string // "" → output.DefaultDir
-	Verbose    bool
-	JSON       bool // also emit report to stdout
+	Recipe         *recipe.Recipe
+	Adapters       []models.ModelAdapter
+	SessionID      string
+	Cfg            config.Config
+	OutputDir      string // directory for output reports (required)
+	CheckpointPath string // path for checkpoint file (required)
+	Verbose        bool
+	JSON           bool // also emit report to stdout
 
 	// DebugLog enables raw API request logging in adapter loops.
 	DebugLog bool
@@ -122,10 +123,10 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		if ctx.Err() != nil {
 			ids := adapterIDs(opts.Adapters)
 			if cp := checkpoint.Build(taskPrompt, ids, responses, opts.Verbose); cp != nil {
-				if err := checkpoint.Save(checkpoint.DefaultPath, *cp); err != nil {
+				if err := checkpoint.Save(opts.CheckpointPath, *cp); err != nil {
 					fmt.Fprintf(w, "warning: could not save checkpoint: %v\n", err)
 				} else {
-					fmt.Fprintf(w, "\nCheckpoint saved to %s. Use `errata run` again to resume.\n", checkpoint.DefaultPath)
+					fmt.Fprintf(w, "\nCheckpoint saved to %s. Use `errata run` again to resume.\n", opts.CheckpointPath)
 				}
 			}
 			// Print partial results for the interrupted task.
@@ -204,9 +205,6 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	}
 
 	outputDir := opts.OutputDir
-	if outputDir == "" {
-		outputDir = output.DefaultDir
-	}
 	path, err := Save(outputDir, headlessReport)
 	if err != nil {
 		fmt.Fprintf(w, "warning: could not save report: %v\n", err)
@@ -279,7 +277,7 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		Timeout:          opts.Cfg.AgentTimeout,
 		CompactThreshold: opts.Cfg.CompactThreshold,
 		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
-		CheckpointPath:   checkpoint.DefaultPath,
+		CheckpointPath:   opts.CheckpointPath,
 	})
 	if tools.SubagentEnabled {
 		ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(

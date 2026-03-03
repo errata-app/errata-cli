@@ -77,6 +77,9 @@ type Store struct {
 	// Recipe store for content-addressed config snapshots.
 	recipeStore *recipestore.Store
 
+	// Output directory for reports.
+	outputDir string
+
 	// Report tracking — path-based (not pointer) so /export works after selection.
 	lastReportPath  string
 	lastActiveTools []string
@@ -89,6 +92,7 @@ type Options struct {
 	SessionPaths   session.Paths
 	SessionID      string
 	PrefPath       string
+	OutputDir      string // directory for output reports
 	Meta           session.Meta
 	RecipeStore    *recipestore.Store
 	Recipe         *recipe.Recipe // base recipe loaded at startup
@@ -118,6 +122,7 @@ func New(opts Options) (*Store, error) {
 		sessionRecipePath: opts.SessionPaths.RecipePath,
 		sessionID:         opts.SessionID,
 		prefPath:          opts.PrefPath,
+		outputDir:         opts.OutputDir,
 		sessionMeta:       opts.Meta,
 		costPerModel:      make(map[string]float64),
 		baseRecipe:        opts.Recipe,
@@ -398,6 +403,9 @@ func (s *Store) CostPerModel() map[string]float64 { return s.costPerModel }
 
 // PrefPath returns the preferences file path.
 func (s *Store) PrefPath() string { return s.prefPath }
+
+// OutputDir returns the output reports directory.
+func (s *Store) OutputDir() string { return s.outputDir }
 
 // SessionID returns the session ID.
 func (s *Store) SessionID() string { return s.sessionID }

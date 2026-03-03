@@ -58,10 +58,9 @@ type Config struct {
 	DefaultAzureModel     string
 	DefaultVertexModel    string
 
-	PreferencesPath   string
-	PricingCachePath  string
-	HistoryPath       string
-	PromptHistoryPath string
+	// DataDir is the root directory for all persistent data files.
+	// Default is "data"; override via ERRATA_DATA_DIR env var.
+	DataDir string
 
 	// MCPServers is the serialised MCP server config (set via recipe ## MCP Servers).
 	// Format: "name:command arg1 arg2,name2:command2"
@@ -120,10 +119,7 @@ func Load() Config {
 		DefaultBedrockModel:   "anthropic.claude-sonnet-4-20250514-v1:0",
 		DefaultAzureModel:     "gpt-4o",
 		DefaultVertexModel:    "gemini-2.5-flash",
-		PreferencesPath:       "data/preferences.jsonl",
-		PricingCachePath:      "data/pricing_cache.json",
-		HistoryPath:           "data/history.json",
-		PromptHistoryPath:     "data/prompt_history.jsonl",
+		DataDir:               "data",
 	}
 
 	// SubagentMaxDepth default (1) comes from the default recipe's ## Sub-Agent section.
@@ -152,6 +148,10 @@ func Load() Config {
 
 	cfg.VertexAIProject = os.Getenv("VERTEX_AI_PROJECT")
 	cfg.VertexAILocation = os.Getenv("VERTEX_AI_LOCATION")
+
+	if v := os.Getenv("ERRATA_DATA_DIR"); v != "" {
+		cfg.DataDir = v
+	}
 
 	return cfg
 }

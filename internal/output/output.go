@@ -24,9 +24,6 @@ import (
 	"github.com/suarezc/errata/internal/uid"
 )
 
-// DefaultDir is the default output directory for reports.
-const DefaultDir = "data/outputs"
-
 // ─── Report types ────────────────────────────────────────────────────────────
 
 // Report is the complete execution snapshot written to data/outputs/.
