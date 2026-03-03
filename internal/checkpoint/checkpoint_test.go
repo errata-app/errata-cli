@@ -437,3 +437,79 @@ func TestSnapshotFromPartial(t *testing.T) {
 		t.Errorf("ProposedWrites = %v", snap.ProposedWrites)
 	}
 }
+
+// ─── ToolCalls round-trip ────────────────────────────────────────────────────
+
+func TestFromModelResponse_ToolCalls_RoundTrip(t *testing.T) {
+	tc := map[string]int{"read_file": 3, "bash": 1}
+	orig := models.ModelResponse{
+		ModelID:      "test-model",
+		Text:         "done",
+		InputTokens:  200,
+		OutputTokens: 100,
+		ToolCalls:    tc,
+	}
+
+	snap := FromModelResponse(orig)
+	if snap.ToolCalls == nil {
+		t.Fatal("ToolCalls should not be nil in snapshot")
+	}
+	if snap.ToolCalls["read_file"] != 3 || snap.ToolCalls["bash"] != 1 {
+		t.Errorf("snapshot ToolCalls = %v, want %v", snap.ToolCalls, tc)
+	}
+
+	restored := snap.ToModelResponse()
+	if restored.ToolCalls == nil {
+		t.Fatal("ToolCalls should not be nil after round-trip")
+	}
+	if restored.ToolCalls["read_file"] != 3 || restored.ToolCalls["bash"] != 1 {
+		t.Errorf("restored ToolCalls = %v, want %v", restored.ToolCalls, tc)
+	}
+}
+
+func TestSnapshotFromPartial_ToolCalls(t *testing.T) {
+	tc := map[string]int{"write_file": 2}
+	ps := models.PartialSnapshot{
+		Text:      "partial",
+		ToolCalls: tc,
+	}
+	snap := SnapshotFromPartial("m", ps)
+	if snap.ToolCalls == nil {
+		t.Fatal("ToolCalls should not be nil")
+	}
+	if snap.ToolCalls["write_file"] != 2 {
+		t.Errorf("ToolCalls = %v, want %v", snap.ToolCalls, tc)
+	}
+}
+
+func TestToolCalls_SaveLoad_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.json")
+
+	tc := map[string]int{"read_file": 5, "bash": 2}
+	responses := []models.ModelResponse{
+		{
+			ModelID:     "model-a",
+			Text:        "done",
+			ToolCalls:   tc,
+			Interrupted: true,
+		},
+	}
+	cp := Build("prompt", []string{"model-a"}, responses, false)
+	if cp == nil {
+		t.Fatal("Build returned nil")
+	}
+	if err := Save(path, *cp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Responses[0].ToolCalls["read_file"] != 5 {
+		t.Errorf("persisted ToolCalls read_file = %d, want 5", loaded.Responses[0].ToolCalls["read_file"])
+	}
+	if loaded.Responses[0].ToolCalls["bash"] != 2 {
+		t.Errorf("persisted ToolCalls bash = %d, want 2", loaded.Responses[0].ToolCalls["bash"])
+	}
+}

@@ -45,14 +45,15 @@ type EventRecord struct {
 
 // ResponseRecord captures the final outcome of a RunAgent call.
 type ResponseRecord struct {
-	Text          string        `json:"text"`
-	InputTokens   int64         `json:"input_tokens"`
-	OutputTokens  int64         `json:"output_tokens"`
-	CostUSD       float64       `json:"cost_usd"`
-	LatencyMS     int64         `json:"latency_ms"`
-	ProposedFiles []string      `json:"proposed_files"`
-	Writes        []WriteRecord `json:"writes,omitempty"`
-	Error         string        `json:"error,omitempty"`
+	Text          string         `json:"text"`
+	InputTokens   int64          `json:"input_tokens"`
+	OutputTokens  int64          `json:"output_tokens"`
+	CostUSD       float64        `json:"cost_usd"`
+	LatencyMS     int64          `json:"latency_ms"`
+	ProposedFiles []string       `json:"proposed_files"`
+	Writes        []WriteRecord  `json:"writes,omitempty"`
+	ToolCalls     map[string]int `json:"tool_calls,omitempty"`
+	Error         string         `json:"error,omitempty"`
 }
 
 // WriteRecord captures one proposed file write (path + full content).
@@ -185,6 +186,7 @@ func (a *loggingAdapter) RunAgent(
 			LatencyMS:     resp.LatencyMS,
 			ProposedFiles: proposedFiles,
 			Writes:        writes,
+			ToolCalls:     resp.ToolCalls,
 			Error:         resp.Error,
 		},
 	})

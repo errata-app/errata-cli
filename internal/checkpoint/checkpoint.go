@@ -35,6 +35,7 @@ type ResponseSnapshot struct {
 	OutputTokens        int64           `json:"output_tokens"`
 	CostUSD             float64         `json:"cost_usd"`
 	ProposedWrites      []WriteSnapshot `json:"proposed_writes,omitempty"`
+	ToolCalls           map[string]int  `json:"tool_calls,omitempty"`
 	Error               string          `json:"error,omitempty"`
 	Interrupted         bool            `json:"interrupted"`
 	Completed           bool            `json:"completed"`
@@ -80,6 +81,7 @@ func FromModelResponse(r models.ModelResponse) ResponseSnapshot {
 		OutputTokens:        r.OutputTokens,
 		CostUSD:             r.CostUSD,
 		ProposedWrites:      toWriteSnapshots(r.ProposedWrites),
+		ToolCalls:           r.ToolCalls,
 		Error:               r.Error,
 		Interrupted:         r.Interrupted,
 		Completed:           !r.Interrupted && r.Error == "",
@@ -96,6 +98,7 @@ func (s ResponseSnapshot) ToModelResponse() models.ModelResponse {
 		OutputTokens:        s.OutputTokens,
 		CostUSD:             s.CostUSD,
 		ProposedWrites:      fromWriteSnapshots(s.ProposedWrites),
+		ToolCalls:           s.ToolCalls,
 		Error:               s.Error,
 		Interrupted:         s.Interrupted,
 	}
@@ -246,6 +249,7 @@ func SnapshotFromPartial(modelID string, ps models.PartialSnapshot) ResponseSnap
 		CostUSD:        ps.CostUSD,
 		LatencyMS:      ps.LatencyMS,
 		ProposedWrites: toWriteSnapshots(ps.Writes),
+		ToolCalls:      ps.ToolCalls,
 		Interrupted:    true, // still in progress
 	}
 }

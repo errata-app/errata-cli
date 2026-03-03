@@ -46,6 +46,7 @@ func runAnthropicAgentLoop(
 
 	var textParts []string
 	var proposed []tools.FileWrite
+	toolCalls := map[string]int{}
 	var totalInput, totalOutput int64
 	start := time.Now()
 
@@ -74,7 +75,7 @@ func runAnthropicAgentLoop(
 		resp, err := client.Messages.New(ctx, params)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, err), err
+				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err), err
 			}
 			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err), err
 		}
@@ -101,7 +102,7 @@ func runAnthropicAgentLoop(
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, fmt.Sprintf("error parsing arguments: %v", err), true))
 					continue
 				}
-				result, ok := DispatchTool(ctx, tu.Name, extractStringMap(input), onEvent, &proposed)
+				result, ok := DispatchTool(ctx, tu.Name, extractStringMap(input), onEvent, &proposed, &toolCalls)
 				if ok {
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, result, false))
 				} else {
@@ -115,10 +116,10 @@ func runAnthropicAgentLoop(
 		}
 
 		messages = append(messages, anthropic.NewUserMessage(toolResults...))
-		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed)
+		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
 	}
 
-	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed), nil
+	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls), nil
 }
 
 // buildAnthropicTools converts the active tool definitions from context into

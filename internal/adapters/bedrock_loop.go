@@ -79,6 +79,7 @@ func runBedrockAgentLoop(
 
 	var textParts []string
 	var proposed []tools.FileWrite
+	toolCalls := map[string]int{}
 	var totalInput, totalOutput int64
 
 	for {
@@ -100,7 +101,7 @@ func runBedrockAgentLoop(
 		resp, err := cfg.client.Converse(ctx, input)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, err), err
+				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err), err
 			}
 			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err), err
 		}
@@ -145,7 +146,7 @@ func runBedrockAgentLoop(
 					inputMap = map[string]any{}
 				}
 
-				result, dispatched := DispatchTool(ctx, aws.ToString(toolUse.Name), extractStringMap(inputMap), onEvent, &proposed)
+				result, dispatched := DispatchTool(ctx, aws.ToString(toolUse.Name), extractStringMap(inputMap), onEvent, &proposed, &toolCalls)
 				if !dispatched {
 					result = fmt.Sprintf("error: unrecognized tool %q", aws.ToString(toolUse.Name))
 				}
@@ -175,10 +176,10 @@ func runBedrockAgentLoop(
 			Role:    bedrocktypes.ConversationRoleUser,
 			Content: toolResults,
 		})
-		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed)
+		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
 	}
 
-	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed), nil
+	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls), nil
 }
 
 // buildBedrockToolConfig translates active tool definitions into Bedrock's ToolConfiguration.

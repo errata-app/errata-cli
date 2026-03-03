@@ -16,17 +16,21 @@ import (
 
 // Entry is one recorded preference decision.
 type Entry struct {
-	TS            string             `json:"ts"`
-	Type          string             `json:"type,omitempty"` // "" for normal entries, "rewind" for rewind markers
-	PromptHash    string             `json:"prompt_hash"`
-	PromptPreview string             `json:"prompt_preview"`
-	Models        []string           `json:"models"`
-	Selected      string             `json:"selected"`
-	Rating        string             `json:"rating,omitempty"` // "bad" for single-model thumbs-down; empty otherwise
-	LatenciesMS   map[string]int64   `json:"latencies_ms"`
-	CostsUSD      map[string]float64 `json:"costs_usd,omitempty"`
-	ConfigHash    string             `json:"config_hash,omitempty"` // content-addressed config snapshot hash
-	SessionID     string             `json:"session_id"`
+	TS                  string                       `json:"ts"`
+	Type                string                       `json:"type,omitempty"` // "" for normal entries, "rewind" for rewind markers
+	PromptHash          string                       `json:"prompt_hash"`
+	PromptPreview       string                       `json:"prompt_preview"`
+	Models              []string                     `json:"models"`
+	Selected            string                       `json:"selected"`
+	Rating              string                       `json:"rating,omitempty"` // "bad" for single-model thumbs-down; empty otherwise
+	LatenciesMS         map[string]int64             `json:"latencies_ms"`
+	CostsUSD            map[string]float64           `json:"costs_usd"`
+	InputTokens         map[string]int64             `json:"input_tokens"`
+	OutputTokens        map[string]int64             `json:"output_tokens"`
+	ToolCalls           map[string]map[string]int    `json:"tool_calls"`
+	ProposedWritesCount map[string]int               `json:"proposed_writes_count"`
+	ConfigHash          string                       `json:"config_hash,omitempty"` // content-addressed config snapshot hash
+	SessionID           string                       `json:"session_id"`
 }
 
 // StatsFilter controls which entries are included in Summarize/SummarizeDetailed.
@@ -62,28 +66,35 @@ func recordEntry(path, prompt, selected, rating, configHash, sessionID string, r
 	modelIDs := make([]string, len(responses))
 	latencies := make(map[string]int64, len(responses))
 	costs := make(map[string]float64, len(responses))
+	inputTokens := make(map[string]int64, len(responses))
+	outputTokens := make(map[string]int64, len(responses))
+	toolCallsMap := make(map[string]map[string]int, len(responses))
+	proposedWritesCount := make(map[string]int, len(responses))
 	for i, r := range responses {
 		modelIDs[i] = r.ModelID
 		latencies[r.ModelID] = r.LatencyMS
-		if r.CostUSD > 0 {
-			costs[r.ModelID] = r.CostUSD
-		}
-	}
-	if len(costs) == 0 {
-		costs = nil
+		costs[r.ModelID] = r.CostUSD
+		inputTokens[r.ModelID] = r.InputTokens
+		outputTokens[r.ModelID] = r.OutputTokens
+		toolCallsMap[r.ModelID] = r.ToolCalls
+		proposedWritesCount[r.ModelID] = len(r.ProposedWrites)
 	}
 
 	entry := Entry{
-		TS:            time.Now().UTC().Format(time.RFC3339),
-		PromptHash:    fmt.Sprintf("sha256:%x", hash),
-		PromptPreview: preview,
-		Models:        modelIDs,
-		Selected:      selected,
-		Rating:        rating,
-		LatenciesMS:   latencies,
-		CostsUSD:      costs,
-		ConfigHash:    configHash,
-		SessionID:     sessionID,
+		TS:                  time.Now().UTC().Format(time.RFC3339),
+		PromptHash:          fmt.Sprintf("sha256:%x", hash),
+		PromptPreview:       preview,
+		Models:              modelIDs,
+		Selected:            selected,
+		Rating:              rating,
+		LatenciesMS:         latencies,
+		CostsUSD:            costs,
+		InputTokens:         inputTokens,
+		OutputTokens:        outputTokens,
+		ToolCalls:           toolCallsMap,
+		ProposedWritesCount: proposedWritesCount,
+		ConfigHash:          configHash,
+		SessionID:           sessionID,
 	}
 
 	data, err := json.Marshal(entry)
@@ -224,15 +235,19 @@ func matchesFilter(e Entry, f *StatsFilter) bool {
 
 // ModelStats holds detailed per-model analytics derived from preference entries.
 type ModelStats struct {
-	Wins           int
-	Losses         int     // times model was in a run where a different model was selected
-	ThumbsDown     int     // times model received a single-model thumbs-down rating
-	Participations int     // times model appeared in any recorded entry
-	WinRate        float64 // Wins / Participations × 100; 0 if Participations == 0
-	LossRate       float64 // Losses / Participations × 100
-	BadRate        float64 // ThumbsDown / Participations × 100
-	AvgLatencyMS   float64 // mean latency across all runs where model participated
-	AvgCostUSD     float64 // mean cost; 0 for entries recorded before cost tracking
+	Wins              int
+	Losses            int     // times model was in a run where a different model was selected
+	ThumbsDown        int     // times model received a single-model thumbs-down rating
+	Participations    int     // times model appeared in any recorded entry
+	WinRate           float64 // Wins / Participations × 100; 0 if Participations == 0
+	LossRate          float64 // Losses / Participations × 100
+	BadRate           float64 // ThumbsDown / Participations × 100
+	AvgLatencyMS      float64 // mean latency across all runs where model participated
+	AvgCostUSD        float64 // mean cost; 0 for entries recorded before cost tracking
+	AvgInputTokens    float64 // mean input tokens; 0 for entries without token data
+	AvgOutputTokens   float64 // mean output tokens; 0 for entries without token data
+	AvgToolCalls      float64 // mean total tool calls per run
+	AvgProposedWrites float64 // mean proposed file writes per run
 }
 
 // SummarizeDetailed computes per-model analytics from all preference entries.
@@ -240,12 +255,16 @@ type ModelStats struct {
 // have zero cost contribution. If filter is non-nil, only matching entries are included.
 func SummarizeDetailed(path string, filter *StatsFilter) map[string]ModelStats {
 	type accumulator struct {
-		wins           int
-		losses         int
-		thumbsDown     int
-		participations int
-		totalLatencyMS int64
-		totalCostUSD   float64
+		wins               int
+		losses             int
+		thumbsDown         int
+		participations     int
+		totalLatencyMS     int64
+		totalCostUSD       float64
+		totalInputTokens   int64
+		totalOutputTokens  int64
+		totalToolCalls     int
+		totalProposedWrites int
 	}
 
 	acc := map[string]*accumulator{}
@@ -265,6 +284,20 @@ func SummarizeDetailed(path string, filter *StatsFilter) map[string]ModelStats {
 			if cost, ok := e.CostsUSD[m]; ok {
 				a.totalCostUSD += cost
 			}
+			if tok, ok := e.InputTokens[m]; ok {
+				a.totalInputTokens += tok
+			}
+			if tok, ok := e.OutputTokens[m]; ok {
+				a.totalOutputTokens += tok
+			}
+			if tc, ok := e.ToolCalls[m]; ok {
+				for _, count := range tc {
+					a.totalToolCalls += count
+				}
+			}
+			if pw, ok := e.ProposedWritesCount[m]; ok {
+				a.totalProposedWrites += pw
+			}
 			switch {
 			case e.Selected == m:
 				a.wins++
@@ -280,23 +313,32 @@ func SummarizeDetailed(path string, filter *StatsFilter) map[string]ModelStats {
 	result := make(map[string]ModelStats, len(acc))
 	for m, a := range acc {
 		var winRate, lossRate, badRate, avgLatency, avgCost float64
+		var avgInputTokens, avgOutputTokens, avgToolCalls, avgProposedWrites float64
 		if a.participations > 0 {
 			winRate = float64(a.wins) / float64(a.participations) * 100
 			lossRate = float64(a.losses) / float64(a.participations) * 100
 			badRate = float64(a.thumbsDown) / float64(a.participations) * 100
 			avgLatency = float64(a.totalLatencyMS) / float64(a.participations)
 			avgCost = a.totalCostUSD / float64(a.participations)
+			avgInputTokens = float64(a.totalInputTokens) / float64(a.participations)
+			avgOutputTokens = float64(a.totalOutputTokens) / float64(a.participations)
+			avgToolCalls = float64(a.totalToolCalls) / float64(a.participations)
+			avgProposedWrites = float64(a.totalProposedWrites) / float64(a.participations)
 		}
 		result[m] = ModelStats{
-			Wins:           a.wins,
-			Losses:         a.losses,
-			ThumbsDown:     a.thumbsDown,
-			Participations: a.participations,
-			WinRate:        winRate,
-			LossRate:       lossRate,
-			BadRate:        badRate,
-			AvgLatencyMS:   avgLatency,
-			AvgCostUSD:     avgCost,
+			Wins:              a.wins,
+			Losses:            a.losses,
+			ThumbsDown:        a.thumbsDown,
+			Participations:    a.participations,
+			WinRate:           winRate,
+			LossRate:          lossRate,
+			BadRate:           badRate,
+			AvgLatencyMS:      avgLatency,
+			AvgCostUSD:        avgCost,
+			AvgInputTokens:    avgInputTokens,
+			AvgOutputTokens:   avgOutputTokens,
+			AvgToolCalls:      avgToolCalls,
+			AvgProposedWrites: avgProposedWrites,
 		}
 	}
 	return result
