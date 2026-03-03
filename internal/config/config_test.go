@@ -20,7 +20,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-6", cfg.DefaultAnthropicModel)
 	assert.Equal(t, "gpt-4o", cfg.DefaultOpenAIModel)
 	assert.Equal(t, "gemini-2.5-flash", cfg.DefaultGeminiModel)
-	assert.Equal(t, "data/preferences.jsonl", cfg.PreferencesPath)
+	assert.Equal(t, "data", cfg.DataDir)
 	assert.Equal(t, 0, cfg.SubagentMaxDepth, "default is 0 (disabled) when SubagentEnabled=false; comes from recipe when enabled")
 	assert.Equal(t, 20, cfg.MaxHistoryTurns)
 	assert.Nil(t, cfg.Seed)
@@ -79,6 +79,14 @@ func TestLoad_DefaultModelNames(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-6", cfg.DefaultAnthropicModel)
 	assert.Equal(t, "gpt-4o", cfg.DefaultOpenAIModel)
 	assert.Equal(t, "gemini-2.5-flash", cfg.DefaultGeminiModel)
+}
+
+func TestLoad_DataDirEnvOverride(t *testing.T) {
+	os.Setenv("ERRATA_DATA_DIR", "/custom/data")
+	defer os.Unsetenv("ERRATA_DATA_DIR")
+
+	cfg := config.Load()
+	assert.Equal(t, "/custom/data", cfg.DataDir)
 }
 
 func TestLoad_OpenRouterAPIKey(t *testing.T) {

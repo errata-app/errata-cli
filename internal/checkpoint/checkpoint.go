@@ -14,9 +14,6 @@ import (
 	"github.com/suarezc/errata/internal/tools"
 )
 
-// DefaultPath is the default location for checkpoint files.
-const DefaultPath = "data/checkpoint.json"
-
 // Checkpoint stores the state of an interrupted run.
 type Checkpoint struct {
 	Prompt     string             `json:"prompt"`

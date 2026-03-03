@@ -377,7 +377,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			toolNames[i] = d.Name
 		}
 		report := output.BuildReport(sessionID, rec, trimmed, responses, collector, toolNames)
-		reportPath, err := output.Save(output.DefaultDir, report)
+		reportPath, err := output.Save(a.store.OutputDir(), report)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
 		}
@@ -615,7 +615,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			toolNames[i] = d.Name
 		}
 		report := output.BuildReport(sessionID, rec, userPrompt, allResponses, collector, toolNames)
-		reportPath, err := output.Save(output.DefaultDir, report)
+		reportPath, err := output.Save(a.store.OutputDir(), report)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
 		}
@@ -754,7 +754,7 @@ func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 		return a.withMessage("No run output to export. Run a prompt first.")
 	}
 
-	dir := output.DefaultDir
+	dir := a.store.OutputDir()
 	if args != "" {
 		dir = args
 	}

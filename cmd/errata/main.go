@@ -14,14 +14,15 @@ import (
 	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/datastore"
-	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/headless"
 	"github.com/suarezc/errata/internal/logging"
 	"github.com/suarezc/errata/internal/mcp"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/paths"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/internal/recipestore"
 	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/tools"
 	"github.com/suarezc/errata/internal/ui"
@@ -29,13 +30,11 @@ import (
 )
 
 var (
-	recipePath    string
-	debugLogPath  string
-	continueFlag  bool
-	resumeID      string
+	recipePath   string
+	debugLogPath string
+	continueFlag bool
+	resumeID     string
 )
-
-const sessionsBaseDir = "data/sessions"
 
 func main() {
 	root := &cobra.Command{
@@ -120,17 +119,17 @@ func applyRecipeToolSettings(rec *recipe.Recipe) {
 	}
 }
 
-// setupAdapters loads config, pricing, adapters, and MCP servers.
+// setupAdapters loads pricing, adapters, and MCP servers.
 // Returns adapters, warnings, MCP state (defs + dispatchers),
 // and a cleanup function the caller must defer.
-func setupAdapters(cfg config.Config, debugLog, sessionID string) (
+func setupAdapters(cfg config.Config, pricingCachePath, debugLog, sessionID string) (
 	ads []models.ModelAdapter,
 	warnings []string,
 	mcpDefs []tools.ToolDef,
 	mcpDispatchers map[string]tools.MCPDispatcher,
 	cleanup func(),
 ) {
-	pricing.LoadPricing(cfg.PricingCachePath)
+	pricing.LoadPricing(pricingCachePath)
 	ads, warnings = adapters.ListAdapters(cfg)
 	cleanup = func() {}
 
@@ -161,6 +160,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	rec := loadRecipe()
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
+	layout := paths.New(cfg.DataDir)
 	applyProjectRoot(rec)
 	applyRecipeToolSettings(rec)
 
@@ -177,27 +177,27 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	switch {
 	case resumeID != "":
 		// --resume <id> — resolve by exact match or prefix.
-		resolved, err := session.Resolve(sessionsBaseDir, resumeID)
+		resolved, err := session.Resolve(layout.Sessions, resumeID)
 		if err != nil {
 			return fmt.Errorf("session resolve: %w", err)
 		}
 		sessionID = resolved
-		sp = session.PathsFor(sessionsBaseDir, sessionID)
+		sp = session.PathsFor(layout.Sessions, sessionID)
 		resuming = true
 
 	case continueFlag:
 		// --continue — resume most recent session.
-		latest, err := session.LatestID(sessionsBaseDir)
+		latest, err := session.LatestID(layout.Sessions)
 		if err != nil {
 			return fmt.Errorf("no previous session to continue: %w", err)
 		}
 		sessionID = latest
-		sp = session.PathsFor(sessionsBaseDir, sessionID)
+		sp = session.PathsFor(layout.Sessions, sessionID)
 		resuming = true
 
 	default:
 		// Fresh session.
-		sessionID, sp = session.New(sessionsBaseDir)
+		sessionID, sp = session.New(layout.Sessions)
 	}
 
 	// If resuming and a session recipe exists, load it instead of the base recipe.
@@ -211,6 +211,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 				// Re-apply on top of config.
 				cfg = config.Load()
 				rec.ApplyTo(&cfg)
+				layout = paths.New(cfg.DataDir)
 				applyRecipeToolSettings(rec)
 			}
 		}
@@ -218,7 +219,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Session: %s\n", sessionID)
 
-	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath, sessionID)
+	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, layout.PricingCache, debugLogPath, sessionID)
 	defer cleanup()
 
 	// Fetch available models from all configured providers (best-effort).
@@ -246,12 +247,13 @@ func runREPL(cmd *cobra.Command, args []string) error {
 
 	store, err := datastore.New(datastore.Options{
 		HistoryPath:    sp.HistoryPath,
-		PromptHistPath: cfg.PromptHistoryPath,
+		PromptHistPath: layout.PromptHistory,
 		SessionPaths:   sp,
 		SessionID:      sessionID,
-		PrefPath:       cfg.PreferencesPath,
+		PrefPath:       layout.Preferences,
+		OutputDir:      layout.Outputs,
 		Meta:           meta,
-		RecipeStore:    recipestore.New("data/configs.json"),
+		RecipeStore:    recipestore.New(layout.ConfigStore),
 		Recipe:         rec,
 	})
 	if err != nil {
@@ -262,8 +264,6 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-
-
 func runHeadless(cmd *cobra.Command, args []string) error {
 	rec := loadRecipe()
 	if len(rec.Tasks) == 0 {
@@ -272,11 +272,12 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
+	layout := paths.New(cfg.DataDir)
 	applyProjectRoot(rec)
 	applyRecipeToolSettings(rec)
 
 	sessionID := uid.New("ses_")
-	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, debugLogPath, sessionID)
+	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, layout.PricingCache, debugLogPath, sessionID)
 	defer cleanup()
 
 	if len(ads) == 0 {
@@ -289,6 +290,9 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputDir, _ := cmd.Flags().GetString("output-dir")
+	if outputDir == "" {
+		outputDir = layout.Outputs
+	}
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -308,6 +312,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 		SessionID:      sessionID,
 		Cfg:            cfg,
 		OutputDir:      outputDir,
+		CheckpointPath: layout.Checkpoint,
 		Verbose:        verbose,
 		JSON:           jsonFlag,
 		DebugLog:       debugLogPath != "",
@@ -324,14 +329,15 @@ func runStats(cmd *cobra.Command, args []string) error {
 	rec := loadRecipe()
 	cfg := config.Load()
 	rec.ApplyTo(&cfg)
+	layout := paths.New(cfg.DataDir)
 
-	filter := resolveStatsFilter(recipeFilter, configFilter)
+	filter := resolveStatsFilter(layout.ConfigStore, recipeFilter, configFilter)
 
 	if detail {
-		return runStatsDetailed(cfg, filter)
+		return runStatsDetailed(layout.Preferences, filter)
 	}
 
-	tally := preferences.Summarize(cfg.PreferencesPath, filter)
+	tally := preferences.Summarize(layout.Preferences, filter)
 	if len(tally) == 0 {
 		fmt.Println("No preference data yet.")
 		return nil
@@ -362,12 +368,12 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 // resolveStatsFilter builds a StatsFilter from CLI flags.
 // --config takes precedence; --recipe resolves to matching hashes via the config store.
-func resolveStatsFilter(recipeName, configHash string) *preferences.StatsFilter {
+func resolveStatsFilter(configStorePath, recipeName, configHash string) *preferences.StatsFilter {
 	if configHash != "" {
 		return &preferences.StatsFilter{ConfigHash: configHash}
 	}
 	if recipeName != "" {
-		cs := recipestore.New("data/configs.json")
+		cs := recipestore.New(configStorePath)
 		hashes := cs.HashesForName(recipeName)
 		if len(hashes) == 1 {
 			return &preferences.StatsFilter{ConfigHash: hashes[0]}
@@ -381,8 +387,8 @@ func resolveStatsFilter(recipeName, configHash string) *preferences.StatsFilter 
 	return nil
 }
 
-func runStatsDetailed(cfg config.Config, filter *preferences.StatsFilter) error {
-	stats := preferences.SummarizeDetailed(cfg.PreferencesPath, filter)
+func runStatsDetailed(preferencesPath string, filter *preferences.StatsFilter) error {
+	stats := preferences.SummarizeDetailed(preferencesPath, filter)
 	if len(stats) == 0 {
 		fmt.Println("No preference data yet.")
 		return nil
@@ -427,7 +433,9 @@ func runStatsDetailed(cfg config.Config, filter *preferences.StatsFilter) error 
 }
 
 func runSessions(cmd *cobra.Command, args []string) error {
-	metas, err := session.List(sessionsBaseDir)
+	cfg := config.Load()
+	layout := paths.New(cfg.DataDir)
+	metas, err := session.List(layout.Sessions)
 	if err != nil {
 		return fmt.Errorf("could not list sessions: %w", err)
 	}

@@ -52,6 +52,7 @@ func newAppForTestWithRecipe(t *testing.T, ads []models.ModelAdapter, rec *recip
 		SessionPaths:   sp,
 		SessionID:      "session",
 		PrefPath:       filepath.Join(tmp, "pref.jsonl"),
+		OutputDir:      filepath.Join(tmp, "outputs"),
 		Meta:           meta,
 		Recipe:         rec,
 	})
