@@ -43,8 +43,9 @@ func testAnthropicConfig(ts *httptest.Server) *anthropicRunConfig {
 			option.WithAPIKey("test-key"),
 			option.WithBaseURL(ts.URL),
 		},
-		modelID:     "claude-sonnet-4-6",
-		qualifiedID: "anthropic/claude-sonnet-4-6",
+		modelID:         "claude-sonnet-4-6",
+		qualifiedID:     "anthropic/claude-sonnet-4-6",
+		maxOutputTokens: 16_000,
 	}
 }
 
@@ -262,6 +263,24 @@ func TestAnthropicLoop_APIError(t *testing.T) {
 	require.Error(t, err)
 	assert.NotEmpty(t, resp.Error)
 	assert.False(t, resp.OK())
+}
+
+func TestAnthropicAdapter_MaxOutputTokensFromCapabilities(t *testing.T) {
+	tests := []struct {
+		modelID  string
+		expected int64
+	}{
+		{"claude-sonnet-4-6", 16_000},
+		{"claude-opus-4-6", 32_000},
+		{"claude-haiku-4-5", 8096},
+	}
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			adapter := NewAnthropicAdapter(tt.modelID, "fake-key")
+			caps := adapter.Capabilities(context.Background())
+			assert.Equal(t, tt.expected, int64(caps.MaxOutputTokens), "MaxOutputTokens mismatch for %s", tt.modelID)
+		})
+	}
 }
 
 func TestAnthropicLoop_EndTurnStopsLoop(t *testing.T) {

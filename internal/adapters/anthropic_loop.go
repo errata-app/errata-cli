@@ -14,9 +14,10 @@ import (
 
 // anthropicRunConfig parameterises the Anthropic agentic loop.
 type anthropicRunConfig struct {
-	clientOpts  []option.RequestOption
-	modelID     string // display ID (set on ModelResponse)
-	qualifiedID string // provider-prefixed ID for pricing/snapshot (e.g. "anthropic/claude-sonnet-4-6")
+	clientOpts      []option.RequestOption
+	modelID         string // display ID (set on ModelResponse)
+	qualifiedID     string // provider-prefixed ID for pricing/snapshot (e.g. "anthropic/claude-sonnet-4-6")
+	maxOutputTokens int64  // from capabilities; Anthropic API requires this field
 }
 
 // runAnthropicAgentLoop is the agentic tool-use loop for the Anthropic adapter.
@@ -59,7 +60,7 @@ func runAnthropicAgentLoop(
 	for {
 		params := anthropic.MessageNewParams{
 			Model:     anthropic.Model(cfg.modelID),
-			MaxTokens: 8096,
+			MaxTokens: cfg.maxOutputTokens,
 			Tools:     toolParams,
 			Messages:  messages,
 		}
