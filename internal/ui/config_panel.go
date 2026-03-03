@@ -940,7 +940,7 @@ func (a *App) syncToolAllowlist() {
 
 // ── rendering ───────────────────────────────────────────────────────────────
 
-func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width, maxHeight int, listItems []listItem, listCursor, listOffset int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string, listFilter string) string {
+func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, width, maxHeight int, listItems []listItem, listCursor, listOffset int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string, listFilter string) string {
 	var sb strings.Builder
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
@@ -949,11 +949,7 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF00"))
 	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 
-	title := "  Configuration"
-	if modified {
-		title += "  [modified]"
-	}
-	sb.WriteString(titleStyle.Render(title))
+	sb.WriteString(titleStyle.Render("  Configuration"))
 	sb.WriteByte('\n')
 
 	if expandedIdx >= 0 && expandedIdx < len(sections) {
@@ -1197,7 +1193,6 @@ func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //no
 			switch strings.ToLower(msg.Text) {
 			case "r":
 				a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
-				a.store.SetRecipeModified(false)
 				a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 				return a, nil
 			case "q":
@@ -1320,7 +1315,7 @@ func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 					}
 				}
 				item.Active = !item.Active
-				a.store.SetRecipeModified(true)
+	
 
 				// Rebuild activeAdapters from the list.
 				var active []models.ModelAdapter
@@ -1361,7 +1356,7 @@ func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 				}
 			case "tools":
 				item.Active = !item.Active
-				a.store.SetRecipeModified(true)
+	
 				if a.disabledTools == nil {
 					a.disabledTools = make(map[string]bool)
 				}
@@ -1374,7 +1369,7 @@ func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 				a.syncToolAllowlist()
 			default:
 				item.Active = !item.Active
-				a.store.SetRecipeModified(true)
+	
 			}
 		}
 		return a, nil
@@ -1418,7 +1413,7 @@ func (a App) handleConfigScalarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { /
 			field.Value = a.configEditBuf
 			field.Editing = false
 			a.configEditBuf = ""
-			a.store.SetRecipeModified(true)
+
 			a.applySessionRecipe()
 			return a, nil
 		case tea.KeyBackspace, tea.KeyDelete:
@@ -1475,7 +1470,6 @@ func (a App) handleConfigTextKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 		sec := a.configSections[a.configExpandedIdx]
 		val := a.configTextArea.Value()
 		_ = setConfigValue(a.store.SessionRecipe(), sec.Path, val)
-		a.store.SetRecipeModified(true)
 		a.configTextEditing = false
 		a.configTextArea.Blur()
 		a.applySessionRecipe()

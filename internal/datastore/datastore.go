@@ -70,9 +70,8 @@ type Store struct {
 	totalCost    float64
 
 	// Recipe state.
-	baseRecipe     *recipe.Recipe // immutable base recipe from startup
-	sessionRecipe  *recipe.Recipe // working copy; nil until first /config or /load
-	recipeModified bool           // true when sessionRecipe differs from baseRecipe
+	baseRecipe    *recipe.Recipe // immutable base recipe from startup
+	sessionRecipe *recipe.Recipe // working copy; nil until first /config or /load
 
 	// Recipe store for content-addressed config snapshots.
 	recipeStore *recipestore.Store
@@ -444,12 +443,6 @@ func (s *Store) ActiveRecipe() *recipe.Recipe {
 	}
 	return s.baseRecipe
 }
-
-// RecipeModified returns whether the session recipe has been modified.
-func (s *Store) RecipeModified() bool { return s.recipeModified }
-
-// SetRecipeModified sets the recipe modified flag.
-func (s *Store) SetRecipeModified(v bool) { s.recipeModified = v }
 
 // ── Report Tracking ─────────────────────────────────────────────────────────
 

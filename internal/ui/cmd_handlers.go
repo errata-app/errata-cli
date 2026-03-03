@@ -639,7 +639,6 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 		lowerArgs := strings.ToLower(args)
 		if lowerArgs == "reset" {
 			a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
-			a.store.SetRecipeModified(false)
 			a.applySessionRecipe()
 			a.configOverlayActive = false
 			return a.withMessage("Configuration reset to recipe defaults.")
@@ -730,7 +729,6 @@ func (a App) handleLoadCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocr
 	}
 
 	a.store.SetSessionRecipe(cloneRecipe(rec))
-	a.store.SetRecipeModified(true)
 	a.applySessionRecipe()
 
 	name := rec.Name
