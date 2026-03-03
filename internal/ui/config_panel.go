@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
+	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/tools"
@@ -29,6 +30,7 @@ type configSection struct {
 type listItem struct {
 	Label  string
 	Active bool
+	Header bool // non-selectable section header (e.g. provider name)
 }
 
 // scalarField is one key-value row in a scalar-type section editor.
@@ -364,16 +366,93 @@ func summarizeContextSummarization(rec *recipe.Recipe) string {
 
 // ── list/scalar data builders ───────────────────────────────────────────────
 
-func buildModelsList(rec *recipe.Recipe, adapters []models.ModelAdapter, activeAdapters []models.ModelAdapter) []listItem {
-	activeSet := make(map[string]bool)
-	for _, a := range activeAdapters {
-		activeSet[a.ID()] = true
+// buildModelsList builds the full catalogue list for /config models.
+// Layout: "Active" header + active models, then per-provider headers + inactive models.
+// filter is a case-insensitive substring match on model IDs; empty = show all.
+func buildModelsList(
+	activeAdapters []models.ModelAdapter,
+	allAdapters []models.ModelAdapter,
+	providerModels []adapters.ProviderModels,
+	filter string,
+) []listItem {
+	activeSet := make(map[string]bool, len(activeAdapters))
+	for _, ad := range activeAdapters {
+		activeSet[ad.ID()] = true
 	}
-	items := make([]listItem, 0, len(adapters))
-	for _, a := range adapters {
-		active := activeAdapters == nil || activeSet[a.ID()]
-		items = append(items, listItem{Label: a.ID(), Active: active})
+	// poolSet tracks all models that have an adapter already (to distinguish
+	// catalogue-only models from those already in the adapter pool).
+	poolSet := make(map[string]bool, len(allAdapters))
+	for _, ad := range allAdapters {
+		poolSet[ad.ID()] = true
 	}
+
+	lf := strings.ToLower(filter)
+	matches := func(id string) bool {
+		return lf == "" || strings.Contains(strings.ToLower(id), lf)
+	}
+
+	var items []listItem
+
+	// ── Active section ──────────────────────────────────────────────────────
+	var activeItems []listItem
+	for _, ad := range activeAdapters {
+		if matches(ad.ID()) {
+			activeItems = append(activeItems, listItem{Label: ad.ID(), Active: true})
+		}
+	}
+	if len(activeItems) > 0 {
+		items = append(items, listItem{Label: "Active", Header: true})
+		items = append(items, activeItems...)
+	}
+
+	// ── Per-provider sections (inactive models only) ────────────────────────
+	for _, pm := range providerModels {
+		if pm.Err != nil {
+			continue
+		}
+		var section []listItem
+		for _, id := range pm.Models {
+			if activeSet[id] {
+				continue // already shown in Active section
+			}
+			if matches(id) {
+				section = append(section, listItem{Label: id, Active: false})
+			}
+		}
+		// Also include pool adapters whose IDs are not in any provider listing
+		// (e.g. manually configured models). We attribute them to the first
+		// matching provider by checking the adapter routing prefix, but only
+		// the pool adapters that are not active and not already listed.
+		if len(section) > 0 {
+			items = append(items, listItem{Label: pm.Provider, Header: true})
+			items = append(items, section...)
+		}
+	}
+
+	// ── Pool-only adapters not covered by any provider listing ──────────────
+	// These are adapters in a.adapters whose IDs don't appear in any
+	// providerModels listing and are not active.
+	catalogueSet := make(map[string]bool)
+	for _, pm := range providerModels {
+		for _, id := range pm.Models {
+			catalogueSet[id] = true
+		}
+	}
+	var orphan []listItem
+	for _, ad := range allAdapters {
+		id := ad.ID()
+		if activeSet[id] || catalogueSet[id] {
+			continue
+		}
+		if matches(id) {
+			orphan = append(orphan, listItem{Label: id, Active: false})
+		}
+	}
+	if len(orphan) > 0 {
+		items = append(items, listItem{Label: "Other", Header: true})
+		items = append(items, orphan...)
+	}
+
 	return items
 }
 
@@ -859,7 +938,7 @@ func (a *App) syncToolAllowlist() {
 
 // ── rendering ───────────────────────────────────────────────────────────────
 
-func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width, maxHeight int, listItems []listItem, listCursor, listOffset int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string) string {
+func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int, modified bool, width, maxHeight int, listItems []listItem, listCursor, listOffset int, scalarFields []scalarField, scalarCursor int, editBuf string, textEditing bool, textAreaView string, listFilter string) string {
 	var sb strings.Builder
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
@@ -888,14 +967,25 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 
 		switch sec.Kind {
 		case "list":
+			headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+
 			// Compute visible window. Overhead: title + breadcrumb + desc + blank + footer hint + trailing newline.
 			overhead := 5 // title, breadcrumb, blank after desc, footer hint, trailing newline
 			if sec.DetailDesc != "" {
 				overhead++ // description line
 			}
+			if listFilter != "" {
+				overhead++ // filter bar line
+			}
 			windowSize := max(len(listItems), 1)
 			if maxHeight > 0 {
 				windowSize = max(maxHeight-overhead, 3)
+			}
+
+			// Filter bar.
+			if listFilter != "" {
+				sb.WriteString(dimStyle.Render(fmt.Sprintf("  Filter: %s", listFilter)))
+				sb.WriteByte('\n')
 			}
 
 			start := listOffset
@@ -907,6 +997,14 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 			}
 			for i := start; i < end; i++ {
 				item := listItems[i]
+				if item.Header {
+					// Non-selectable section header.
+					label := fmt.Sprintf("  ── %s ", item.Label)
+					padLen := min(max(width-4-len(label), 0), 40)
+					sb.WriteString(headerStyle.Render(label + strings.Repeat("─", padLen)))
+					sb.WriteByte('\n')
+					continue
+				}
 				cursor := "  "
 				if i == listCursor {
 					cursor = "> "
@@ -925,7 +1023,11 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 				sb.WriteByte('\n')
 			}
 			sb.WriteByte('\n')
-			sb.WriteString(dimStyle.Render("  Space = toggle  Escape = back"))
+			if sec.Name == "models" {
+				sb.WriteString(dimStyle.Render("  Space = toggle  Type to filter  Escape = back"))
+			} else {
+				sb.WriteString(dimStyle.Render("  Space = toggle  Escape = back"))
+			}
 
 		case "scalar":
 			for i, f := range scalarFields {
@@ -1058,7 +1160,8 @@ func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //no
 		case "list":
 			switch sec.Name {
 			case "models":
-				a.configListItems = buildModelsList(sessRec, a.adapters, a.activeAdapters)
+				a.configListFilter = ""
+				a.configListItems = buildModelsList(a.activeAdapters, a.adapters, a.providerModels, "")
 			case "tools":
 				a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
 			case "mcp-servers":
@@ -1104,43 +1207,123 @@ func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //no
 	return a, nil
 }
 
+// nextNonHeaderDown returns the next non-header index after idx, or idx if none.
+func nextNonHeaderDown(items []listItem, idx int) int {
+	for i := idx + 1; i < len(items); i++ {
+		if !items[i].Header {
+			return i
+		}
+	}
+	return idx
+}
+
+// nextNonHeaderUp returns the next non-header index before idx, or idx if none.
+func nextNonHeaderUp(items []listItem, idx int) int {
+	for i := idx - 1; i >= 0; i-- {
+		if !items[i].Header {
+			return i
+		}
+	}
+	return idx
+}
+
+// firstNonHeaderIdx returns the index of the first non-header item, or 0 if none.
+func firstNonHeaderIdx(items []listItem) int {
+	for i, item := range items {
+		if !item.Header {
+			return i
+		}
+	}
+	return 0
+}
+
 func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	sec := a.configSections[a.configExpandedIdx]
+	isModels := sec.Name == "models"
+
 	switch msg.Code {
 	case tea.KeyEscape:
+		if isModels && a.configListFilter != "" {
+			// Clear filter first; second Escape exits section.
+			a.configListFilter = ""
+			a.configListItems = buildModelsList(a.activeAdapters, a.adapters, a.providerModels, "")
+			a.configListCursor = firstNonHeaderIdx(a.configListItems)
+			a.configListOffset = 0
+			return a, nil
+		}
 		a.configExpandedIdx = -1
 		a.configListOffset = 0
+		a.configListFilter = ""
 		a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
 		return a, nil
 	case tea.KeyUp:
-		if a.configListCursor > 0 {
-			a.configListCursor--
+		next := nextNonHeaderUp(a.configListItems, a.configListCursor)
+		if next != a.configListCursor {
+			a.configListCursor = next
 			if a.configListCursor < a.configListOffset {
 				a.configListOffset = a.configListCursor
+				// Also skip header above if visible.
+				if a.configListOffset > 0 && a.configListItems[a.configListOffset-1].Header {
+					a.configListOffset--
+				}
 			}
 		}
 		return a, nil
 	case tea.KeyDown:
-		if a.configListCursor < len(a.configListItems)-1 {
-			a.configListCursor++
+		next := nextNonHeaderDown(a.configListItems, a.configListCursor)
+		if next != a.configListCursor {
+			a.configListCursor = next
 			wh := a.configListWindowHeight()
 			if a.configListCursor >= a.configListOffset+wh {
 				a.configListOffset = a.configListCursor - wh + 1
 			}
 		}
 		return a, nil
+	case tea.KeyBackspace, tea.KeyDelete:
+		if isModels && a.configListFilter != "" {
+			a.configListFilter = a.configListFilter[:len(a.configListFilter)-1]
+			a.configListItems = buildModelsList(a.activeAdapters, a.adapters, a.providerModels, a.configListFilter)
+			a.configListCursor = firstNonHeaderIdx(a.configListItems)
+			a.configListOffset = 0
+			return a, nil
+		}
+		return a, nil
 	case tea.KeyEnter, ' ':
 		if a.configListCursor < len(a.configListItems) {
 			item := &a.configListItems[a.configListCursor]
-			item.Active = !item.Active
-			a.store.SetRecipeModified(true)
+			if item.Header {
+				return a, nil // non-selectable
+			}
+			toggledID := item.Label
 
-			sec := a.configSections[a.configExpandedIdx]
 			switch sec.Name {
 			case "models":
-				// Sync toggled models back to activeAdapters.
+				if !item.Active {
+					// Toggling ON: ensure adapter exists in the pool.
+					found := false
+					for _, ad := range a.adapters {
+						if ad.ID() == toggledID {
+							found = true
+							break
+						}
+					}
+					if !found {
+						newAd, err := adapters.NewAdapter(toggledID, a.cfg)
+						if err != nil {
+							// Revert toggle — can't create adapter (missing API key, etc.)
+							a.configSections = buildConfigSections(a.store.SessionRecipe(), a.adapters, a.disabledTools)
+							return a, nil
+						}
+						a.adapters = append(a.adapters, newAd)
+					}
+				}
+				item.Active = !item.Active
+				a.store.SetRecipeModified(true)
+
+				// Rebuild activeAdapters from the list.
 				var active []models.ModelAdapter
 				for _, li := range a.configListItems {
-					if li.Active {
+					if li.Active && !li.Header {
 						for _, ad := range a.adapters {
 							if ad.ID() == li.Label {
 								active = append(active, ad)
@@ -1149,12 +1332,34 @@ func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 						}
 					}
 				}
-				if len(active) == len(a.adapters) {
-					a.activeAdapters = nil // all active = no filter
-				} else {
-					a.activeAdapters = active
+				a.activeAdapters = active
+
+				// Sync session recipe models.
+				sessRec := a.store.SessionRecipe()
+				sessRec.Models = a.activeModelIDs()
+
+				// Rebuild list (model moves between Active/provider sections).
+				a.configListItems = buildModelsList(a.activeAdapters, a.adapters, a.providerModels, a.configListFilter)
+				// Reposition cursor on the toggled item.
+				for i, li := range a.configListItems {
+					if !li.Header && li.Label == toggledID {
+						a.configListCursor = i
+						break
+					}
+				}
+				// Ensure cursor is within visible window.
+				wh := a.configListWindowHeight()
+				if a.configListCursor < a.configListOffset {
+					a.configListOffset = a.configListCursor
+					if a.configListOffset > 0 && a.configListItems[a.configListOffset-1].Header {
+						a.configListOffset--
+					}
+				} else if a.configListCursor >= a.configListOffset+wh {
+					a.configListOffset = a.configListCursor - wh + 1
 				}
 			case "tools":
+				item.Active = !item.Active
+				a.store.SetRecipeModified(true)
 				if a.disabledTools == nil {
 					a.disabledTools = make(map[string]bool)
 				}
@@ -1165,9 +1370,21 @@ func (a App) handleConfigListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //n
 				}
 				// Sync the effective tool set back to the session recipe allowlist.
 				a.syncToolAllowlist()
+			default:
+				item.Active = !item.Active
+				a.store.SetRecipeModified(true)
 			}
 		}
 		return a, nil
+	default:
+		// Type-to-filter for models section.
+		if isModels && len(msg.Text) > 0 {
+			a.configListFilter += msg.Text
+			a.configListItems = buildModelsList(a.activeAdapters, a.adapters, a.providerModels, a.configListFilter)
+			a.configListCursor = firstNonHeaderIdx(a.configListItems)
+			a.configListOffset = 0
+			return a, nil
+		}
 	}
 	return a, nil
 }

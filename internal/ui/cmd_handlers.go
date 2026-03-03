@@ -81,11 +81,7 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 				}
 			}
 			if found == nil {
-				newAd, err := adapters.NewAdapter(id, a.cfg)
-				if err != nil {
-					return a.withMessage(fmt.Sprintf("Cannot create adapter for %q: %v", id, err))
-				}
-				found = newAd
+				return a.withMessage(fmt.Sprintf("model %q not active — enable it in /config models", id))
 			}
 			mentionAdapters = append(mentionAdapters, found)
 		}
@@ -121,10 +117,7 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubblet
 }
 
 func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	toCompact := a.adapters
-	if a.activeAdapters != nil {
-		toCompact = a.activeAdapters
-	}
+	toCompact := a.activeAdapters
 	histories := a.store.Histories()
 	prog := a.prog
 	var compactSumPrompt string
@@ -221,11 +214,9 @@ func (a App) launchRun(trimmed string) (tea.Model, tea.Cmd) { //nolint:gocritic 
 }
 
 func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdapter) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	toRun := a.adapters
+	toRun := a.activeAdapters
 	if mentionTargets != nil {
 		toRun = mentionTargets
-	} else if a.activeAdapters != nil {
-		toRun = a.activeAdapters
 	}
 
 	if len(toRun) == 0 {
@@ -661,7 +652,8 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 				case "list":
 					switch sec.Name {
 					case "models":
-						a.configListItems = buildModelsList(sessRec, a.adapters, a.activeAdapters)
+						a.configListFilter = ""
+						a.configListItems = buildModelsList(a.activeAdapters, a.adapters, a.providerModels, "")
 					case "tools":
 						a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
 					case "mcp-servers":

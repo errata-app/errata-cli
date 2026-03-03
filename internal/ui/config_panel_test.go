@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/tools"
@@ -368,20 +369,95 @@ func TestCloneRecipe_NilReturnsDefault(t *testing.T) {
 
 func TestBuildModelsList_AllActive(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
-	items := buildModelsList(&recipe.Recipe{}, ads, nil)
-	require.Len(t, items, 2)
-	assert.True(t, items[0].Active)
+	items := buildModelsList(ads, ads, nil, "")
+	// Header "Active" + 2 items.
+	require.Len(t, items, 3)
+	assert.True(t, items[0].Header)
+	assert.Equal(t, "Active", items[0].Label)
 	assert.True(t, items[1].Active)
+	assert.True(t, items[2].Active)
 }
 
 func TestBuildModelsList_WithSubset(t *testing.T) {
-	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}, uiStub{"m3"}}
+	allAds := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}, uiStub{"m3"}}
 	active := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m3"}}
-	items := buildModelsList(&recipe.Recipe{}, ads, active)
+	items := buildModelsList(active, allAds, nil, "")
+	// Active header + m1 + m3, Other header + m2.
+	require.Len(t, items, 5)
+	assert.True(t, items[0].Header)
+	assert.Equal(t, "Active", items[0].Label)
+	assert.Equal(t, "m1", items[1].Label)
+	assert.True(t, items[1].Active)
+	assert.Equal(t, "m3", items[2].Label)
+	assert.True(t, items[2].Active)
+	assert.True(t, items[3].Header)
+	assert.Equal(t, "Other", items[3].Label)
+	assert.Equal(t, "m2", items[4].Label)
+	assert.False(t, items[4].Active)
+}
+
+func TestBuildModelsList_ProviderGroups(t *testing.T) {
+	active := []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}}
+	allAds := []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}}
+	pm := []adapters.ProviderModels{
+		{Provider: "Anthropic", Models: []string{"claude-sonnet-4-6", "claude-opus-4-6"}},
+		{Provider: "OpenAI", Models: []string{"gpt-4o", "gpt-4o-mini"}},
+	}
+	items := buildModelsList(active, allAds, pm, "")
+	// Active: header + claude-sonnet-4-6
+	// Anthropic: header + claude-opus-4-6
+	// OpenAI: header + gpt-4o + gpt-4o-mini
+	assert.Equal(t, "Active", items[0].Label)
+	assert.True(t, items[0].Header)
+	assert.Equal(t, "claude-sonnet-4-6", items[1].Label)
+	assert.True(t, items[1].Active)
+	assert.Equal(t, "Anthropic", items[2].Label)
+	assert.True(t, items[2].Header)
+	assert.Equal(t, "claude-opus-4-6", items[3].Label)
+	assert.False(t, items[3].Active)
+	assert.Equal(t, "OpenAI", items[4].Label)
+	assert.True(t, items[4].Header)
+	assert.Equal(t, "gpt-4o", items[5].Label)
+	assert.Equal(t, "gpt-4o-mini", items[6].Label)
+}
+
+func TestBuildModelsList_Filter(t *testing.T) {
+	active := []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}}
+	allAds := []models.ModelAdapter{uiStub{"claude-sonnet-4-6"}}
+	pm := []adapters.ProviderModels{
+		{Provider: "Anthropic", Models: []string{"claude-sonnet-4-6", "claude-opus-4-6"}},
+		{Provider: "OpenAI", Models: []string{"gpt-4o", "gpt-4o-mini"}},
+	}
+	items := buildModelsList(active, allAds, pm, "gpt")
+	// Only GPT models match, and none are active, so no Active section.
+	// OpenAI header + gpt-4o + gpt-4o-mini.
 	require.Len(t, items, 3)
-	assert.True(t, items[0].Active)  // m1
-	assert.False(t, items[1].Active) // m2
-	assert.True(t, items[2].Active)  // m3
+	assert.Equal(t, "OpenAI", items[0].Label)
+	assert.True(t, items[0].Header)
+	assert.Equal(t, "gpt-4o", items[1].Label)
+	assert.Equal(t, "gpt-4o-mini", items[2].Label)
+}
+
+func TestBuildModelsList_EmptyActiveSet(t *testing.T) {
+	pm := []adapters.ProviderModels{
+		{Provider: "OpenAI", Models: []string{"gpt-4o"}},
+	}
+	items := buildModelsList(nil, nil, pm, "")
+	// No Active header. OpenAI header + gpt-4o.
+	require.Len(t, items, 2)
+	assert.Equal(t, "OpenAI", items[0].Label)
+	assert.True(t, items[0].Header)
+	assert.Equal(t, "gpt-4o", items[1].Label)
+}
+
+func TestBuildModelsList_HeadersNonSelectable(t *testing.T) {
+	active := []models.ModelAdapter{uiStub{"m1"}}
+	items := buildModelsList(active, active, nil, "")
+	for _, item := range items {
+		if item.Header {
+			assert.False(t, item.Active, "header items should not be active")
+		}
+	}
 }
 
 func TestBuildToolsList_Disabled(t *testing.T) {
@@ -441,7 +517,7 @@ func TestBuildScalarFields_UnknownSection(t *testing.T) {
 func TestRenderConfigOverlay_ContainsSectionNames(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
 	for _, name := range interactiveSections {
 		assert.Contains(t, out, name)
 	}
@@ -451,21 +527,21 @@ func TestRenderConfigOverlay_ContainsSectionNames(t *testing.T) {
 func TestRenderConfigOverlay_ModifiedBadge(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, true, 80, 40, nil, 0, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, -1, true, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
 	assert.Contains(t, out, "[modified]")
 }
 
 func TestRenderConfigOverlay_NoModifiedBadgeWhenClean(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
 	assert.NotContains(t, out, "[modified]")
 }
 
 func TestRenderConfigOverlay_ListExpanded(t *testing.T) {
 	sections := []configSection{{Name: "tools", Summary: "8 enabled", Kind: "list"}}
 	items := []listItem{{Label: "bash", Active: true}, {Label: "read_file", Active: false}}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, items, 0, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, items, 0, 0, nil, 0, "", false, "", "")
 	assert.Contains(t, out, "bash")
 	assert.Contains(t, out, "read_file")
 	assert.Contains(t, out, "[x]")
@@ -478,7 +554,7 @@ func TestRenderConfigOverlay_ScalarExpanded(t *testing.T) {
 		{Key: "timeout", Path: "constraints.timeout", Value: "5m0s"},
 		{Key: "max_steps", Path: "constraints.max_steps", Value: "50"},
 	}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, fields, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, fields, 0, "", false, "", "")
 	assert.Contains(t, out, "timeout")
 	assert.Contains(t, out, "max_steps")
 	assert.Contains(t, out, "5m0s")
@@ -599,7 +675,7 @@ func TestConfigPathDefaults_RenderInScalarView(t *testing.T) {
 		[]configSection{{Name: "constraints", Kind: "scalar"}},
 		0, 0, false, 80, 40,
 		nil, 0, 0,
-		fields, 0, "", false, "",
+		fields, 0, "", false, "", "",
 	)
 	// Unset fields should show their default values.
 	assert.Contains(t, out, "(default: 5m)")
@@ -634,7 +710,7 @@ func TestSectionDescriptions_NavViewShowsDescForSelected(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
 	// Render with first section selected.
-	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
 	// The selected section (models) should show its brief description.
 	assert.Contains(t, out, sectionDescriptions["models"].Brief)
 }
@@ -644,7 +720,7 @@ func TestSectionDescriptions_ExpandedViewShowsDetail(t *testing.T) {
 	sections := buildConfigSections(rec, nil, nil)
 	fields := buildScalarFields("constraints", rec)
 	// Expand constraints (index 5).
-	out := renderConfigOverlay(sections, 5, 5, false, 80, 40, nil, 0, 0, fields, 0, "", false, "")
+	out := renderConfigOverlay(sections, 5, 5, false, 80, 40, nil, 0, 0, fields, 0, "", false, "", "")
 	assert.Contains(t, out, "Set wall-clock timeout and maximum tool-call steps per model.")
 }
 
@@ -725,7 +801,7 @@ func TestTextSections_HavePaths(t *testing.T) {
 func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {
 	sections := []configSection{{Name: "system-prompt", Kind: "text", DetailDesc: "test detail"}}
 	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, nil, 0, "",
-		true, "  [textarea content here]")
+		true, "  [textarea content here]", "")
 	assert.Contains(t, out, "[textarea content here]")
 	assert.Contains(t, out, "Ctrl+S = save")
 }
@@ -733,7 +809,7 @@ func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {
 func TestRenderConfigOverlay_TextPreviewShown(t *testing.T) {
 	sections := []configSection{{Name: "system-prompt", Kind: "text", DetailDesc: "test detail"}}
 	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, nil, 0, "Hello world",
-		false, "")
+		false, "", "")
 	assert.Contains(t, out, "Hello world")
 	assert.Contains(t, out, "Enter = edit")
 }
@@ -748,7 +824,7 @@ func TestRenderConfigOverlay_ListWindowed(t *testing.T) {
 		items[i] = listItem{Label: fmt.Sprintf("tool_%02d", i), Active: true}
 	}
 	// maxHeight 12 → overhead ~6 → window ~6 items.
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 12, items, 0, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 12, items, 0, 0, nil, 0, "", false, "", "")
 	// First few items should be visible.
 	assert.Contains(t, out, "tool_00")
 	assert.Contains(t, out, "tool_05")
@@ -768,7 +844,7 @@ func TestRenderConfigOverlay_ListWindowedWithOffset(t *testing.T) {
 		items[i] = listItem{Label: fmt.Sprintf("tool_%02d", i), Active: true}
 	}
 	// Offset=5 so items before 5 are hidden.
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 12, items, 5, 5, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 12, items, 5, 5, nil, 0, "", false, "", "")
 	// Items before offset should not be visible.
 	assert.NotContains(t, out, "tool_00")
 	// Items starting from offset should be visible.
@@ -923,7 +999,7 @@ func TestRenderConfigOverlay_ListFitsHeight(t *testing.T) {
 		{Label: "read_file", Active: true},
 		{Label: "write_file", Active: false},
 	}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, items, 0, 0, nil, 0, "", false, "")
+	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, items, 0, 0, nil, 0, "", false, "", "")
 	assert.Contains(t, out, "bash")
 	assert.Contains(t, out, "read_file")
 	assert.Contains(t, out, "write_file")

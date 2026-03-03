@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/rivo/uniseg"
+	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/commands"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/datastore"
@@ -80,9 +82,16 @@ type feedItem struct {
 // App is the bubbletea model.
 type App struct {
 	adapters       []models.ModelAdapter
-	activeAdapters []models.ModelAdapter // nil = use all adapters
+	activeAdapters []models.ModelAdapter // always explicit; initialised to adapters in New()
 	disabledTools  map[string]bool       // tools excluded from runs; nil = all enabled
 	cfg config.Config
+
+	// providerModels is the full per-provider model catalogue fetched at startup.
+	// Used by /config models to show activatable models from all connected providers.
+	providerModels []adapters.ProviderModels
+
+	// configListFilter is the live type-to-filter text for the models list section.
+	configListFilter string
 
 	// MCP tool definitions and dispatchers (nil if no MCP servers configured)
 	mcpDefs        []tools.ToolDef
@@ -143,10 +152,6 @@ type App struct {
 	// seed for reproducible model sampling; nil = not set
 	seed *int64
 
-	// availableModels is the full list of model IDs available from enabled
-	// providers (fetched at startup). Used by @mention autocomplete.
-	availableModels []string
-
 	// reminderState tracks conditional mid-conversation injection state.
 	// nil when no reminders are configured in the recipe.
 	reminderState *reminders.State
@@ -173,7 +178,7 @@ type App struct {
 }
 
 // New creates the App model.
-func New(adapters []models.ModelAdapter, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, availableModels []string, debugLog bool, store *datastore.Store) *App {
+func New(adapterList []models.ModelAdapter, cfg config.Config, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, providerModels []adapters.ProviderModels, debugLog bool, store *datastore.Store) *App {
 	ta := textarea.New()
 	ta.Placeholder = "Enter a prompt…"
 	ta.Focus()
@@ -197,7 +202,8 @@ func New(adapters []models.ModelAdapter, cfg config.Config, mcpDefs []tools.Tool
 	cta.ShowLineNumbers = false
 
 	app := &App{
-		adapters:       adapters,
+		adapters:       adapterList,
+		activeAdapters: slices.Clone(adapterList),
 		historyIdx:     -1,
 		input:          ta,
 		configTextArea: cta,
@@ -205,7 +211,7 @@ func New(adapters []models.ModelAdapter, cfg config.Config, mcpDefs []tools.Tool
 		cfg:     cfg,
 		mcpDefs: mcpDefs,
 		mcpDispatchers: mcpDispatchers,
-		availableModels: availableModels,
+		providerModels: providerModels,
 		seed:           cfg.Seed,
 		debugLog:       debugLog,
 		store:          store,
@@ -612,6 +618,7 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 				a.configScalarFields, a.configScalarCursor,
 				a.configEditBuf,
 				a.configTextEditing, a.configTextArea.View(),
+				a.configListFilter,
 			))
 			v := tea.NewView(sb.String())
 			v.AltScreen = true
@@ -703,8 +710,8 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 }
 
 // Run starts the bubbletea program and blocks until exit.
-func Run(adapters []models.ModelAdapter, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, resuming bool, availableModels []string, debugLog bool, store *datastore.Store) error {
-	app := New(adapters, cfg, mcpDefs, mcpDispatchers, availableModels, debugLog, store)
+func Run(adapterList []models.ModelAdapter, cfg config.Config, warnings []string, mcpDefs []tools.ToolDef, mcpDispatchers map[string]tools.MCPDispatcher, resuming bool, providerModels []adapters.ProviderModels, debugLog bool, store *datastore.Store) error {
+	app := New(adapterList, cfg, mcpDefs, mcpDispatchers, providerModels, debugLog, store)
 
 	p := tea.NewProgram(app)
 	app.SetProgram(p)
@@ -743,12 +750,8 @@ func Run(adapters []models.ModelAdapter, cfg config.Config, warnings []string, m
 
 // activeModelIDs returns the IDs of the adapters that will run on the next prompt.
 func (a App) activeModelIDs() []string { //nolint:gocritic // called from bubbletea value-receiver methods
-	adapters := a.adapters
-	if a.activeAdapters != nil {
-		adapters = a.activeAdapters
-	}
-	ids := make([]string, len(adapters))
-	for i, ad := range adapters {
+	ids := make([]string, len(a.activeAdapters))
+	for i, ad := range a.activeAdapters {
 		ids[i] = ad.ID()
 	}
 	return ids
