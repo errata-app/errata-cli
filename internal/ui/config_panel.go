@@ -923,7 +923,9 @@ func (a *App) syncToolAllowlist() {
 		return
 	}
 	// Build allowlist from active tools in the config list.
-	var allowlist []string
+	// Use a non-nil empty slice so that unchecking all tools produces
+	// "no tools" rather than nil (which means "all tools").
+	allowlist := []string{}
 	for _, item := range a.configListItems {
 		if item.Active {
 			allowlist = append(allowlist, item.Label)

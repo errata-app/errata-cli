@@ -266,6 +266,22 @@ func TestDefinitionsAllowed_NilAllowlist_UsesAll(t *testing.T) {
 	assert.NotEmpty(t, got)
 }
 
+func TestDefinitionsAllowed_NilAllowlistReturnsAll(t *testing.T) {
+	got := tools.DefinitionsAllowed(nil, nil)
+	assert.Equal(t, tools.Definitions, got)
+}
+
+func TestDefinitionsAllowed_EmptyAllowlistReturnsNone(t *testing.T) {
+	got := tools.DefinitionsAllowed([]string{}, nil)
+	assert.Empty(t, got)
+}
+
+func TestDefinitionsAllowed_EmptyAllowlistPlusDisabled(t *testing.T) {
+	// Empty allowlist already yields zero tools; disabled is irrelevant.
+	got := tools.DefinitionsAllowed([]string{}, map[string]bool{tools.BashToolName: true})
+	assert.Empty(t, got)
+}
+
 func TestDefinitionsAllowed_InvalidNames(t *testing.T) {
 	got := tools.DefinitionsAllowed([]string{"nonexistent_tool"}, nil)
 	assert.Empty(t, got)

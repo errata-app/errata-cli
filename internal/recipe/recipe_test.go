@@ -216,6 +216,37 @@ func TestParse_NoToolsSection(t *testing.T) {
 	assert.Nil(t, r.Tools, "absent ## Tools section should leave Tools nil (all tools enabled)")
 }
 
+func TestParse_ToolsEmptySection(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, v1("## Tools\n")))
+	require.NoError(t, err)
+	require.NotNil(t, r.Tools, "present but empty ## Tools should yield non-nil ToolsConfig")
+	assert.Empty(t, r.Tools.Allowlist, "empty ## Tools should have zero allowlist entries")
+}
+
+func TestMarshalMarkdown_ToolsEmpty(t *testing.T) {
+	r := &recipe.Recipe{
+		Version: 1,
+		Tools:   &recipe.ToolsConfig{Allowlist: []string{}},
+	}
+	md := r.MarshalMarkdown()
+	assert.Contains(t, md, "## Tools\n", "non-nil empty tools should emit ## Tools section")
+
+	// Round-trip: parse the emitted markdown back.
+	rt, err := recipe.Parse(writeRecipe(t, md))
+	require.NoError(t, err)
+	require.NotNil(t, rt.Tools, "round-tripped empty tools should be non-nil")
+	assert.Empty(t, rt.Tools.Allowlist, "round-tripped empty tools should have zero entries")
+}
+
+func TestMarshalMarkdown_ToolsNil(t *testing.T) {
+	r := &recipe.Recipe{
+		Version: 1,
+		Tools:   nil,
+	}
+	md := r.MarshalMarkdown()
+	assert.NotContains(t, md, "## Tools", "nil tools should not emit ## Tools section")
+}
+
 func TestParse_MCPServers(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## MCP Servers
