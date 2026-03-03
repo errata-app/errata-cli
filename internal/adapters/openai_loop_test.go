@@ -144,6 +144,22 @@ func mustJSON(v any) string {
 
 // ─── tests ───────────────────────────────────────────────────────────────────
 
+func TestOpenAILoop_NoTools(t *testing.T) {
+	ts := newOpenAIMockServer(t, []string{
+		openaiTextResponse("No tools here.", 100, 20),
+	})
+	defer ts.Close()
+
+	ctx := tools.WithActiveTools(context.Background(), []tools.ToolDef{})
+	resp, err := runOpenAIAgentLoop(ctx, testOpenAIConfig(ts), nil, "hello",
+		func(models.AgentEvent) {})
+
+	require.NoError(t, err)
+	assert.Equal(t, "No tools here.", resp.Text)
+	assert.Empty(t, resp.ProposedWrites)
+	assert.True(t, resp.OK())
+}
+
 func TestOpenAILoop_TextOnly(t *testing.T) {
 	ts := newOpenAIMockServer(t, []string{
 		openaiTextResponse("Hello, world!", 100, 20),

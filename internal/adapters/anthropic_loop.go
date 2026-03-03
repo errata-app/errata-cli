@@ -60,9 +60,11 @@ func runAnthropicAgentLoop(
 		params := anthropic.MessageNewParams{
 			Model:     anthropic.Model(cfg.modelID),
 			MaxTokens: 8096,
-			System:    []anthropic.TextBlockParam{{Text: systemMsg}},
 			Tools:     toolParams,
 			Messages:  messages,
+		}
+		if systemMsg != "" {
+			params.System = []anthropic.TextBlockParam{{Text: systemMsg}}
 		}
 		if temperature != nil {
 			params.Temperature = anthropic.Float(*temperature)

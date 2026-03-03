@@ -69,8 +69,11 @@ func runBedrockAgentLoop(
 		},
 	})
 
-	systemBlocks := []bedrocktypes.SystemContentBlock{
-		&bedrocktypes.SystemContentBlockMemberText{Value: systemMsg},
+	var systemBlocks []bedrocktypes.SystemContentBlock
+	if systemMsg != "" {
+		systemBlocks = []bedrocktypes.SystemContentBlock{
+			&bedrocktypes.SystemContentBlockMemberText{Value: systemMsg},
+		}
 	}
 
 	var textParts []string
