@@ -101,6 +101,7 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
+	a.lastRunInView = false
 	a.store.ClearRewindStack()
 	a.pastedText = ""
 	a.pastedLineCount = 0
@@ -109,6 +110,7 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 
 func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
+	a.lastRunInView = false
 	a.store.ClearRewindStack()
 	a.pastedText = ""
 	a.pastedLineCount = 0
@@ -224,6 +226,10 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		return a.withMessage("No models configured. Set API keys in .env and restart.")
 	}
 
+	// Flush the previous run's output from View() to scrollback.
+	var flushCmd tea.Cmd
+	a, flushCmd = a.flushLastRunToScrollback()
+
 	// Record in prompt history (deduplicate consecutive identical entries).
 	a.historyIdx = -1
 	a.historyInputBuf = ""
@@ -298,7 +304,11 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		baseCtx = adapters.WithDebugRequests(baseCtx)
 	}
 
-	return a, tea.Batch(promptPrintCmd, func() tea.Msg {
+	var batchCmds []tea.Cmd
+	if flushCmd != nil {
+		batchCmds = append(batchCmds, flushCmd)
+	}
+	batchCmds = append(batchCmds, promptPrintCmd, func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		// Skip auto-compact when context strategy is "manual" or "off".
@@ -385,6 +395,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 
 		return runCompleteMsg{responses: responses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
 	})
+	return a, tea.Batch(batchCmds...)
 }
 
 func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -453,6 +464,10 @@ func (a App) handleRewindCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbl
 }
 
 func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdapter, completedResponses []models.ModelResponse, verbose bool) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	// Flush the previous run's output from View() to scrollback.
+	var flushCmd tea.Cmd
+	a, flushCmd = a.flushLastRunToScrollback()
+
 	a.lastPrompt = userPrompt
 	a.mode = modeRunning
 	a.panels = nil
@@ -532,7 +547,11 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		baseCtx = adapters.WithDebugRequests(baseCtx)
 	}
 
-	return a, tea.Batch(promptPrintCmd, func() tea.Msg {
+	var resumeBatchCmds []tea.Cmd
+	if flushCmd != nil {
+		resumeBatchCmds = append(resumeBatchCmds, flushCmd)
+	}
+	resumeBatchCmds = append(resumeBatchCmds, promptPrintCmd, func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		if contextStrategy != "manual" && contextStrategy != "off" {
@@ -623,6 +642,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 
 		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
 	})
+	return a, tea.Batch(resumeBatchCmds...)
 }
 
 func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver

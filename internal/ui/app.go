@@ -159,6 +159,12 @@ type App struct {
 	// debugLog is true when --debug-log is active; enables raw API request logging.
 	debugLog bool
 
+	// lastRunInView: when true, the last completed run's panels+diffs are
+	// rendered in View() instead of being pushed to scrollback. This enables
+	// Ctrl+O expand/collapse to take visible effect. Flushed to scrollback
+	// when the next run starts, /clear, /wipe, or withMessage is called.
+	lastRunInView bool
+
 	// hint line tracking (for feed viewport height budget)
 	lastHintLines int
 
@@ -318,9 +324,60 @@ func (a *App) renderInitialFeed() string {
 	return sb.String()
 }
 
+// renderLastRunView builds the display string for the last completed run's
+// panels + diffs + note, suitable for rendering in View(). Returns "" if
+// lastRunInView is false or no run feed item exists.
+func (a App) renderLastRunView() string { //nolint:gocritic // called from bubbletea value-receiver methods
+	if !a.lastRunInView {
+		return ""
+	}
+	for i := len(a.feed) - 1; i >= 0; i-- {
+		item := a.feed[i]
+		if item.kind != "run" {
+			continue
+		}
+		promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
+		noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
+		var sb strings.Builder
+		sb.WriteString(wrapText("> "+item.prompt, a.width, 0, promptStyle))
+		sb.WriteByte('\n')
+		if len(item.panels) > 0 {
+			sb.WriteString(renderInlinePanels(item.panels, a.width))
+		}
+		if item.responses != nil {
+			if d := RenderDiffs(item.responses, a.width); d != "" {
+				sb.WriteString(d)
+			}
+		}
+		if item.note != "" {
+			sb.WriteString(wrapText(item.note, a.width, 2, noteStyle))
+			sb.WriteByte('\n')
+		}
+		return sb.String()
+	}
+	return ""
+}
+
+// flushLastRunToScrollback pushes the last run's rendered output to terminal
+// scrollback and clears the lastRunInView flag. Returns the updated App and a
+// tea.Println cmd (or nil if nothing to flush).
+func (a App) flushLastRunToScrollback() (App, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	if !a.lastRunInView {
+		return a, nil
+	}
+	content := a.renderLastRunView()
+	a.lastRunInView = false
+	if content == "" {
+		return a, nil
+	}
+	return a, tea.Println(strings.TrimRight(content, "\n"))
+}
+
 // withMessage appends a system message to the feed and prints it to terminal
 // scrollback via tea.Println.
 func (a *App) withMessage(text string) (App, tea.Cmd) {
+	flushed, flushCmd := a.flushLastRunToScrollback()
+	*a = flushed
 	a.feed = append(a.feed, feedItem{kind: "message", text: text})
 	msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	w := max(a.width, 40)
@@ -329,7 +386,11 @@ func (a *App) withMessage(text string) (App, tea.Cmd) {
 		sb.WriteString(wrapText(line, w, 2, msgStyle))
 		sb.WriteByte('\n')
 	}
-	return *a, tea.Println(strings.TrimRight(sb.String(), "\n"))
+	printCmd := tea.Println(strings.TrimRight(sb.String(), "\n"))
+	if flushCmd != nil {
+		return *a, tea.Batch(flushCmd, printCmd)
+	}
+	return *a, printCmd
 }
 
 //nolint:gocritic // bubbletea requires value receiver for tea.Model interface
@@ -493,12 +554,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.feed[len(a.feed)-1].responses = msg.responses
 		}
 
-		// Build scrollback output: panel summaries + diffs.
-		var out strings.Builder
-		out.WriteString(renderInlinePanels(a.panels, a.width))
-		if d := RenderDiffs(msg.responses, a.width); d != "" {
-			out.WriteString(d)
-		}
+		// Keep the last run's output in View() for live re-rendering (Ctrl+O).
+		a.lastRunInView = true
 
 		// If any models were interrupted, show a message and return to idle.
 		if runner.HasInterrupted(msg.responses) {
@@ -515,11 +572,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(a.feed) > 0 {
 				a.feed[len(a.feed)-1].note = note
 			}
-			noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
-			out.WriteString(wrapText(note, a.width, 2, noteStyle))
-			out.WriteByte('\n')
 			a.mode = modeIdle
-			return a, tea.Println(strings.TrimRight(out.String(), "\n"))
+			return a, nil
 		}
 
 		// Successful completion — clear any stale checkpoint.
@@ -533,11 +587,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		printCmd := tea.Cmd(nil)
-		if s := strings.TrimRight(out.String(), "\n"); s != "" {
-			printCmd = tea.Println(s)
-		}
-
 		if !hasWrites {
 			okWithText := 0
 			for _, resp := range msg.responses {
@@ -547,13 +596,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if okWithText == 0 {
 				a.mode = modeIdle
-				return a, printCmd
+				return a, nil
 			}
 			if okWithText == 1 {
 				// Single usable response — offer thumbs-up/down rating.
 				a.responses = msg.responses
 				a.mode = modeRating
-				return a, printCmd
+				return a, nil
 			}
 			// okWithText >= 2: fall through to modeSelecting for text voting.
 		}
@@ -562,7 +611,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.mode = modeSelecting
 		a.selection = ""
 		a.selectionErr = ""
-		return a, printCmd
+		return a, nil
 	}
 
 	// Pass remaining events to textarea in idle mode.
@@ -587,6 +636,7 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 			Render("  running… (ESC to cancel)"))
 
 	case modeSelecting:
+		sb.WriteString(a.renderLastRunView())
 		sb.WriteString(RenderSelectionMenu(a.responses))
 		if a.selectionErr != "" {
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).
@@ -597,6 +647,7 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 		sb.WriteString(a.selection)
 
 	case modeRating:
+		sb.WriteString(a.renderLastRunView())
 		ratingStyle := lipgloss.NewStyle().Bold(true)
 		ratingModelName := "this"
 		for _, resp := range a.responses {
@@ -609,6 +660,7 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 		sb.WriteString("  y = good  n = bad  s = skip\n")
 
 	case modeIdle:
+		sb.WriteString(a.renderLastRunView())
 		if a.configOverlayActive {
 			overlayHeight := max(a.height-1, 5)
 			sb.WriteString(renderConfigOverlay(

@@ -1240,3 +1240,124 @@ func TestRewind_WipeClearsStack(t *testing.T) {
 	a = appFrom(t, result)
 	assert.False(t, a.store.CanRewind())
 }
+
+// ── Group: Ctrl+O expand/collapse in View ───────────────────────────────────
+
+func TestCtrlO_ToggleVisibleInView(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	a.width = 80
+	a.height = 40
+	setupRunState(&a,"test prompt", []string{"m1"})
+
+	// Complete the run with a text-only response → modeRating.
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "here is my answer", LatencyMS: 300},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	require.Equal(t, modeRating, a.mode)
+	require.True(t, a.lastRunInView)
+
+	// Default (collapsed): View should contain the "ctrl+o to expand" hint.
+	view := a.View().Content
+	assert.Contains(t, view, "ctrl+o to expand")
+
+	// Press Ctrl+O to expand.
+	result, _ = a.handleRatingKey(ctrlKey('o'))
+	a = appFrom(t, result)
+	view = a.View().Content
+	assert.NotContains(t, view, "ctrl+o to expand", "expanded panels should not show expand hint")
+
+	// Press Ctrl+O again to collapse.
+	result, _ = a.handleRatingKey(ctrlKey('o'))
+	a = appFrom(t, result)
+	view = a.View().Content
+	assert.Contains(t, view, "ctrl+o to expand", "collapsed panels should show expand hint again")
+}
+
+func TestLastRunInView_FlushedOnNewRun(t *testing.T) {
+	ads := []models.ModelAdapter{&scenarioAdapter{id: "m1"}}
+	a := newAppForTest(t, ads)
+	setupRunState(&a,"first prompt", []string{"m1"})
+
+	// Complete the first run.
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	assert.True(t, a.lastRunInView)
+
+	// Launch a new run — should flush previous run to scrollback.
+	result, _ = a.launchRun("second prompt")
+	a = appFrom(t, result)
+	assert.False(t, a.lastRunInView, "launchRun should flush last run to scrollback")
+	assert.Equal(t, modeRunning, a.mode)
+}
+
+func TestLastRunInView_ClearedBySlashClear(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a,"prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	assert.True(t, a.lastRunInView)
+
+	result, _ = a.handleClearCmd()
+	a = appFrom(t, result)
+	assert.False(t, a.lastRunInView, "/clear should reset lastRunInView")
+}
+
+func TestLastRunInView_ClearedBySlashWipe(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a,"prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	assert.True(t, a.lastRunInView)
+
+	result, _ = a.handleWipeCmd()
+	a = appFrom(t, result)
+	assert.False(t, a.lastRunInView, "/wipe should reset lastRunInView")
+}
+
+func TestLastRunInView_SetOnRunComplete(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	assert.False(t, a.lastRunInView, "should start false")
+
+	setupRunState(&a,"prompt", []string{"m1"})
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	assert.True(t, a.lastRunInView, "runCompleteMsg should set lastRunInView=true")
+}
+
+func TestLastRunInView_FlushedByWithMessage(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	a.width = 80
+	setupRunState(&a,"prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	assert.True(t, a.lastRunInView)
+
+	// withMessage should flush the last run first.
+	flushed, cmd := a.withMessage("some message")
+	assert.False(t, flushed.lastRunInView, "withMessage should flush last run")
+	assert.NotNil(t, cmd, "should return a cmd")
+}
