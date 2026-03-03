@@ -113,6 +113,7 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubblet
 	a.pastedText = ""
 	a.pastedLineCount = 0
 	a.store.ClearHistories()
+	a.store.ClearReportPaths()
 	return a, nil
 }
 
@@ -749,8 +750,8 @@ func (a App) handleLoadCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocr
 }
 
 func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	report, err := a.store.LoadLastReport()
-	if err != nil {
+	reports := a.store.LoadAllReports()
+	if len(reports) == 0 {
 		return a.withMessage("No run output to export. Run a prompt first.")
 	}
 
@@ -759,11 +760,12 @@ func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 		dir = args
 	}
 
-	path, err := output.Save(dir, report)
+	sessionReport := output.BuildSessionReport(a.store.SessionID(), reports)
+	path, err := output.SaveSession(dir, sessionReport)
 	if err != nil {
 		return a.withMessage(fmt.Sprintf("Export failed: %v", err))
 	}
-	return a.withMessage(fmt.Sprintf("Output exported to %s", path))
+	return a.withMessage(fmt.Sprintf("Output exported to %s (%d turns)", path, len(reports)))
 }
 
 // maxSaveSuffix is the highest numeric suffix nextAvailablePath will try

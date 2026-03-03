@@ -83,6 +83,7 @@ type Store struct {
 	// Report tracking — path-based (not pointer) so /export works after selection.
 	lastReportPath  string
 	lastActiveTools []string
+	reportPaths     []string // all per-run report paths this session, in order
 }
 
 // Options configures a new Store.
@@ -457,6 +458,9 @@ func (s *Store) SetRecipeModified(v bool) { s.recipeModified = v }
 func (s *Store) SetLastReportInfo(reportPath string, toolNames []string) {
 	s.lastReportPath = reportPath
 	s.lastActiveTools = toolNames
+	if reportPath != "" {
+		s.reportPaths = append(s.reportPaths, reportPath)
+	}
 }
 
 // LastReportPath returns the path to the last saved report.
@@ -476,6 +480,27 @@ func (s *Store) LoadLastReport() (*output.Report, error) {
 
 // ClearLastReport clears the last report path (called on skip).
 func (s *Store) ClearLastReport() { s.lastReportPath = "" }
+
+// LoadAllReports loads all accumulated per-run reports from disk, in order.
+// Reports that fail to load (missing, corrupt) are skipped with a log warning.
+func (s *Store) LoadAllReports() []*output.Report {
+	var reports []*output.Report
+	for _, p := range s.reportPaths {
+		r, err := output.Load(p)
+		if err != nil {
+			log.Printf("warning: could not load report %s: %v", p, err)
+			continue
+		}
+		reports = append(reports, r)
+	}
+	return reports
+}
+
+// ReportPathCount returns the number of accumulated report paths.
+func (s *Store) ReportPathCount() int { return len(s.reportPaths) }
+
+// ClearReportPaths resets the accumulated report paths.
+func (s *Store) ClearReportPaths() { s.reportPaths = nil }
 
 // ── Recipe Snapshot ─────────────────────────────────────────────────────────
 

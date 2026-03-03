@@ -108,6 +108,112 @@ type SelectionOutcome struct {
 	Timestamp     time.Time `json:"timestamp"`
 }
 
+// ─── Session Report ──────────────────────────────────────────────────────────
+
+// SessionReport aggregates all runs within a session into a single export.
+type SessionReport struct {
+	ID        string       `json:"id"`
+	Timestamp time.Time    `json:"timestamp"`
+	SessionID string       `json:"session_id"`
+	Turns     []TurnReport `json:"turns"`
+	Aggregate SessionStats `json:"aggregate"`
+}
+
+// TurnReport is one prompt+results within the session.
+type TurnReport struct {
+	TurnIndex int               `json:"turn_index"`
+	Timestamp time.Time         `json:"timestamp"`
+	Prompt    string            `json:"prompt"`
+	Recipe    RecipeSnapshot    `json:"recipe"`
+	Models    []ModelResult     `json:"models"`
+	Aggregate AggregateStats    `json:"aggregate"`
+	Selection *SelectionOutcome `json:"selection,omitempty"`
+}
+
+// SessionStats summarizes the session across all turns.
+type SessionStats struct {
+	TurnCount         int     `json:"turn_count"`
+	TotalCostUSD      float64 `json:"total_cost_usd"`
+	TotalInputTokens  int64   `json:"total_input_tokens"`
+	TotalOutputTokens int64   `json:"total_output_tokens"`
+}
+
+// BuildSessionReport constructs a SessionReport from a slice of per-run Reports.
+func BuildSessionReport(sessionID string, reports []*Report) *SessionReport {
+	sr := &SessionReport{
+		ID:        uid.New("srpt_"),
+		Timestamp: time.Now().UTC(),
+		SessionID: sessionID,
+		Turns:     make([]TurnReport, len(reports)),
+	}
+
+	var totalCost float64
+	var totalIn, totalOut int64
+
+	for i, r := range reports {
+		sr.Turns[i] = TurnReport{
+			TurnIndex: i,
+			Timestamp: r.Timestamp,
+			Prompt:    r.Prompt,
+			Recipe:    r.Recipe,
+			Models:    r.Models,
+			Aggregate: r.Aggregate,
+			Selection: r.Selection,
+		}
+		totalCost += r.Aggregate.TotalCostUSD
+		totalIn += r.Aggregate.TotalInputTokens
+		totalOut += r.Aggregate.TotalOutputTokens
+	}
+
+	sr.Aggregate = SessionStats{
+		TurnCount:         len(reports),
+		TotalCostUSD:      totalCost,
+		TotalInputTokens:  totalIn,
+		TotalOutputTokens: totalOut,
+	}
+
+	return sr
+}
+
+// Filename returns the output file name: session_output_{id}.json
+func (r *SessionReport) Filename() string {
+	return "session_output_" + r.ID + ".json"
+}
+
+// SaveSession writes the session report as pretty-printed JSON to dir/{filename}.
+// Parent directories are created as needed. Returns the full path.
+func SaveSession(dir string, report *SessionReport) (string, error) {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+	path := filepath.Join(dir, report.Filename())
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return "", fmt.Errorf("write: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return "", fmt.Errorf("rename: %w", err)
+	}
+	return path, nil
+}
+
+// LoadSession reads a session report JSON file at the given path.
+func LoadSession(path string) (*SessionReport, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var r SessionReport
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	return &r, nil
+}
+
 // ─── Collector ───────────────────────────────────────────────────────────────
 
 // Collector accumulates per-model AgentEvents during a run.

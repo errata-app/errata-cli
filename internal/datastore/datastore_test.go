@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/history"
 	"github.com/suarezc/errata/internal/models"
+	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/prompthistory"
 	"github.com/suarezc/errata/internal/recipe"
 	"github.com/suarezc/errata/internal/session"
@@ -791,4 +792,93 @@ func TestBuildRecipeSnapshot_NilOptionalFields(t *testing.T) {
 	assert.Nil(t, snap.BashPrefixes)
 	assert.Nil(t, snap.ToolDescriptions)
 	assert.Empty(t, snap.SummarizationPrompt)
+}
+
+// ── Report Path Accumulation ────────────────────────────────────────────────
+
+func TestSetLastReportInfo_AccumulatesPaths(t *testing.T) {
+	s := tempStore(t)
+
+	s.SetLastReportInfo("path/report1.json", []string{"bash"})
+	s.SetLastReportInfo("path/report2.json", []string{"bash"})
+	s.SetLastReportInfo("path/report3.json", []string{"bash"})
+
+	assert.Equal(t, 3, s.ReportPathCount())
+	assert.Equal(t, "path/report3.json", s.LastReportPath())
+}
+
+func TestSetLastReportInfo_EmptyPathNotAccumulated(t *testing.T) {
+	s := tempStore(t)
+
+	s.SetLastReportInfo("path/report1.json", []string{"bash"})
+	s.SetLastReportInfo("", []string{"bash"})
+
+	assert.Equal(t, 1, s.ReportPathCount())
+}
+
+func TestLoadAllReports_LoadsInOrder(t *testing.T) {
+	tmp := t.TempDir()
+	s := tempStore(t)
+
+	// Create and save two reports.
+	r1 := &output.Report{
+		ID:        "rpt_1",
+		Prompt:    "first",
+		Recipe:    output.RecipeSnapshot{Name: "test"},
+		Models:    []output.ModelResult{},
+		Aggregate: output.AggregateStats{},
+	}
+	r2 := &output.Report{
+		ID:        "rpt_2",
+		Prompt:    "second",
+		Recipe:    output.RecipeSnapshot{Name: "test"},
+		Models:    []output.ModelResult{},
+		Aggregate: output.AggregateStats{},
+	}
+
+	p1, err := output.Save(tmp, r1)
+	require.NoError(t, err)
+	p2, err := output.Save(tmp, r2)
+	require.NoError(t, err)
+
+	s.SetLastReportInfo(p1, nil)
+	s.SetLastReportInfo(p2, nil)
+
+	reports := s.LoadAllReports()
+	require.Len(t, reports, 2)
+	assert.Equal(t, "first", reports[0].Prompt)
+	assert.Equal(t, "second", reports[1].Prompt)
+}
+
+func TestLoadAllReports_SkipsMissing(t *testing.T) {
+	tmp := t.TempDir()
+	s := tempStore(t)
+
+	r := &output.Report{
+		ID:        "rpt_1",
+		Prompt:    "valid",
+		Recipe:    output.RecipeSnapshot{Name: "test"},
+		Models:    []output.ModelResult{},
+		Aggregate: output.AggregateStats{},
+	}
+	p, err := output.Save(tmp, r)
+	require.NoError(t, err)
+
+	s.SetLastReportInfo("/nonexistent/report.json", nil)
+	s.SetLastReportInfo(p, nil)
+
+	reports := s.LoadAllReports()
+	require.Len(t, reports, 1)
+	assert.Equal(t, "valid", reports[0].Prompt)
+}
+
+func TestClearReportPaths(t *testing.T) {
+	s := tempStore(t)
+
+	s.SetLastReportInfo("path/report1.json", nil)
+	s.SetLastReportInfo("path/report2.json", nil)
+	assert.Equal(t, 2, s.ReportPathCount())
+
+	s.ClearReportPaths()
+	assert.Equal(t, 0, s.ReportPathCount())
 }
