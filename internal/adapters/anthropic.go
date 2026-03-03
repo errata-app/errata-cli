@@ -31,10 +31,12 @@ func (a *AnthropicAdapter) RunAgent(
 	prompt  string,
 	onEvent func(models.AgentEvent),
 ) (models.ModelResponse, error) {
+	caps := a.Capabilities(ctx)
 	return runAnthropicAgentLoop(ctx, &anthropicRunConfig{
-		clientOpts:  []option.RequestOption{option.WithAPIKey(a.apiKey)},
-		modelID:     a.modelID,
-		qualifiedID: "anthropic/" + a.modelID,
+		clientOpts:      []option.RequestOption{option.WithAPIKey(a.apiKey)},
+		modelID:         a.modelID,
+		qualifiedID:     "anthropic/" + a.modelID,
+		maxOutputTokens: int64(caps.MaxOutputTokens),
 	}, history, prompt, onEvent)
 }
 
