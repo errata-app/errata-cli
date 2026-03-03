@@ -163,7 +163,6 @@ func TestHandleLoadCommand_LoadsRecipe(t *testing.T) {
 	last := app.feed[len(app.feed)-1].text
 	assert.Contains(t, last, "Loaded recipe")
 	assert.Contains(t, last, "Loaded Recipe")
-	assert.True(t, app.store.RecipeModified())
 	require.NotNil(t, app.store.SessionRecipe())
 	assert.Equal(t, []string{"alpha", "beta"}, app.store.SessionRecipe().Models)
 	assert.Equal(t, "You are helpful.", app.store.SessionRecipe().SystemPrompt)

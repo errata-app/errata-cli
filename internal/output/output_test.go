@@ -549,3 +549,245 @@ func TestLoad_InvalidJSON(t *testing.T) {
 		t.Error("Load should return error for invalid JSON")
 	}
 }
+
+// ─── Session Report ──────────────────────────────────────────────────────────
+
+func TestBuildSessionReport_SingleTurn(t *testing.T) {
+	r := &Report{
+		ID:        "rpt_1",
+		Timestamp: time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC),
+		SessionID: "sess1",
+		Prompt:    "fix bug",
+		Recipe:    RecipeSnapshot{Name: "test"},
+		Models: []ModelResult{
+			{ModelID: "m1", InputTokens: 100, OutputTokens: 50, CostUSD: 0.01},
+		},
+		Aggregate: AggregateStats{
+			TotalCostUSD:      0.01,
+			TotalInputTokens:  100,
+			TotalOutputTokens: 50,
+			ModelCount:        1,
+			SuccessCount:      1,
+		},
+	}
+
+	sr := BuildSessionReport("sess1", []*Report{r})
+
+	if sr.SessionID != "sess1" {
+		t.Errorf("SessionID = %q, want sess1", sr.SessionID)
+	}
+	if len(sr.Turns) != 1 {
+		t.Fatalf("Turns len = %d, want 1", len(sr.Turns))
+	}
+	if sr.Turns[0].TurnIndex != 0 {
+		t.Errorf("TurnIndex = %d, want 0", sr.Turns[0].TurnIndex)
+	}
+	if sr.Turns[0].Prompt != "fix bug" {
+		t.Errorf("Prompt = %q, want fix bug", sr.Turns[0].Prompt)
+	}
+	if sr.Aggregate.TurnCount != 1 {
+		t.Errorf("TurnCount = %d, want 1", sr.Aggregate.TurnCount)
+	}
+	if sr.Aggregate.TotalCostUSD != 0.01 {
+		t.Errorf("TotalCostUSD = %f, want 0.01", sr.Aggregate.TotalCostUSD)
+	}
+	if sr.Aggregate.TotalInputTokens != 100 {
+		t.Errorf("TotalInputTokens = %d, want 100", sr.Aggregate.TotalInputTokens)
+	}
+	if sr.Aggregate.TotalOutputTokens != 50 {
+		t.Errorf("TotalOutputTokens = %d, want 50", sr.Aggregate.TotalOutputTokens)
+	}
+}
+
+func TestBuildSessionReport_MultiTurn(t *testing.T) {
+	r1 := &Report{
+		ID:        "rpt_1",
+		Timestamp: time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC),
+		Prompt:    "first prompt",
+		Recipe:    RecipeSnapshot{Name: "test"},
+		Models:    []ModelResult{{ModelID: "m1", InputTokens: 100, OutputTokens: 50, CostUSD: 0.01}},
+		Aggregate: AggregateStats{TotalCostUSD: 0.01, TotalInputTokens: 100, TotalOutputTokens: 50},
+	}
+	r2 := &Report{
+		ID:        "rpt_2",
+		Timestamp: time.Date(2026, 3, 1, 10, 5, 0, 0, time.UTC),
+		Prompt:    "second prompt",
+		Recipe:    RecipeSnapshot{Name: "test"},
+		Models:    []ModelResult{{ModelID: "m1", InputTokens: 200, OutputTokens: 100, CostUSD: 0.02}},
+		Aggregate: AggregateStats{TotalCostUSD: 0.02, TotalInputTokens: 200, TotalOutputTokens: 100},
+	}
+	r3 := &Report{
+		ID:        "rpt_3",
+		Timestamp: time.Date(2026, 3, 1, 10, 10, 0, 0, time.UTC),
+		Prompt:    "third prompt",
+		Recipe:    RecipeSnapshot{Name: "test"},
+		Models:    []ModelResult{{ModelID: "m1", InputTokens: 300, OutputTokens: 150, CostUSD: 0.03}},
+		Aggregate: AggregateStats{TotalCostUSD: 0.03, TotalInputTokens: 300, TotalOutputTokens: 150},
+	}
+
+	sr := BuildSessionReport("sess1", []*Report{r1, r2, r3})
+
+	if len(sr.Turns) != 3 {
+		t.Fatalf("Turns len = %d, want 3", len(sr.Turns))
+	}
+	for i, turn := range sr.Turns {
+		if turn.TurnIndex != i {
+			t.Errorf("Turns[%d].TurnIndex = %d, want %d", i, turn.TurnIndex, i)
+		}
+	}
+	if sr.Turns[0].Prompt != "first prompt" {
+		t.Errorf("Turns[0].Prompt = %q", sr.Turns[0].Prompt)
+	}
+	if sr.Turns[2].Prompt != "third prompt" {
+		t.Errorf("Turns[2].Prompt = %q", sr.Turns[2].Prompt)
+	}
+	if sr.Aggregate.TurnCount != 3 {
+		t.Errorf("TurnCount = %d, want 3", sr.Aggregate.TurnCount)
+	}
+	if diff := sr.Aggregate.TotalCostUSD - 0.06; diff < -1e-9 || diff > 1e-9 {
+		t.Errorf("TotalCostUSD = %f, want 0.06", sr.Aggregate.TotalCostUSD)
+	}
+	if sr.Aggregate.TotalInputTokens != 600 {
+		t.Errorf("TotalInputTokens = %d, want 600", sr.Aggregate.TotalInputTokens)
+	}
+	if sr.Aggregate.TotalOutputTokens != 300 {
+		t.Errorf("TotalOutputTokens = %d, want 300", sr.Aggregate.TotalOutputTokens)
+	}
+}
+
+func TestBuildSessionReport_WithSelection(t *testing.T) {
+	sel := &SelectionOutcome{
+		SelectedModel: "m1",
+		AppliedFiles:  []string{"main.go"},
+		Timestamp:     time.Date(2026, 3, 1, 10, 1, 0, 0, time.UTC),
+	}
+	r1 := &Report{
+		ID:        "rpt_1",
+		Prompt:    "no selection",
+		Aggregate: AggregateStats{},
+	}
+	r2 := &Report{
+		ID:        "rpt_2",
+		Prompt:    "with selection",
+		Selection: sel,
+		Aggregate: AggregateStats{},
+	}
+
+	sr := BuildSessionReport("sess1", []*Report{r1, r2})
+
+	if sr.Turns[0].Selection != nil {
+		t.Error("Turns[0].Selection should be nil")
+	}
+	if sr.Turns[1].Selection == nil {
+		t.Fatal("Turns[1].Selection should not be nil")
+	}
+	if sr.Turns[1].Selection.SelectedModel != "m1" {
+		t.Errorf("Selection.SelectedModel = %q", sr.Turns[1].Selection.SelectedModel)
+	}
+}
+
+func TestBuildSessionReport_Empty(t *testing.T) {
+	sr := BuildSessionReport("sess1", nil)
+
+	if sr.SessionID != "sess1" {
+		t.Errorf("SessionID = %q", sr.SessionID)
+	}
+	if len(sr.Turns) != 0 {
+		t.Errorf("Turns len = %d, want 0", len(sr.Turns))
+	}
+	if sr.Aggregate.TurnCount != 0 {
+		t.Errorf("TurnCount = %d, want 0", sr.Aggregate.TurnCount)
+	}
+	if sr.Aggregate.TotalCostUSD != 0 {
+		t.Errorf("TotalCostUSD = %f, want 0", sr.Aggregate.TotalCostUSD)
+	}
+}
+
+func TestSaveSessionAndLoadSession_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	r := &Report{
+		ID:        "rpt_1",
+		Timestamp: time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC),
+		SessionID: "sess1",
+		Prompt:    "test prompt",
+		Recipe:    RecipeSnapshot{Name: "test", Tools: []string{"bash"}},
+		Models: []ModelResult{
+			{
+				ModelID:      "m1",
+				Text:         "answer",
+				LatencyMS:    500,
+				InputTokens:  100,
+				OutputTokens: 50,
+				CostUSD:      0.01,
+				Events:       []EventEntry{{Type: "reading", Data: "read_file x.go"}},
+			},
+		},
+		Aggregate: AggregateStats{
+			TotalCostUSD:      0.01,
+			TotalInputTokens:  100,
+			TotalOutputTokens: 50,
+			ModelCount:        1,
+			SuccessCount:      1,
+			FastestModel:      "m1",
+			FastestMS:         500,
+		},
+		Selection: &SelectionOutcome{
+			SelectedModel: "m1",
+			AppliedFiles:  []string{"x.go"},
+			Timestamp:     time.Date(2026, 3, 1, 10, 1, 0, 0, time.UTC),
+		},
+	}
+
+	original := BuildSessionReport("sess1", []*Report{r})
+
+	path, err := SaveSession(dir, original)
+	if err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+
+	if loaded.ID != original.ID {
+		t.Errorf("ID = %q, want %q", loaded.ID, original.ID)
+	}
+	if loaded.SessionID != "sess1" {
+		t.Errorf("SessionID = %q", loaded.SessionID)
+	}
+	if !loaded.Timestamp.Equal(original.Timestamp) {
+		t.Errorf("Timestamp = %v, want %v", loaded.Timestamp, original.Timestamp)
+	}
+	if len(loaded.Turns) != 1 {
+		t.Fatalf("Turns len = %d, want 1", len(loaded.Turns))
+	}
+	if loaded.Turns[0].Prompt != "test prompt" {
+		t.Errorf("Turns[0].Prompt = %q", loaded.Turns[0].Prompt)
+	}
+	if loaded.Turns[0].Selection == nil {
+		t.Fatal("Turns[0].Selection should not be nil")
+	}
+	if loaded.Turns[0].Selection.SelectedModel != "m1" {
+		t.Errorf("Selection.SelectedModel = %q", loaded.Turns[0].Selection.SelectedModel)
+	}
+	if loaded.Aggregate.TurnCount != 1 {
+		t.Errorf("TurnCount = %d", loaded.Aggregate.TurnCount)
+	}
+	if loaded.Aggregate.TotalCostUSD != 0.01 {
+		t.Errorf("TotalCostUSD = %f", loaded.Aggregate.TotalCostUSD)
+	}
+	if loaded.Aggregate.TotalInputTokens != 100 {
+		t.Errorf("TotalInputTokens = %d", loaded.Aggregate.TotalInputTokens)
+	}
+}
+
+func TestSessionReport_Filename(t *testing.T) {
+	sr := &SessionReport{ID: "srpt_abc123"}
+	want := "session_output_srpt_abc123.json"
+	got := sr.Filename()
+	if got != want {
+		t.Errorf("Filename() = %q, want %q", got, want)
+	}
+}

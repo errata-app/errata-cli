@@ -613,7 +613,7 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 			overlayHeight := max(a.height-1, 5)
 			sb.WriteString(renderConfigOverlay(
 				a.configSections, a.configSelectedIdx, a.configExpandedIdx,
-				a.store.RecipeModified(), a.width, overlayHeight,
+				a.width, overlayHeight,
 				a.configListItems, a.configListCursor, a.configListOffset,
 				a.configScalarFields, a.configScalarCursor,
 				a.configEditBuf,
@@ -623,11 +623,6 @@ func (a App) View() tea.View { //nolint:gocritic // bubbletea requires value rec
 			v := tea.NewView(sb.String())
 			v.AltScreen = true
 			return v
-		}
-		if a.store.RecipeModified() {
-			modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AFAF00"))
-			sb.WriteString(modStyle.Render("  [modified]"))
-			sb.WriteByte('\n')
 		}
 		if a.searchActive {
 			query := a.searchQuery

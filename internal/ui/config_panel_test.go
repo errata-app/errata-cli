@@ -517,31 +517,17 @@ func TestBuildScalarFields_UnknownSection(t *testing.T) {
 func TestRenderConfigOverlay_ContainsSectionNames(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
+	out := renderConfigOverlay(sections, 0, -1, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
 	for _, name := range interactiveSections {
 		assert.Contains(t, out, name)
 	}
 	assert.Contains(t, out, "Configuration")
 }
 
-func TestRenderConfigOverlay_ModifiedBadge(t *testing.T) {
-	rec := recipe.Default()
-	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, true, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
-	assert.Contains(t, out, "[modified]")
-}
-
-func TestRenderConfigOverlay_NoModifiedBadgeWhenClean(t *testing.T) {
-	rec := recipe.Default()
-	sections := buildConfigSections(rec, nil, nil)
-	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
-	assert.NotContains(t, out, "[modified]")
-}
-
 func TestRenderConfigOverlay_ListExpanded(t *testing.T) {
 	sections := []configSection{{Name: "tools", Summary: "8 enabled", Kind: "list"}}
 	items := []listItem{{Label: "bash", Active: true}, {Label: "read_file", Active: false}}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, items, 0, 0, nil, 0, "", false, "", "")
+	out := renderConfigOverlay(sections, 0, 0, 80, 40, items, 0, 0, nil, 0, "", false, "", "")
 	assert.Contains(t, out, "bash")
 	assert.Contains(t, out, "read_file")
 	assert.Contains(t, out, "[x]")
@@ -554,7 +540,7 @@ func TestRenderConfigOverlay_ScalarExpanded(t *testing.T) {
 		{Key: "timeout", Path: "constraints.timeout", Value: "5m0s"},
 		{Key: "max_steps", Path: "constraints.max_steps", Value: "50"},
 	}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, fields, 0, "", false, "", "")
+	out := renderConfigOverlay(sections, 0, 0, 80, 40, nil, 0, 0, fields, 0, "", false, "", "")
 	assert.Contains(t, out, "timeout")
 	assert.Contains(t, out, "max_steps")
 	assert.Contains(t, out, "5m0s")
@@ -596,11 +582,9 @@ func TestHandleConfigCommand_Reset(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}}
 	a := newAppForTest(t, ads)
 	a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
-	a.store.SetRecipeModified(true)
 	result, _ := a.handleConfigCommand("reset")
 	app := result.(App)
 	assert.False(t, app.configOverlayActive)
-	assert.False(t, app.store.RecipeModified())
 }
 
 // ── /config overlay key navigation ──────────────────────────────────────────
@@ -642,22 +626,6 @@ func TestTryArgComplete_ConfigSection(t *testing.T) {
 	assert.Contains(t, result, "/config sandbox ")
 }
 
-// ── modified badge in View ──────────────────────────────────────────────────
-
-func TestModifiedBadge_ShownWhenModified(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.store.SetRecipeModified(true)
-	view := a.View().Content
-	assert.Contains(t, view, "[modified]")
-}
-
-func TestModifiedBadge_HiddenWhenClean(t *testing.T) {
-	a := newAppForTest(t, nil)
-	a.store.SetRecipeModified(false)
-	view := a.View().Content
-	assert.NotContains(t, view, "[modified]")
-}
-
 // ── configPathDefaults tests ─────────────────────────────────────────────────
 
 func TestConfigPathDefaults_AllPathsHaveDefaults(t *testing.T) {
@@ -673,7 +641,7 @@ func TestConfigPathDefaults_RenderInScalarView(t *testing.T) {
 	fields := buildScalarFields("constraints", rec)
 	out := renderConfigOverlay(
 		[]configSection{{Name: "constraints", Kind: "scalar"}},
-		0, 0, false, 80, 40,
+		0, 0, 80, 40,
 		nil, 0, 0,
 		fields, 0, "", false, "", "",
 	)
@@ -710,7 +678,7 @@ func TestSectionDescriptions_NavViewShowsDescForSelected(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
 	// Render with first section selected.
-	out := renderConfigOverlay(sections, 0, -1, false, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
+	out := renderConfigOverlay(sections, 0, -1, 80, 40, nil, 0, 0, nil, 0, "", false, "", "")
 	// The selected section (models) should show its brief description.
 	assert.Contains(t, out, sectionDescriptions["models"].Brief)
 }
@@ -720,7 +688,7 @@ func TestSectionDescriptions_ExpandedViewShowsDetail(t *testing.T) {
 	sections := buildConfigSections(rec, nil, nil)
 	fields := buildScalarFields("constraints", rec)
 	// Expand constraints (index 5).
-	out := renderConfigOverlay(sections, 5, 5, false, 80, 40, nil, 0, 0, fields, 0, "", false, "", "")
+	out := renderConfigOverlay(sections, 5, 5, 80, 40, nil, 0, 0, fields, 0, "", false, "", "")
 	assert.Contains(t, out, "Set wall-clock timeout and maximum tool-call steps per model.")
 }
 
@@ -739,7 +707,6 @@ func TestHandleConfigTextKey_CtrlSSavesSystemPrompt(t *testing.T) {
 	result, _ := a.handleConfigTextKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	app := result.(App)
 	assert.Equal(t, "New system prompt content", app.store.SessionRecipe().SystemPrompt)
-	assert.True(t, app.store.RecipeModified())
 	assert.False(t, app.configTextEditing)
 	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after save")
 }
@@ -782,7 +749,6 @@ func TestHandleConfigTextKey_CtrlDSavesContextSummarization(t *testing.T) {
 	result, _ := a.handleConfigTextKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	app := result.(App)
 	assert.Equal(t, "Custom summarization prompt", app.store.SessionRecipe().SummarizationPrompt)
-	assert.True(t, app.store.RecipeModified())
 	assert.Equal(t, -1, app.configExpandedIdx, "should return to section navigation after save")
 }
 
@@ -800,7 +766,7 @@ func TestTextSections_HavePaths(t *testing.T) {
 
 func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {
 	sections := []configSection{{Name: "system-prompt", Kind: "text", DetailDesc: "test detail"}}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, nil, 0, "",
+	out := renderConfigOverlay(sections, 0, 0, 80, 40, nil, 0, 0, nil, 0, "",
 		true, "  [textarea content here]", "")
 	assert.Contains(t, out, "[textarea content here]")
 	assert.Contains(t, out, "Ctrl+S = save")
@@ -808,7 +774,7 @@ func TestRenderConfigOverlay_TextEditingShowsTextArea(t *testing.T) {
 
 func TestRenderConfigOverlay_TextPreviewShown(t *testing.T) {
 	sections := []configSection{{Name: "system-prompt", Kind: "text", DetailDesc: "test detail"}}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, nil, 0, 0, nil, 0, "Hello world",
+	out := renderConfigOverlay(sections, 0, 0, 80, 40, nil, 0, 0, nil, 0, "Hello world",
 		false, "", "")
 	assert.Contains(t, out, "Hello world")
 	assert.Contains(t, out, "Enter = edit")
@@ -824,7 +790,7 @@ func TestRenderConfigOverlay_ListWindowed(t *testing.T) {
 		items[i] = listItem{Label: fmt.Sprintf("tool_%02d", i), Active: true}
 	}
 	// maxHeight 12 → overhead ~6 → window ~6 items.
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 12, items, 0, 0, nil, 0, "", false, "", "")
+	out := renderConfigOverlay(sections, 0, 0, 80, 12, items, 0, 0, nil, 0, "", false, "", "")
 	// First few items should be visible.
 	assert.Contains(t, out, "tool_00")
 	assert.Contains(t, out, "tool_05")
@@ -844,7 +810,7 @@ func TestRenderConfigOverlay_ListWindowedWithOffset(t *testing.T) {
 		items[i] = listItem{Label: fmt.Sprintf("tool_%02d", i), Active: true}
 	}
 	// Offset=5 so items before 5 are hidden.
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 12, items, 5, 5, nil, 0, "", false, "", "")
+	out := renderConfigOverlay(sections, 0, 0, 80, 12, items, 5, 5, nil, 0, "", false, "", "")
 	// Items before offset should not be visible.
 	assert.NotContains(t, out, "tool_00")
 	// Items starting from offset should be visible.
@@ -999,7 +965,7 @@ func TestRenderConfigOverlay_ListFitsHeight(t *testing.T) {
 		{Label: "read_file", Active: true},
 		{Label: "write_file", Active: false},
 	}
-	out := renderConfigOverlay(sections, 0, 0, false, 80, 40, items, 0, 0, nil, 0, "", false, "", "")
+	out := renderConfigOverlay(sections, 0, 0, 80, 40, items, 0, 0, nil, 0, "", false, "", "")
 	assert.Contains(t, out, "bash")
 	assert.Contains(t, out, "read_file")
 	assert.Contains(t, out, "write_file")

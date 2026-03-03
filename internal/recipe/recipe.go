@@ -656,8 +656,11 @@ func parseModelProfiles(body string) map[string]ModelProfileConfig {
 }
 
 // parseTools parses the ## Tools section into a ToolsConfig.
+// Called only when ## Tools is present in the recipe. An empty section yields
+// a non-nil ToolsConfig with a non-nil empty Allowlist (meaning zero tools),
+// distinguishable from a nil ToolsConfig (section absent → all tools).
 func parseTools(body string) *ToolsConfig {
-	tc := &ToolsConfig{}
+	tc := &ToolsConfig{Allowlist: []string{}}
 	for _, item := range parseList(body) {
 		if strings.HasPrefix(item, "bash(") && strings.HasSuffix(item, ")") {
 			// bash(prefix1, prefix2, ...)
@@ -673,9 +676,6 @@ func parseTools(body string) *ToolsConfig {
 		} else {
 			tc.Allowlist = append(tc.Allowlist, item)
 		}
-	}
-	if len(tc.Allowlist) == 0 {
-		return nil
 	}
 	return tc
 }
@@ -980,7 +980,7 @@ func (r *Recipe) MarshalMarkdown() string {
 	}
 
 	// Tools
-	if r.Tools != nil && len(r.Tools.Allowlist) > 0 {
+	if r.Tools != nil {
 		sb.WriteString("\n## Tools\n")
 		for _, t := range r.Tools.Allowlist {
 			if t == "bash" && len(r.Tools.BashPrefixes) > 0 {

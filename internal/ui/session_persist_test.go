@@ -304,8 +304,10 @@ func TestSyncToolAllowlist_AllInactiveEmptiesAllowlist(t *testing.T) {
 
 	a.syncToolAllowlist()
 
-	assert.Nil(t, a.store.SessionRecipe().Tools.Allowlist)
-	assert.Nil(t, a.toolAllowlist)
+	assert.NotNil(t, a.store.SessionRecipe().Tools.Allowlist, "should be non-nil empty slice (zero tools)")
+	assert.Empty(t, a.store.SessionRecipe().Tools.Allowlist)
+	assert.NotNil(t, a.toolAllowlist, "should be non-nil empty slice (zero tools)")
+	assert.Empty(t, a.toolAllowlist)
 }
 
 // ── Group J: handleRewindCmd feed persistence ───────────────────────────────

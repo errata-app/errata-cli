@@ -435,11 +435,12 @@ func ActiveDefinitions(disabled map[string]bool) []ToolDef {
 }
 
 // DefinitionsAllowed returns tool definitions filtered by allowlist (if non-nil)
-// and minus any disabled tools. If allowlist is nil, all Definitions are candidates.
+// and minus any disabled tools. A nil allowlist means all Definitions are candidates;
+// a non-nil empty allowlist means zero tools (the section was present but empty).
 // This combines recipe-level tool allowlist filtering with session-level disabling.
 func DefinitionsAllowed(allowlist []string, disabled map[string]bool) []ToolDef {
 	candidates := Definitions
-	if len(allowlist) > 0 {
+	if allowlist != nil {
 		set := make(map[string]bool, len(allowlist))
 		for _, n := range allowlist {
 			set[n] = true
