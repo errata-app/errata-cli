@@ -1247,7 +1247,10 @@ func TestCtrlO_ToggleVisibleInView(t *testing.T) {
 	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
 	a.width = 80
 	a.height = 40
-	setupRunState(&a,"test prompt", []string{"m1"})
+	setupRunState(&a, "test prompt", []string{"m1"})
+
+	// Add an event so we can verify it shows up in expanded view.
+	a.panels[0].addEvent(models.AgentEvent{Type: models.EventReading, Data: "foo.go"})
 
 	// Complete the run with a text-only response → modeRating.
 	msg := runCompleteMsg{responses: []models.ModelResponse{
@@ -1258,21 +1261,24 @@ func TestCtrlO_ToggleVisibleInView(t *testing.T) {
 	require.Equal(t, modeRating, a.mode)
 	require.True(t, a.lastRunInView)
 
-	// Default (collapsed): View should contain the "ctrl+o to expand" hint.
+	// Default (expanded): panels show events, no "ctrl+o to expand" hint.
 	view := a.View().Content
-	assert.Contains(t, view, "ctrl+o to expand")
+	assert.NotContains(t, view, "ctrl+o to expand")
+	assert.Contains(t, view, "foo.go", "expanded panels should show tool events")
 
-	// Press Ctrl+O to expand.
+	// Press Ctrl+O to collapse.
 	result, _ = a.handleRatingKey(ctrlKey('o'))
 	a = appFrom(t, result)
 	view = a.View().Content
-	assert.NotContains(t, view, "ctrl+o to expand", "expanded panels should not show expand hint")
+	assert.Contains(t, view, "ctrl+o to expand", "collapsed panels should show expand hint")
+	assert.NotContains(t, view, "foo.go", "collapsed panels should hide tool events")
 
-	// Press Ctrl+O again to collapse.
+	// Press Ctrl+O again to expand.
 	result, _ = a.handleRatingKey(ctrlKey('o'))
 	a = appFrom(t, result)
 	view = a.View().Content
-	assert.Contains(t, view, "ctrl+o to expand", "collapsed panels should show expand hint again")
+	assert.NotContains(t, view, "ctrl+o to expand", "re-expanded panels should hide hint")
+	assert.Contains(t, view, "foo.go", "re-expanded panels should show tool events")
 }
 
 func TestLastRunInView_FlushedOnNewRun(t *testing.T) {

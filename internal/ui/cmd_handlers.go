@@ -308,7 +308,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	if flushCmd != nil {
 		batchCmds = append(batchCmds, flushCmd)
 	}
-	batchCmds = append(batchCmds, promptPrintCmd, func() tea.Msg {
+	batchCmds = append(batchCmds, promptPrintCmd, panelTick(), func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		// Skip auto-compact when context strategy is "manual" or "off".
@@ -551,7 +551,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	if flushCmd != nil {
 		resumeBatchCmds = append(resumeBatchCmds, flushCmd)
 	}
-	resumeBatchCmds = append(resumeBatchCmds, promptPrintCmd, func() tea.Msg {
+	resumeBatchCmds = append(resumeBatchCmds, promptPrintCmd, panelTick(), func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		if contextStrategy != "manual" && contextStrategy != "off" {
