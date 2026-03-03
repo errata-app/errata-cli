@@ -286,19 +286,18 @@ func TestActiveModelIDs_AllModelsShown(t *testing.T) {
 	assert.Equal(t, []string{"m1", "m2"}, ids)
 }
 
-func TestModelIDCandidates_UsesAvailableModels(t *testing.T) {
-	ads := []models.ModelAdapter{uiStub{"m1"}}
+func TestModelIDCandidates_ReturnsActiveModelsOnly(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}, uiStub{"m3"}}
 	a := newAppForTest(t, ads)
-	a.availableModels = []string{"alpha", "beta", "m1"}
+	a.activeAdapters = []models.ModelAdapter{uiStub{"m1"}, uiStub{"m3"}}
 
 	got := a.modelIDCandidates()
-	assert.Equal(t, []string{"alpha", "beta", "m1"}, got)
+	assert.Equal(t, []string{"m1", "m3"}, got)
 }
 
-func TestModelIDCandidates_FallsBackToAdapters(t *testing.T) {
+func TestModelIDCandidates_AllActiveByDefault(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
 	a := newAppForTest(t, ads)
-	// availableModels is nil (default from newAppForTest).
 
 	got := a.modelIDCandidates()
 	assert.Equal(t, []string{"m1", "m2"}, got)
@@ -328,15 +327,29 @@ func TestHandlePrompt_MentionOnlyNoPromptShowsError(t *testing.T) {
 func TestHandlePrompt_MentionDoesNotChangeActiveAdapters(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
 	a := newAppForTest(t, ads)
-	// Set a persistent subset.
-	a.activeAdapters = []models.ModelAdapter{uiStub{"m2"}}
+	// Set a persistent subset (both active, so @m1 resolves).
+	a.activeAdapters = []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
 
 	// @mention resolves m1 for this run only.
 	result, _ := a.handlePrompt("@m1 hello")
 	app := result.(App)
-	// activeAdapters should still be the original subset (m2), not changed by @mention.
-	require.Len(t, app.activeAdapters, 1)
-	assert.Equal(t, "m2", app.activeAdapters[0].ID())
+	// activeAdapters should still be the original set, not changed by @mention.
+	require.Len(t, app.activeAdapters, 2)
+	assert.Equal(t, "m1", app.activeAdapters[0].ID())
+	assert.Equal(t, "m2", app.activeAdapters[1].ID())
+}
+
+func TestHandlePrompt_MentionInactiveModelShowsError(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}, uiStub{"m2"}}
+	a := newAppForTest(t, ads)
+	// Only m2 is active.
+	a.activeAdapters = []models.ModelAdapter{uiStub{"m2"}}
+
+	// @m1 should fail since m1 is not active.
+	result, _ := a.handlePrompt("@m1 hello")
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "No model matching")
 }
 
 // ─── paste badge ─────────────────────────────────────────────────────────────

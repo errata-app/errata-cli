@@ -101,17 +101,9 @@ func lastWord(s string) string {
 }
 
 // modelIDCandidates returns model IDs for @mention autocomplete.
-// When availableModels is populated (full provider catalogues), it is used;
-// otherwise falls back to the configured adapter IDs.
+// Only active (enabled) models are returned — use /config models to activate more.
 func (a App) modelIDCandidates() []string { //nolint:gocritic // called from bubbletea value-receiver methods
-	if len(a.availableModels) > 0 {
-		return a.availableModels
-	}
-	ids := make([]string, len(a.adapters))
-	for i, ad := range a.adapters {
-		ids[i] = ad.ID()
-	}
-	return ids
+	return a.activeModelIDs()
 }
 
 // tryArgComplete attempts tab-completion of the last word for commands that
