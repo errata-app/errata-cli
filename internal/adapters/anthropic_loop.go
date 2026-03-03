@@ -103,6 +103,8 @@ func runAnthropicAgentLoop(
 				result, ok := DispatchTool(ctx, tu.Name, extractStringMap(input), onEvent, &proposed)
 				if ok {
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, result, false))
+				} else {
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(tu.ID, fmt.Sprintf("error: unrecognized tool %q", tu.Name), true))
 				}
 			}
 		}
@@ -122,6 +124,9 @@ func runAnthropicAgentLoop(
 // Anthropic tool parameters.
 func buildAnthropicTools(ctx context.Context) []anthropic.ToolUnionParam {
 	active := tools.ActiveToolsFromContext(ctx)
+	if len(active) == 0 {
+		return nil
+	}
 	out := make([]anthropic.ToolUnionParam, 0, len(active))
 	for _, def := range active {
 		props, required := def.JSONSchemaProps()

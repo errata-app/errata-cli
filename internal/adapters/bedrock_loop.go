@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -145,21 +146,22 @@ func runBedrockAgentLoop(
 				}
 
 				result, dispatched := DispatchTool(ctx, aws.ToString(toolUse.Name), extractStringMap(inputMap), onEvent, &proposed)
-				if dispatched {
-					status := bedrocktypes.ToolResultStatusSuccess
-					if strings.HasPrefix(result, "error:") || strings.HasPrefix(result, "[mcp error:") {
-						status = bedrocktypes.ToolResultStatusError
-					}
-					toolResults = append(toolResults, &bedrocktypes.ContentBlockMemberToolResult{
-						Value: bedrocktypes.ToolResultBlock{
-							ToolUseId: toolUse.ToolUseId,
-							Content: []bedrocktypes.ToolResultContentBlock{
-								&bedrocktypes.ToolResultContentBlockMemberText{Value: result},
-							},
-							Status: status,
-						},
-					})
+				if !dispatched {
+					result = fmt.Sprintf("error: unrecognized tool %q", aws.ToString(toolUse.Name))
 				}
+				status := bedrocktypes.ToolResultStatusSuccess
+				if strings.HasPrefix(result, "error:") || strings.HasPrefix(result, "[mcp error:") {
+					status = bedrocktypes.ToolResultStatusError
+				}
+				toolResults = append(toolResults, &bedrocktypes.ContentBlockMemberToolResult{
+					Value: bedrocktypes.ToolResultBlock{
+						ToolUseId: toolUse.ToolUseId,
+						Content: []bedrocktypes.ToolResultContentBlock{
+							&bedrocktypes.ToolResultContentBlockMemberText{Value: result},
+						},
+						Status: status,
+					},
+				})
 			}
 		}
 

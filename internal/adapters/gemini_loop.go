@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math"
 	"time"
@@ -96,6 +97,8 @@ func runGeminiAgentLoop(
 				result, ok := DispatchTool(ctx, fc.Name, extractStringMap(fc.Args), onEvent, &proposed)
 				if ok {
 					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"result": result}))
+				} else {
+					toolResults = append(toolResults, genai.NewPartFromFunctionResponse(fc.Name, map[string]any{"error": fmt.Sprintf("unrecognized tool %q", fc.Name)}))
 				}
 			}
 		}
