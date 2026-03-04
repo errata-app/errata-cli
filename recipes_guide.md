@@ -139,16 +139,11 @@ Available criteria:
 
 ### `go_docstore.md` — Multi-File DocStore Bug Fix
 
-A multi-file in-memory document store with bugs spread across `collection.go`, `index.go`, `query.go`, and `document.go`. Models must trace failures across file boundaries and fix multiple interacting bugs. Tests which model can hold a multi-file mental model. An interesting result: models that fix each file in isolation often miss the index/query interaction bug.
+A multi-file in-memory document store with bugs spread across `collection.go`, `index.go`, `query.go`, and `document.go`. Models must trace failures across file boundaries and fix multiple interacting bugs. Tests which model can hold a multi-file mental model. Most strong models will complete it but vary on tokens, steps, and cost.
 
 ```
 errata run go_docstore.md --verbose
 ```
-
-## Writing Good Recipes
-
-Hard tasks differentiate models — if every model passes, the recipe isn't useful. Easy tasks find where you can use cheaper models — run the same task with a $0.001/call model and a $0.10/call model. Always include success criteria so headless runs can self-evaluate without human review. Keep system prompts short and directive — models follow explicit rules better than vague guidance. One task per concept makes results easier to interpret than multi-part prompts.
-
 
 --- Below are sections that have not yet been fully validated but could be tuned. ---
 ## Other Sections

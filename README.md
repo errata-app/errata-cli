@@ -15,6 +15,8 @@ Set your API keys in a `.env` file:
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
 OPENROUTER_API_KEY=sk-or-...
+GOOGLE_API_KEY=AI...
+OPENAI_API_KEY=sk...
 ```
 
 Run the example recipe:
@@ -89,13 +91,71 @@ Then run it:
 errata run my-recipe.md
 ```
 
+## Interactive Mode (TUI)
 
---- Below are features intended for full-release, they do not exist as of now. ---
+Start the TUI with `errata` (no subcommand). Type a prompt, and every configured model works on it concurrently. Live panels show each model's tool activity. When they finish, pick the best response — its file writes are applied to disk and your choice is logged to `data/preferences.jsonl`.
+
+```bash
+errata                           # fresh session
+errata --continue                # resume most recent session
+errata --resume <id>             # resume a specific session
+```
+
+### Key commands
+
+| Command | What it does |
+|---------|-------------|
+| `/config` | Browse and edit the session recipe (models, tools, constraints, system prompt) |
+| `/stats` | Show model win counts and session cost |
+| `/compact` | Summarize conversation history to free context window |
+| `/resume` | Re-run only interrupted models from a cancelled run |
+| `/rewind` | Undo the last run (revert writes and remove from context) |
+| `/save [path]` | Save the session recipe to disk |
+| `/load <path>` | Load a recipe file into the session |
+| `/verbose` | Toggle showing model text alongside tool events |
+| `/help` | Show all commands |
+
+
+### Data and output
+
+Errata stores all data under `data/`:
+
+| Path | Contents |
+|------|----------|
+| `data/preferences.jsonl` | Every model selection (append-only) |
+| `data/outputs/` | JSON reports from headless runs and `/export` |
+| `data/sessions/` | Per-session history, feed, and recipe state |
+| `data/prompt_history.jsonl` | Prompt recall for Up-arrow / Ctrl-R |
+
+View a summary with `/stats` in the TUI or `errata stats` from the command line. Filter by recipe with `errata stats --recipe <name>`.
+
+#### Querying with jq examples
+
+Win counts per model:
+
+```bash
+jq -s 'group_by(.selected) | map({model: .[0].selected, wins: length}) | sort_by(-.wins)' data/preferences.jsonl
+```
+
+All models that passed every criterion in a headless report:
+
+```bash
+jq '.tasks[].criteria_results | to_entries[] | select(.value | all(.passed)) | .key' data/outputs/*.json
+```
+
+Per-model pass rate from a headless report:
+
+```bash
+jq '.summary.per_model | to_entries[] | "\(.key): \(.value.criteria_passed)/\(.value.criteria_total)"' data/outputs/*.json
+```
+
+---
+
+--- Below are features intended for full release, they do not exist as of now. ---
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `errata run <recipe>` | Run a recipe against all specified models |
 | `errata publish` | Upload a recipe to errata.app |
 | `errata pull <id>` | Download a community recipe |
 
