@@ -1283,10 +1283,25 @@ func TestMarshalMarkdown_ToolGuidance_Empty(t *testing.T) {
 	assert.NotContains(t, md, "## Tool Guidance")
 }
 
+func TestApplyTo_MaxSteps(t *testing.T) {
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\nmax_steps: 25\n")))
+	cfg := defaultCfg()
+	r.ApplyTo(&cfg)
+	assert.Equal(t, 25, cfg.MaxSteps)
+}
+
+func TestApplyTo_MaxStepsZero_DoesNotOverwrite(t *testing.T) {
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
+	cfg := defaultCfg()
+	cfg.MaxSteps = 10
+	r.ApplyTo(&cfg)
+	assert.Equal(t, 10, cfg.MaxSteps, "absent max_steps must not clear existing config")
+}
+
 // ─── ApplyTo regression tests ─────────────────────────────────────────────────
 
 func TestApplyTo_AllFields_Simultaneous(t *testing.T) {
-	// Construct a recipe with ALL 10 ApplyTo-mapped fields set simultaneously.
+	// Construct a recipe with ALL ApplyTo-mapped fields set simultaneously.
 	// Pins field-interaction behavior — setting all at once must not interfere.
 	seed := int64(42)
 	r := &recipe.Recipe{
@@ -1304,7 +1319,8 @@ func TestApplyTo_AllFields_Simultaneous(t *testing.T) {
 			CompactThreshold: 0.65,
 		},
 		Constraints: recipe.ConstraintsConfig{
-			Timeout: 10 * time.Minute,
+			Timeout:  10 * time.Minute,
+			MaxSteps: 50,
 		},
 		ModelParams: recipe.ModelParamsConfig{
 			Seed: &seed,
@@ -1323,6 +1339,7 @@ func TestApplyTo_AllFields_Simultaneous(t *testing.T) {
 	assert.Equal(t, 3, cfg.SubagentMaxDepth)
 	assert.Equal(t, 30, cfg.MaxHistoryTurns)
 	assert.Equal(t, 10*time.Minute, cfg.AgentTimeout)
+	assert.Equal(t, 50, cfg.MaxSteps)
 	assert.InDelta(t, 0.65, cfg.CompactThreshold, 1e-9)
 	require.NotNil(t, cfg.Seed)
 	assert.Equal(t, int64(42), *cfg.Seed)
@@ -1341,6 +1358,7 @@ func TestApplyTo_UnsetFields_PreserveAll(t *testing.T) {
 		MCPServers:        "existing:server",
 		SubagentModel:     "existing-subagent",
 		SubagentMaxDepth:  5,
+		MaxSteps:          15,
 		MaxHistoryTurns:   40,
 		AgentTimeout:      7 * time.Minute,
 		CompactThreshold:  0.90,
@@ -1370,4 +1388,5 @@ func TestApplyTo_UnsetFields_PreserveAll(t *testing.T) {
 	require.NotNil(t, cfg.Seed)
 	assert.Equal(t, int64(99), *cfg.Seed)
 	assert.Equal(t, "existing guidance", cfg.ToolGuidance)
+	assert.Equal(t, 15, cfg.MaxSteps)
 }

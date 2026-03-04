@@ -58,7 +58,13 @@ func runAnthropicAgentLoop(
 		temperature = &zero
 	}
 
+	maxSteps := tools.MaxStepsFromContext(ctx)
+	step := 0
 	for {
+		step++
+		if maxSteps > 0 && step > maxSteps {
+			break
+		}
 		params := anthropic.MessageNewParams{
 			Model:     anthropic.Model(cfg.modelID),
 			MaxTokens: cfg.maxOutputTokens,

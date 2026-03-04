@@ -52,7 +52,13 @@ func runOpenAIAgentLoop(
 	var totalInput, totalOutput int64
 	start := time.Now()
 
+	maxSteps := tools.MaxStepsFromContext(ctx)
+	step := 0
 	for {
+		step++
+		if maxSteps > 0 && step > maxSteps {
+			break
+		}
 		params := openai.ChatCompletionNewParams{
 			Model:    openai.ChatModel(cfg.apiModelID),
 			Tools:    toolParams,

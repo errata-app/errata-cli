@@ -277,6 +277,7 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		Timeout:          opts.Cfg.AgentTimeout,
 		CompactThreshold: opts.Cfg.CompactThreshold,
 		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
+		MaxSteps:         opts.Cfg.MaxSteps,
 		CheckpointPath:   opts.CheckpointPath,
 	})
 	if tools.SubagentEnabled {

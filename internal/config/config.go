@@ -82,6 +82,10 @@ type Config struct {
 	// 0 disables spawn_agent entirely. Set via recipe ## Sub-Agent max_depth:.
 	SubagentMaxDepth int
 
+	// MaxSteps is the maximum number of agentic tool-use turns per adapter.
+	// 0 means unlimited. Set via recipe ## Constraints max_steps:.
+	MaxSteps int
+
 	// AgentTimeout is the per-adapter wall-clock timeout for a single RunAgent call.
 	// 0 means use the runner's built-in default (5 minutes).
 	// Set via recipe ## Constraints timeout:.

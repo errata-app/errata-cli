@@ -277,3 +277,29 @@ func TestGeminiLoop_EmptyCandidates(t *testing.T) {
 	assert.Empty(t, resp.Text)
 	assert.Empty(t, resp.ProposedWrites)
 }
+
+func TestGeminiLoop_MaxSteps(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile("f.txt", []byte("data"), 0o600))
+
+	ts := newGeminiMockServer(t, []string{
+		// Turn 1: function call
+		geminiFunctionCallResponse("read_file", map[string]any{"path": "f.txt"}, 100, 30),
+		// Turn 2: function call — should be skipped by maxSteps=1
+		geminiFunctionCallResponse("read_file", map[string]any{"path": "f.txt"}, 200, 40),
+		// Turn 3: text — should never be reached
+		geminiTextResponse("done", 300, 50),
+	})
+	defer ts.Close()
+
+	ctx := tools.WithMaxSteps(geminiToolCtx(), 1)
+	cfg := testGeminiConfig(t, ts)
+	resp, err := runGeminiAgentLoop(ctx, cfg, nil, "test",
+		func(models.AgentEvent) {})
+
+	require.NoError(t, err)
+	// Only 1 API call made; turn 2+ never executed.
+	assert.Equal(t, int64(100), resp.InputTokens)
+	assert.Equal(t, int64(30), resp.OutputTokens)
+}

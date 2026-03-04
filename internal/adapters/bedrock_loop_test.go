@@ -247,3 +247,27 @@ func TestBedrockLoop_StopReasonEndTurn(t *testing.T) {
 	assert.Equal(t, "Final answer.", resp.Text)
 	assert.True(t, resp.OK())
 }
+
+func TestBedrockLoop_MaxSteps(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile("f.txt", []byte("data"), 0o600))
+
+	stub := &stubBedrockConverser{responses: []*bedrockruntime.ConverseOutput{
+		// Turn 1: tool call
+		bedrockToolUseOutput("tu_1", "read_file", map[string]any{"path": "f.txt"}, 100, 30),
+		// Turn 2: tool call — should be skipped by maxSteps=1
+		bedrockToolUseOutput("tu_2", "read_file", map[string]any{"path": "f.txt"}, 200, 40),
+		// Turn 3: text — should never be reached
+		bedrockTextOutput("done", 300, 50),
+	}}
+
+	ctx := tools.WithMaxSteps(bedrockToolCtx(), 1)
+	resp, err := runBedrockAgentLoop(ctx, testBedrockConfig(stub), nil, "test",
+		func(models.AgentEvent) {})
+
+	require.NoError(t, err)
+	// Only 1 API call made; turn 2+ never executed.
+	assert.Equal(t, int64(100), resp.InputTokens)
+	assert.Equal(t, int64(30), resp.OutputTokens)
+}

@@ -82,7 +82,13 @@ func runBedrockAgentLoop(
 	toolCalls := map[string]int{}
 	var totalInput, totalOutput int64
 
+	maxSteps := tools.MaxStepsFromContext(ctx)
+	step := 0
 	for {
+		step++
+		if maxSteps > 0 && step > maxSteps {
+			break
+		}
 		input := &bedrockruntime.ConverseInput{
 			ModelId:    aws.String(cfg.bareModelID),
 			Messages:   messages,

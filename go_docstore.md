@@ -1,0 +1,40 @@
+# DocStore Bug Fix Challenge
+
+## Models
+- anthropic/claude-sonnet-4-6
+- google/gemini-2.5-pro
+- openai/o3
+- openai/gpt-4.1
+
+## System Prompt
+You are a Go developer debugging a multi-file in-memory document store.
+
+The project is at go_gauntlet_test/challenge11_docstore/. It has these source files:
+
+- document.go — Document type and field helpers
+- collection.go — Collection with CRUD operations and Find
+- index.go — Inverted index for fast equality lookups
+- query.go — Query builder and filter matching
+- docstore_test.go — Test suite (DO NOT modify)
+
+Start by running the tests:
+
+cd go_gauntlet_test/challenge11_docstore && go test -v ./...
+
+Read the failing test cases, trace the logic through the source files, and fix all bugs to make every test pass. Only modify implementation files — never touch the test file.
+
+## Tools
+- read_file
+- list_directory
+- search_code
+- search_files
+- write_file
+- edit_file
+- bash
+
+## Constraints
+max_steps: 50
+
+## Success Criteria
+- no_errors
+- files_written >= 2

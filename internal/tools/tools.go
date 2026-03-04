@@ -276,6 +276,24 @@ func MCPDispatchersFromContext(ctx context.Context) map[string]MCPDispatcher {
 	return v
 }
 
+// ─── Max steps support ────────────────────────────────────────────────────────
+
+// maxStepsKey is the context key for the maximum agentic loop iterations.
+type maxStepsKey struct{}
+
+// WithMaxSteps returns a context carrying the given max steps limit.
+// Adapter loops call MaxStepsFromContext to enforce the limit.
+func WithMaxSteps(ctx context.Context, n int) context.Context {
+	return context.WithValue(ctx, maxStepsKey{}, n)
+}
+
+// MaxStepsFromContext returns the max steps limit stored in ctx.
+// Returns 0 if no limit was set (unlimited).
+func MaxStepsFromContext(ctx context.Context) int {
+	v, _ := ctx.Value(maxStepsKey{}).(int)
+	return v
+}
+
 // ─── Seed support ─────────────────────────────────────────────────────────────
 
 // seedKey is the context key for the pseudorandom seed.

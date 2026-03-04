@@ -13,6 +13,7 @@ import (
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/prompt"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 const agentTimeout = 5 * time.Minute
@@ -28,6 +29,7 @@ type RunOptions struct {
 	Timeout          time.Duration // 0 → agentTimeout (5 min)
 	CompactThreshold float64       // 0 → autoCompactThreshold (0.80)
 	MaxHistoryTurns  int           // 0 → defaultMaxHistoryTurns (20)
+	MaxSteps         int           // 0 → unlimited agentic loop turns
 	CheckpointPath   string        // "" disables incremental checkpointing
 }
 
@@ -86,6 +88,9 @@ func RunAll(
 		wg.Go(func() {
 			tctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 			defer cancel()
+			if opts.MaxSteps > 0 {
+				tctx = tools.WithMaxSteps(tctx, opts.MaxSteps)
+			}
 
 			// filtered suppresses "text" and "error" events when not verbose,
 			// and intercepts "snapshot" events for incremental checkpointing.

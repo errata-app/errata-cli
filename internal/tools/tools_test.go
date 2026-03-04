@@ -239,6 +239,17 @@ func TestWithSeed_ZeroValue(t *testing.T) {
 	assert.Equal(t, int64(0), seed)
 }
 
+// ─── MaxSteps context ──────────────────────────────────────────────────────
+
+func TestWithMaxSteps_RoundTrip(t *testing.T) {
+	ctx := tools.WithMaxSteps(context.Background(), 42)
+	assert.Equal(t, 42, tools.MaxStepsFromContext(ctx))
+}
+
+func TestMaxStepsFromContext_ZeroWhenAbsent(t *testing.T) {
+	assert.Equal(t, 0, tools.MaxStepsFromContext(context.Background()))
+}
+
 // ─── DefinitionsAllowed ─────────────────────────────────────────────────────
 
 func TestDefinitionsAllowed_AllowlistOnly(t *testing.T) {

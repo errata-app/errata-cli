@@ -61,7 +61,13 @@ func runGeminiAgentLoop(
 	toolCalls := map[string]int{}
 	var totalInput, totalOutput int64
 
+	maxSteps := tools.MaxStepsFromContext(ctx)
+	step := 0
 	for {
+		step++
+		if maxSteps > 0 && step > maxSteps {
+			break
+		}
 		EmitRequest(ctx, onEvent, struct {
 			Model    string                       `json:"model"`
 			Contents []*genai.Content              `json:"contents"`
