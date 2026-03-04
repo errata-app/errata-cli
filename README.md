@@ -27,6 +27,8 @@ GOOGLE_API_KEY=AI...
 OPENAI_API_KEY=sk...
 ```
 
+The example recipe assumes the OpenRouter naming convention Errata uses for models. If you are running provider APIs directly you may be able to remove the */ before the model names.
+
 Run the example recipe:
 
 ```bash
