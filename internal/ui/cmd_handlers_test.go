@@ -23,7 +23,7 @@ func TestHandleClearCmd_PreservesConversationHistories(t *testing.T) {
 	a.feed = []feedItem{{kind: "msg", text: "old message"}}
 
 	result, cmd := a.handleClearCmd()
-	assert.Nil(t, cmd)
+	assert.NotNil(t, cmd, "/clear should return tea.ClearScreen cmd")
 	app := result.(App)
 
 	// Display feed should be cleared.
@@ -42,7 +42,7 @@ func TestHandleWipeCmd_ClearsConversationHistories(t *testing.T) {
 	a.feed = []feedItem{{kind: "msg", text: "old message"}}
 
 	result, cmd := a.handleWipeCmd()
-	assert.Nil(t, cmd)
+	assert.NotNil(t, cmd, "/wipe should return tea.ClearScreen cmd")
 	app := result.(App)
 
 	// Both display feed and conversation histories should be cleared.

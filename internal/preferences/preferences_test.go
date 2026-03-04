@@ -690,3 +690,47 @@ func TestSummarizeDetailed_NewAverages(t *testing.T) {
 	assert.InDelta(t, 5.0, sa.AvgToolCalls, 0.1)         // (4+6)/2
 	assert.InDelta(t, 1.0, sa.AvgProposedWrites, 0.1)    // (2+0)/2
 }
+
+func TestSummarize_FilterBySessionID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	require.NoError(t, preferences.Record(path, "p1", "a", "", "ses_1", []models.ModelResponse{{ModelID: "a", LatencyMS: 100}}))
+	require.NoError(t, preferences.Record(path, "p2", "b", "", "ses_1", []models.ModelResponse{{ModelID: "b", LatencyMS: 200}}))
+	require.NoError(t, preferences.Record(path, "p3", "a", "", "ses_2", []models.ModelResponse{{ModelID: "a", LatencyMS: 150}}))
+
+	// Unfiltered: a=2, b=1.
+	tally := preferences.Summarize(path, nil)
+	assert.Equal(t, 2, tally["a"])
+	assert.Equal(t, 1, tally["b"])
+
+	// Filtered by ses_1: a=1, b=1.
+	filtered := preferences.Summarize(path, &preferences.StatsFilter{SessionID: "ses_1"})
+	assert.Equal(t, 1, filtered["a"])
+	assert.Equal(t, 1, filtered["b"])
+
+	// Filtered by ses_2: a=1.
+	filtered2 := preferences.Summarize(path, &preferences.StatsFilter{SessionID: "ses_2"})
+	assert.Equal(t, 1, filtered2["a"])
+	assert.Equal(t, 0, filtered2["b"])
+}
+
+func TestSummarizeDetailed_FilterBySessionID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prefs.jsonl")
+	require.NoError(t, preferences.Record(path, "p1", "a", "", "ses_1", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 100},
+		{ModelID: "b", LatencyMS: 200},
+	}))
+	require.NoError(t, preferences.Record(path, "p2", "b", "", "ses_2", []models.ModelResponse{
+		{ModelID: "a", LatencyMS: 150},
+		{ModelID: "b", LatencyMS: 250},
+	}))
+
+	stats := preferences.SummarizeDetailed(path, &preferences.StatsFilter{SessionID: "ses_1"})
+	assert.Equal(t, 1, stats["a"].Wins)
+	assert.Equal(t, 1, stats["a"].Participations)
+	assert.Equal(t, 0, stats["b"].Wins)
+	assert.Equal(t, 1, stats["b"].Participations)
+
+	stats2 := preferences.SummarizeDetailed(path, &preferences.StatsFilter{SessionID: "ses_2"})
+	assert.Equal(t, 0, stats2["a"].Wins)
+	assert.Equal(t, 1, stats2["b"].Wins)
+}

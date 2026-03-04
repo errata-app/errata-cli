@@ -1241,46 +1241,6 @@ func TestRewind_WipeClearsStack(t *testing.T) {
 	assert.False(t, a.store.CanRewind())
 }
 
-// ── Group: Ctrl+O expand/collapse in View ───────────────────────────────────
-
-func TestCtrlO_ToggleVisibleInView(t *testing.T) {
-	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
-	a.width = 80
-	a.height = 40
-	setupRunState(&a, "test prompt", []string{"m1"})
-
-	// Add an event so we can verify it shows up in expanded view.
-	a.panels[0].addEvent(models.AgentEvent{Type: models.EventReading, Data: "foo.go"})
-
-	// Complete the run with a text-only response → modeRating.
-	msg := runCompleteMsg{responses: []models.ModelResponse{
-		{ModelID: "m1", Text: "here is my answer", LatencyMS: 300},
-	}}
-	result, _ := a.Update(msg)
-	a = appFrom(t, result)
-	require.Equal(t, modeRating, a.mode)
-	require.True(t, a.lastRunInView)
-
-	// Default (expanded): panels show events, no "ctrl+o to expand" hint.
-	view := a.View().Content
-	assert.NotContains(t, view, "ctrl+o to expand")
-	assert.Contains(t, view, "foo.go", "expanded panels should show tool events")
-
-	// Press Ctrl+O to collapse.
-	result, _ = a.handleRatingKey(ctrlKey('o'))
-	a = appFrom(t, result)
-	view = a.View().Content
-	assert.Contains(t, view, "ctrl+o to expand", "collapsed panels should show expand hint")
-	assert.NotContains(t, view, "foo.go", "collapsed panels should hide tool events")
-
-	// Press Ctrl+O again to expand.
-	result, _ = a.handleRatingKey(ctrlKey('o'))
-	a = appFrom(t, result)
-	view = a.View().Content
-	assert.NotContains(t, view, "ctrl+o to expand", "re-expanded panels should hide hint")
-	assert.Contains(t, view, "foo.go", "re-expanded panels should show tool events")
-}
-
 func TestLastRunInView_FlushedOnNewRun(t *testing.T) {
 	ads := []models.ModelAdapter{&scenarioAdapter{id: "m1"}}
 	a := newAppForTest(t, ads)
@@ -1314,9 +1274,10 @@ func TestLastRunInView_ClearedBySlashClear(t *testing.T) {
 	a.mode = modeIdle
 	assert.True(t, a.lastRunInView)
 
-	result, _ = a.handleClearCmd()
+	result, cmd := a.handleClearCmd()
 	a = appFrom(t, result)
 	assert.False(t, a.lastRunInView, "/clear should reset lastRunInView")
+	assert.NotNil(t, cmd, "/clear should return tea.ClearScreen cmd")
 }
 
 func TestLastRunInView_ClearedBySlashWipe(t *testing.T) {
@@ -1331,9 +1292,10 @@ func TestLastRunInView_ClearedBySlashWipe(t *testing.T) {
 	a.mode = modeIdle
 	assert.True(t, a.lastRunInView)
 
-	result, _ = a.handleWipeCmd()
+	result, cmd := a.handleWipeCmd()
 	a = appFrom(t, result)
 	assert.False(t, a.lastRunInView, "/wipe should reset lastRunInView")
+	assert.NotNil(t, cmd, "/wipe should return tea.ClearScreen cmd")
 }
 
 func TestLastRunInView_SetOnRunComplete(t *testing.T) {

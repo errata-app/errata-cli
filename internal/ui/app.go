@@ -166,9 +166,8 @@ type App struct {
 	// debugLog is true when --debug-log is active; enables raw API request logging.
 	debugLog bool
 
-	// lastRunInView: when true, the last completed run's panels+diffs are
-	// rendered in View() instead of being pushed to scrollback. This enables
-	// Ctrl+O expand/collapse to take visible effect. Flushed to scrollback
+	// lastRunInView: when true, the last completed run's panels are rendered
+	// in View() instead of being pushed to scrollback. Flushed to scrollback
 	// when the next run starts, /clear, /wipe, or withMessage is called.
 	lastRunInView bool
 
@@ -468,7 +467,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.idx < len(a.panels) {
 			p := a.panels[msg.idx]
 			p.done = true
-			p.expanded = true
 			p.latencyMS = msg.response.LatencyMS
 			p.inputTokens = msg.response.InputTokens
 			p.outputTokens = msg.response.OutputTokens
@@ -509,16 +507,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.cancelRun = nil
 		a.store.SetLastReportInfo(msg.reportPath, msg.toolNames)
 
-		// Mark panels done and expanded (so tool events stay visible after
-		// completion; Ctrl+O collapses). runner.RunAll preserves adapter order,
-		// so results[i] == panels[i].
+		// Mark panels done. runner.RunAll preserves adapter order, so results[i] == panels[i].
 		for i, resp := range msg.responses {
 			if i >= len(a.panels) {
 				break
 			}
 			p := a.panels[i]
 			p.done = true
-			p.expanded = true
 			p.latencyMS = resp.LatencyMS
 			p.inputTokens = resp.InputTokens
 			p.outputTokens = resp.OutputTokens
@@ -566,7 +561,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.feed[len(a.feed)-1].responses = msg.responses
 		}
 
-		// Panels stay in View() for Ctrl+O expand/collapse; diffs go to
+		// Panels stay in View() for live re-rendering; diffs go to
 		// scrollback immediately (they're static and can be very long).
 		a.lastRunInView = true
 		var diffCmd tea.Cmd

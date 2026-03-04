@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -105,7 +106,7 @@ func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 	a.store.ClearRewindStack()
 	a.pastedText = ""
 	a.pastedLineCount = 0
-	return a, nil
+	return a, clearScreenAndScrollback()
 }
 
 func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -116,8 +117,32 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubblet
 	a.pastedLineCount = 0
 	a.store.ClearHistories()
 	a.store.ClearReportPaths()
-	return a, nil
+	return a, clearScreenAndScrollback()
 }
+
+// clearScreenAndScrollback returns a tea.Cmd that clears the visible screen
+// and the terminal scrollback buffer. It uses tea.Exec to safely write ANSI
+// escape sequences while the renderer is paused, then ClearScreen to repaint.
+func clearScreenAndScrollback() tea.Cmd {
+	return tea.Exec(&clearScrollbackCmd{}, func(error) tea.Msg {
+		return tea.ClearScreen()
+	})
+}
+
+// clearScrollbackCmd implements tea.ExecCommand to write the ANSI clear
+// sequences directly to the terminal output.
+type clearScrollbackCmd struct{ out io.Writer }
+
+func (c *clearScrollbackCmd) Run() error {
+	// \033[H  — cursor home
+	// \033[2J — erase entire visible screen
+	// \033[3J — erase scrollback buffer
+	_, err := c.out.Write([]byte("\033[H\033[2J\033[3J"))
+	return err
+}
+func (c *clearScrollbackCmd) SetStdin(io.Reader)      {}
+func (c *clearScrollbackCmd) SetStdout(w io.Writer)    { c.out = w }
+func (c *clearScrollbackCmd) SetStderr(io.Writer)      {}
 
 func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	toCompact := a.activeAdapters
@@ -141,22 +166,10 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 }
 
 func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	// Filter stats by current config when a config store is available.
-	var filter *preferences.StatsFilter
-	var recipeName string
-	if a.store.RecipeStore() != nil {
-		snap := a.store.BuildRecipeSnapshot()
-		h := a.store.RecipeStore().Put(snap)
-		filter = &preferences.StatsFilter{ConfigHash: h}
-		recipeName = snap.Name
-	}
+	filter := &preferences.StatsFilter{SessionID: a.store.SessionID()}
 	stats := preferences.SummarizeDetailed(a.store.PrefPath(), filter)
 	var sb strings.Builder
-	if recipeName != "" {
-		fmt.Fprintf(&sb, "Stats (recipe: %s):\n", recipeName)
-	} else {
-		sb.WriteString("Stats:\n")
-	}
+	sb.WriteString("Stats (session):\n")
 	if len(stats) == 0 {
 		sb.WriteString("  No preference data yet.\n")
 	} else {

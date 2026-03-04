@@ -23,8 +23,6 @@ func (a App) handleIdleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolint:
 		switch msg.Code {
 		case 'd', 'c':
 			return a, tea.Quit
-		case 'o':
-			return a.toggleExpandLastRun()
 		case 'r':
 			a.searchActive = true
 			a.searchQuery = ""
@@ -237,33 +235,6 @@ func (a App) currentSearchResult() string { //nolint:gocritic // called from bub
 		return ""
 	}
 	return r[a.searchResultIdx]
-}
-
-// toggleExpandLastRun finds the most recent completed run and toggles its panels
-// between expanded and collapsed views.
-func (a App) toggleExpandLastRun() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	for i := len(a.feed) - 1; i >= 0; i-- {
-		item := &a.feed[i]
-		if item.kind != "run" || len(item.panels) == 0 {
-			continue
-		}
-		allDone := true
-		for _, p := range item.panels {
-			if !p.done {
-				allDone = false
-				break
-			}
-		}
-		if !allDone {
-			continue
-		}
-		newState := !item.panels[0].expanded
-		for _, p := range item.panels {
-			p.expanded = newState
-		}
-		return a, nil
-	}
-	return a, nil
 }
 
 // handleSearchKey processes keypresses while Ctrl-R search is active.

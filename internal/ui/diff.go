@@ -13,6 +13,7 @@ var (
 	addStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF00"))
 	removeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000"))
 	contextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	responseStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBBBBB"))
 	hunkStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#0087AF"))
 	addHighlight    = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(lipgloss.Color("#00AF00"))
 	removeHighlight = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Background(lipgloss.Color("#AF0000"))
@@ -68,7 +69,7 @@ func RenderDiffs(responses []models.ModelResponse, width ...int) string {
 				maxW := max(termW-2, 10) // 2 for "  " indent
 				for line := range strings.SplitSeq(resp.Text, "\n") {
 					for _, wl := range wrapLine(line, maxW) {
-						sb.WriteString(contextStyle.Render("  " + wl))
+						sb.WriteString(responseStyle.Render("  " + wl))
 						sb.WriteByte('\n')
 					}
 				}
@@ -82,13 +83,13 @@ func RenderDiffs(responses []models.ModelResponse, width ...int) string {
 			sb.WriteString(renderFileDiff(fd))
 		}
 		if resp.Text != "" {
-			sb.WriteString(contextStyle.Render("  ── reasoning ──"))
+			sb.WriteString(responseStyle.Render("  ── reasoning ──"))
 			sb.WriteByte('\n')
 			maxW := max(termW-2, 10)
 			for line := range strings.SplitSeq(resp.Text, "\n") {
 				if line != "" {
 					for _, wl := range wrapLine(line, maxW) {
-						sb.WriteString(contextStyle.Render("  " + wl))
+						sb.WriteString(responseStyle.Render("  " + wl))
 						sb.WriteByte('\n')
 					}
 				}
