@@ -69,6 +69,7 @@ type ModelResponse struct {
 	CostUSD             float64
 	ProposedWrites      []tools.FileWrite
 	ToolCalls           map[string]int // tool_name → call count across all turns
+	Steps               int    // number of agentic loop iterations (API round-trips)
 	Error               string // empty = success
 	Interrupted         bool   // true when run was cancelled mid-flight (partial data preserved)
 	StopReason          StopReason `json:"stop_reason,omitempty"`

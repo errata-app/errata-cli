@@ -552,6 +552,7 @@ func printModelResult(w io.Writer, resp models.ModelResponse, cr []criteria.Resu
 		status = "done"
 	}
 	tok := fmtTokens(resp.InputTokens, resp.OutputTokens)
+	steps := fmt.Sprintf("%d steps", resp.Steps)
 
 	if totalCriteria > 0 {
 		passed := criteria.PassCount(cr)
@@ -563,16 +564,16 @@ func printModelResult(w io.Writer, resp models.ModelResponse, cr []criteria.Resu
 			fmt.Fprintf(w, "  %-22s %-10s  %s  %s %d/%d criteria\n",
 				resp.ModelID, status, truncate(resp.Error, 30), mark, passed, totalCriteria)
 		} else {
-			fmt.Fprintf(w, "  %-22s %-10s  %5dms  %s  $%.4f  %s %d/%d criteria\n",
-				resp.ModelID, status, resp.LatencyMS, tok, resp.CostUSD, mark, passed, totalCriteria)
+			fmt.Fprintf(w, "  %-22s %-10s  %5dms  %s  %s  $%.4f  %s %d/%d criteria\n",
+				resp.ModelID, status, resp.LatencyMS, steps, tok, resp.CostUSD, mark, passed, totalCriteria)
 		}
 	} else {
 		if resp.Error != "" {
 			fmt.Fprintf(w, "  %-22s %-10s  %s\n",
 				resp.ModelID, status, truncate(resp.Error, 50))
 		} else {
-			fmt.Fprintf(w, "  %-22s %-10s  %5dms  %s  $%.4f\n",
-				resp.ModelID, status, resp.LatencyMS, tok, resp.CostUSD)
+			fmt.Fprintf(w, "  %-22s %-10s  %5dms  %s  %s  $%.4f\n",
+				resp.ModelID, status, resp.LatencyMS, steps, tok, resp.CostUSD)
 		}
 	}
 }
