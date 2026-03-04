@@ -83,9 +83,26 @@ timeout: 5m
 bash_timeout: 30s
 ```
 
+### Context
+
+Controls conversation history and how multiple tasks relate to each other.
+
+- `task_mode` — `independent` (default): reset history before each task. `sequential`: carry conversation history forward across tasks.
+- `max_history_turns` — sliding window size for conversation history (default: 20)
+- `strategy` — `auto_compact` (default), `manual`, or `off`
+- `compact_threshold` — auto-compact triggers when history fills this fraction of the context window (default: 0.80)
+
+```markdown
+## Context
+task_mode: independent
+max_history_turns: 20
+strategy: auto_compact
+compact_threshold: 0.80
+```
+
 ### Tasks
 
-What the models should accomplish. Each bullet is a separate task prompt sent to all models. Multiple tasks run sequentially by default.
+What the models should accomplish. Each bullet is a separate task prompt sent to all models. In `independent` mode (default), each task runs in isolation; in `sequential` mode, conversation history carries forward.
 
 ```markdown
 ## Tasks
@@ -131,3 +148,7 @@ errata run go_docstore.md --verbose
 ## Writing Good Recipes
 
 Hard tasks differentiate models — if every model passes, the recipe isn't useful. Easy tasks find where you can use cheaper models — run the same task with a $0.001/call model and a $0.10/call model. Always include success criteria so headless runs can self-evaluate without human review. Keep system prompts short and directive — models follow explicit rules better than vague guidance. One task per concept makes results easier to interpret than multi-part prompts.
+
+## Other Sections
+
+This guide covers the most essential recipe sections. Recipes also support: `## MCP Servers` (external tool servers), `## Model Parameters` (temperature, max_tokens, seed), `## Sandbox` (filesystem/network restrictions), `## Metadata` (name, description, tags, author), `## Tool Descriptions` (per-tool description overrides), `## Tool Guidance` (custom tool-use instructions), `## Model Profiles` (per-model capability overrides), `## Output Processing` (per-tool truncation rules), and `## Context Summarization Prompt` (custom compaction prompt). See `internal/recipe/recipe.go` for the full schema.
