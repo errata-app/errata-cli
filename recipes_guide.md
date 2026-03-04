@@ -149,6 +149,8 @@ errata run go_docstore.md --verbose
 
 Hard tasks differentiate models — if every model passes, the recipe isn't useful. Easy tasks find where you can use cheaper models — run the same task with a $0.001/call model and a $0.10/call model. Always include success criteria so headless runs can self-evaluate without human review. Keep system prompts short and directive — models follow explicit rules better than vague guidance. One task per concept makes results easier to interpret than multi-part prompts.
 
+
+Below are sections that have not yet been fully validated but could be tuned.
 ## Other Sections
 
 This guide covers the most essential recipe sections. Recipes also support: `## MCP Servers` (external tool servers), `## Model Parameters` (temperature, max_tokens, seed), `## Sandbox` (filesystem/network restrictions), `## Metadata` (name, description, tags, author), `## Tool Descriptions` (per-tool description overrides), `## Tool Guidance` (custom tool-use instructions), `## Model Profiles` (per-model capability overrides), `## Output Processing` (per-tool truncation rules), and `## Context Summarization Prompt` (custom compaction prompt). See `internal/recipe/recipe.go` for the full schema.
