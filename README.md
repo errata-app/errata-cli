@@ -75,7 +75,7 @@ Create a Markdown file with these sections:
 You are a senior Go developer. Always run tests before proposing changes.
 
 ## Tools
-<!-- Which tools models can use (omit for all) -->
+<!-- Which tools models can use, empty section for none, omit section entirely for all -->
 - read_file
 - edit_file
 - bash
