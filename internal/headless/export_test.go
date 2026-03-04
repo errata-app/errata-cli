@@ -14,3 +14,4 @@ var DiffWorktree = diffWorktree
 var SnapshotDir = snapshotDir
 var DiffSnapshot = diffSnapshot
 var GitAvailable = gitAvailable
+var CopyDir = copyDir

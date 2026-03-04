@@ -395,14 +395,9 @@ func createModelWorkDirs(projectDir, baseDir string, adpts []models.ModelAdapter
 			}
 		} else if gitAvail {
 			// Non-git fallback with git available: copy directory and create a baseline commit.
-			cmd := exec.Command("cp", "-a", projectDir+"/.", worktree+"/")
-			if mkdirErr := os.MkdirAll(worktree, 0o750); mkdirErr != nil {
+			if cpErr := copyDir(projectDir, worktree); cpErr != nil {
 				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
-				return nil, "", nil, nil, fmt.Errorf("mkdir for %s: %w", a.ID(), mkdirErr)
-			}
-			if out, cpErr := cmd.CombinedOutput(); cpErr != nil {
-				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
-				return nil, "", nil, nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
+				return nil, "", nil, nil, fmt.Errorf("copy for %s: %w", a.ID(), cpErr)
 			}
 			// Create git baseline for diffing.
 			for _, args := range [][]string{
@@ -419,14 +414,9 @@ func createModelWorkDirs(projectDir, baseDir string, adpts []models.ModelAdapter
 			}
 		} else {
 			// No git: copy directory and take a checksum snapshot for diffing.
-			cmd := exec.Command("cp", "-a", projectDir+"/.", worktree+"/")
-			if mkdirErr := os.MkdirAll(worktree, 0o750); mkdirErr != nil {
+			if cpErr := copyDir(projectDir, worktree); cpErr != nil {
 				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
-				return nil, "", nil, nil, fmt.Errorf("mkdir for %s: %w", a.ID(), mkdirErr)
-			}
-			if out, cpErr := cmd.CombinedOutput(); cpErr != nil {
-				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
-				return nil, "", nil, nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
+				return nil, "", nil, nil, fmt.Errorf("copy for %s: %w", a.ID(), cpErr)
 			}
 			snap, snapErr := snapshotDir(worktree)
 			if snapErr != nil {
@@ -464,6 +454,51 @@ func isGitRepo(dir string) bool {
 func gitAvailable() bool {
 	_, err := exec.LookPath("git")
 	return err == nil
+}
+
+// copyDir recursively copies src into dst, creating dst if needed.
+// It skips .git/ directories and preserves file modes and symlinks.
+func copyDir(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(src, path)
+		if relErr != nil {
+			return relErr
+		}
+		target := filepath.Join(dst, rel)
+
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(target, 0o750)
+		}
+
+		// Symlinks: recreate the link rather than copying the target.
+		if d.Type()&fs.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		}
+
+		// Regular files: copy contents preserving mode.
+		if !d.Type().IsRegular() {
+			return nil // skip special files (devices, sockets, etc.)
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	})
 }
 
 // snapshotDir walks root and returns a map of relative-path → SHA-256 hex digest
