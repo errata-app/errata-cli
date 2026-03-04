@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -489,58 +491,149 @@ func matchParts(pat, fp []string) (bool, error) {
 	return len(fp) == 0, nil
 }
 
-// ExecuteSearchCode searches file contents for pattern using grep.
-// path and fileGlob are optional; path defaults to ".".
-// contextLines adds N lines of context before and after each match (grep -C N).
-// Returns grep output (path:line:content format) or an error message.
+// isBinaryFile reports whether data looks like a binary file by checking
+// the first 512 bytes for a null byte.
+func isBinaryFile(data []byte) bool {
+	return bytes.ContainsRune(data[:min(len(data), 512)], 0)
+}
+
+// matchFileGlob reports whether name matches glob (base-name only, like
+// grep --include). Returns true when glob is empty (no filter).
+func matchFileGlob(name, glob string) bool {
+	if glob == "" {
+		return true
+	}
+	ok, _ := filepath.Match(glob, name)
+	return ok
+}
+
+// searchFileLines appends grep-style output lines to results for every line
+// in lines that matches re. relPath is the display path prefix.
 //
-// DERIVED: subprocess + 30s timeout pattern from codex grep_files.rs
+// When contextLines <= 0, only matching lines are emitted (file:N:content).
+// When contextLines > 0, before/after context is included with "-" separators
+// for context lines and ":" for match lines, and "--" between non-adjacent groups.
+func searchFileLines(re *regexp.Regexp, relPath string, lines []string, contextLines int, results *[]string) {
+	if contextLines <= 0 {
+		for i, line := range lines {
+			if re.MatchString(line) {
+				*results = append(*results, fmt.Sprintf("%s:%d:%s", relPath, i+1, line))
+			}
+		}
+		return
+	}
+
+	// Collect matching indices.
+	var matchIdx []int
+	for i, line := range lines {
+		if re.MatchString(line) {
+			matchIdx = append(matchIdx, i)
+		}
+	}
+	if len(matchIdx) == 0 {
+		return
+	}
+
+	// Build context groups, merging overlapping ranges.
+	type span struct{ lo, hi int } // inclusive line indices
+	var groups []span
+	for _, idx := range matchIdx {
+		lo := max(idx-contextLines, 0)
+		hi := idx + contextLines
+		if hi >= len(lines) {
+			hi = len(lines) - 1
+		}
+		if len(groups) > 0 && lo <= groups[len(groups)-1].hi+1 {
+			groups[len(groups)-1].hi = hi
+		} else {
+			groups = append(groups, span{lo, hi})
+		}
+	}
+
+	// Build a set of match line indices for O(1) lookup.
+	matchSet := make(map[int]bool, len(matchIdx))
+	for _, idx := range matchIdx {
+		matchSet[idx] = true
+	}
+
+	for gi, g := range groups {
+		if gi > 0 {
+			*results = append(*results, "--")
+		}
+		for i := g.lo; i <= g.hi; i++ {
+			if matchSet[i] {
+				*results = append(*results, fmt.Sprintf("%s:%d:%s", relPath, i+1, lines[i]))
+			} else {
+				*results = append(*results, fmt.Sprintf("%s-%d-%s", relPath, i+1, lines[i]))
+			}
+		}
+	}
+}
+
+// ExecuteSearchCode searches file contents for pattern using pure Go
+// (filepath.WalkDir + regexp). Skips .git/ directories and binary files.
+// path and fileGlob are optional; path defaults to ".".
+// contextLines adds N lines of context before and after each match.
+// Returns grep-compatible output (path:line:content format) or an error message.
 func ExecuteSearchCode(ctx context.Context, pattern, path, fileGlob string, contextLines int) string {
 	if path == "" {
 		path = "."
 	}
-	absPath, _, errMsg := validatePathCtx(ctx, path)
+	absPath, root, errMsg := validatePathCtx(ctx, path)
 	if errMsg != "" {
 		return errMsg
 	}
 
-	args := []string{"-rn"}
-	if fileGlob != "" {
-		args = append(args, "--include="+fileGlob)
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Sprintf("[error: invalid regex %q: %v]", pattern, err)
 	}
-	if contextLines > 0 {
-		args = append(args, fmt.Sprintf("-C%d", contextLines))
-	}
-	args = append(args, "--", pattern, absPath)
 
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), searchCommandTimeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, searchCommandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, "grep", args...)
-	var out bytes.Buffer
-	var errOut bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
+	var results []string
+	walkErr := filepath.WalkDir(absPath, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // skip unreadable entries
+		}
+		if timeoutCtx.Err() != nil {
+			return timeoutCtx.Err()
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !matchFileGlob(d.Name(), fileGlob) {
+			return nil
+		}
+		data, readErr := os.ReadFile(p)
+		if readErr != nil {
+			return nil //nolint:nilerr // skip unreadable files
+		}
+		if isBinaryFile(data) {
+			return nil
+		}
 
-	if runErr := cmd.Run(); runErr != nil {
-		if timeoutCtx.Err() == context.DeadlineExceeded {
-			return "[error: search timed out after 30s]"
+		relPath, _ := filepath.Rel(root, p)
+		lines := strings.Split(string(data), "\n")
+		// Remove trailing empty element from final newline.
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
 		}
-		// grep exit code 1 means no matches — not an error.
-		if out.Len() == 0 {
-			return "(no matches)"
-		}
+		searchFileLines(re, relPath, lines, contextLines, &results)
+		return nil
+	})
+	if walkErr != nil && timeoutCtx.Err() == context.DeadlineExceeded {
+		return "[error: search timed out after 30s]"
 	}
 
-	output := out.String()
-	// Make paths relative to cwd for cleaner output
-	output = strings.ReplaceAll(output, absPath+string(filepath.Separator), "")
-	output = strings.ReplaceAll(output, absPath, "")
-
-	if output == "" {
+	if len(results) == 0 {
 		return "(no matches)"
 	}
-	return strings.TrimRight(output, "\n")
+	return strings.Join(results, "\n")
 }
 
 // WriteFileDirect writes content to path, resolving against WorkDirFromContext.
