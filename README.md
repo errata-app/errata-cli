@@ -89,6 +89,8 @@ Then run it:
 errata run my-recipe.md
 ```
 
+
+--- Below are features intended for full-release, they do not exist as of now. ---
 ## Commands
 
 | Command | Description |

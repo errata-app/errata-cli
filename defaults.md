@@ -142,14 +142,3 @@ Override with recipe `## Context Summarization Prompt`.
 | Temperature | Provider default | `## Model Parameters` `temperature:` |
 | Max tokens | Provider default | `## Model Parameters` `max_tokens:` |
 
----
-
-## Features Disabled at Compile Time
-
-| Feature | Gate | How to enable |
-|---------|------|---------------|
-| Sub-agents (`spawn_agent`) | `SubagentEnabled = false` | Set to `true` in `internal/tools/tools.go`, recompile |
-| Lifecycle hooks | `HooksEnabled = false` | Set to `true` in `internal/tools/tools.go`, recompile |
-| System reminders | `RemindersEnabled = false` | Set to `true` in `internal/tools/tools.go`, recompile |
-
-These features can be configured via recipe (`## Hooks`, `## System Reminders`, `## Sub-Agent`) but the runtime code is gated behind the compile-time constants above.
