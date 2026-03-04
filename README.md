@@ -30,7 +30,12 @@ OPENAI_API_KEY=sk...
 Run the example recipe:
 
 ```bash
-errata run go_docstore.md --verbose
+./errata run -r go_docstore.md --verbose
+```
+or
+
+```bash
+errata run -r go_docstore.md --verbose
 ```
 
 Sample output:
@@ -96,7 +101,7 @@ You are a senior Go developer. Always run tests before proposing changes.
 Then run it:
 
 ```bash
-errata run my-recipe.md
+errata run -r my-recipe.md
 ```
 
 ## Interactive Mode (TUI)
