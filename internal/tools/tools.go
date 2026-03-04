@@ -276,6 +276,41 @@ func MCPDispatchersFromContext(ctx context.Context) map[string]MCPDispatcher {
 	return v
 }
 
+// ─── WorkDir support (per-model filesystem isolation) ─────────────────────────
+
+// workDirKey is the context key for the per-model working directory override.
+type workDirKey struct{}
+
+// WithWorkDir returns a context carrying the given working directory override.
+// Executor functions resolve paths relative to this directory instead of os.Getwd().
+func WithWorkDir(ctx context.Context, dir string) context.Context {
+	return context.WithValue(ctx, workDirKey{}, dir)
+}
+
+// WorkDirFromContext returns the working directory override stored in ctx,
+// or "" if no override was set (fall back to os.Getwd()).
+func WorkDirFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(workDirKey{}).(string)
+	return v
+}
+
+// directWritesKey is the context key for direct-write mode.
+type directWritesKey struct{}
+
+// WithDirectWrites returns a context that enables direct-write mode.
+// When enabled, write_file and edit_file write to disk immediately instead of
+// queuing proposals. Used in headless mode with per-model worktrees.
+func WithDirectWrites(ctx context.Context, enabled bool) context.Context {
+	return context.WithValue(ctx, directWritesKey{}, enabled)
+}
+
+// DirectWriteFromContext reports whether direct-write mode is enabled in ctx.
+// Returns false if not set (queue writes as proposals — TUI default).
+func DirectWriteFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(directWritesKey{}).(bool)
+	return v
+}
+
 // ─── Max steps support ────────────────────────────────────────────────────────
 
 // maxStepsKey is the context key for the maximum agentic loop iterations.

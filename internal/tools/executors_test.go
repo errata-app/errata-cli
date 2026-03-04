@@ -19,21 +19,21 @@ func TestExecuteRead_FileFound(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte("hello world"), 0o644))
 
 	t.Chdir(dir)
-	got := tools.ExecuteRead("hello.txt", 0, 0)
+	got := tools.ExecuteRead(context.Background(),"hello.txt", 0, 0)
 	assert.Equal(t, "hello world", got)
 }
 
 func TestExecuteRead_FileNotFound(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	got := tools.ExecuteRead("nonexistent.txt", 0, 0)
+	got := tools.ExecuteRead(context.Background(),"nonexistent.txt", 0, 0)
 	assert.Contains(t, got, "[error:")
 }
 
 func TestExecuteRead_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	got := tools.ExecuteRead("../../etc/passwd", 0, 0)
+	got := tools.ExecuteRead(context.Background(),"../../etc/passwd", 0, 0)
 	assert.Contains(t, got, "[error:")
 	assert.Contains(t, got, "outside the working directory")
 }
@@ -46,7 +46,7 @@ func TestExecuteRead_Nested(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte("nested"), 0o644))
 
 	t.Chdir(dir)
-	got := tools.ExecuteRead("sub/data.txt", 0, 0)
+	got := tools.ExecuteRead(context.Background(),"sub/data.txt", 0, 0)
 	assert.Equal(t, "nested", got)
 }
 
@@ -56,7 +56,7 @@ func TestExecuteRead_OffsetSkipsLines(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644))
 	t.Chdir(dir)
 
-	got := tools.ExecuteRead("f.txt", 3, 0)
+	got := tools.ExecuteRead(context.Background(),"f.txt", 3, 0)
 	assert.True(t, strings.HasPrefix(got, "line3"), "offset=3 should start at line3, got: %q", got)
 	assert.NotContains(t, got, "line1")
 	assert.NotContains(t, got, "line2")
@@ -68,7 +68,7 @@ func TestExecuteRead_LimitCapsLines(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644))
 	t.Chdir(dir)
 
-	got := tools.ExecuteRead("f.txt", 1, 2)
+	got := tools.ExecuteRead(context.Background(),"f.txt", 1, 2)
 	// First 2 lines should be present; remainder should not.
 	assert.True(t, strings.HasPrefix(got, "a\nb"), "expected first 2 lines, got: %q", got)
 	assert.NotContains(t, got, "c\n")
@@ -82,7 +82,7 @@ func TestExecuteRead_TruncationNotice(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644))
 	t.Chdir(dir)
 
-	got := tools.ExecuteRead("f.txt", 1, 2)
+	got := tools.ExecuteRead(context.Background(),"f.txt", 1, 2)
 	assert.Contains(t, got, "lines omitted")
 	assert.Contains(t, got, "offset=3")
 }
@@ -92,7 +92,7 @@ func TestExecuteRead_OffsetBeyondEnd(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte("only one line"), 0o644))
 	t.Chdir(dir)
 
-	got := tools.ExecuteRead("f.txt", 999, 0)
+	got := tools.ExecuteRead(context.Background(),"f.txt", 999, 0)
 	assert.Contains(t, got, "[error:")
 	assert.Contains(t, got, "offset")
 }
@@ -107,7 +107,7 @@ func TestExecuteRead_HardCap(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "big.txt"), []byte(sb.String()), 0o644))
 	t.Chdir(dir)
 
-	got := tools.ExecuteRead("big.txt", 0, 0)
+	got := tools.ExecuteRead(context.Background(),"big.txt", 0, 0)
 	assert.Contains(t, got, "lines omitted")
 	assert.Contains(t, got, "offset=2001")
 }
@@ -140,7 +140,7 @@ func TestListDirectory_Basic(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "b.txt"), []byte("b"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteListDirectory(".", 2)
+	out := tools.ExecuteListDirectory(context.Background(),".", 2)
 	assert.Contains(t, out, "a.txt")
 	assert.Contains(t, out, "sub/")
 	assert.Contains(t, out, "b.txt")
@@ -152,7 +152,7 @@ func TestListDirectory_DepthOne(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "nested.txt"), []byte("n"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteListDirectory(".", 1)
+	out := tools.ExecuteListDirectory(context.Background(),".", 1)
 	assert.Contains(t, out, "sub/")
 	assert.NotContains(t, out, "nested.txt")
 }
@@ -163,7 +163,7 @@ func TestListDirectory_DepthTwo(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "nested.txt"), []byte("n"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteListDirectory(".", 2)
+	out := tools.ExecuteListDirectory(context.Background(),".", 2)
 	assert.Contains(t, out, "sub/")
 	assert.Contains(t, out, "nested.txt")
 }
@@ -171,7 +171,7 @@ func TestListDirectory_DepthTwo(t *testing.T) {
 func TestListDirectory_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	out := tools.ExecuteListDirectory("../../etc", 1)
+	out := tools.ExecuteListDirectory(context.Background(),"../../etc", 1)
 	assert.Contains(t, out, "[error:")
 	assert.Contains(t, out, "outside the working directory")
 }
@@ -179,7 +179,7 @@ func TestListDirectory_PathTraversal(t *testing.T) {
 func TestListDirectory_NotExist(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	out := tools.ExecuteListDirectory("nosuchdir", 1)
+	out := tools.ExecuteListDirectory(context.Background(),"nosuchdir", 1)
 	assert.Contains(t, out, "[error:")
 }
 
@@ -187,7 +187,7 @@ func TestListDirectory_NotADirectory(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0o644))
 	t.Chdir(dir)
-	out := tools.ExecuteListDirectory("file.txt", 1)
+	out := tools.ExecuteListDirectory(context.Background(),"file.txt", 1)
 	assert.Contains(t, out, "[error:")
 }
 
@@ -197,7 +197,7 @@ func TestListDirectory_DefaultDepthZero(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "f.txt"), []byte("f"), 0o644))
 	t.Chdir(dir)
-	out := tools.ExecuteListDirectory(".", 0)
+	out := tools.ExecuteListDirectory(context.Background(),".", 0)
 	assert.Contains(t, out, "sub/")
 	assert.Contains(t, out, "f.txt")
 }
@@ -211,7 +211,7 @@ func TestSearchFiles_GlobMatch(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "readme.md"), []byte(""), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchFiles("*.go", ".")
+	out := tools.ExecuteSearchFiles(context.Background(),"*.go", ".")
 	assert.Contains(t, out, "main.go")
 	assert.Contains(t, out, "main_test.go")
 	assert.NotContains(t, out, "readme.md")
@@ -222,7 +222,7 @@ func TestSearchFiles_NoMatches(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte(""), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchFiles("*.go", ".")
+	out := tools.ExecuteSearchFiles(context.Background(),"*.go", ".")
 	assert.Equal(t, "(no matches)", out)
 }
 
@@ -232,14 +232,14 @@ func TestSearchFiles_DefaultBasePath(t *testing.T) {
 	t.Chdir(dir)
 
 	// empty base_path defaults to "."
-	out := tools.ExecuteSearchFiles("*.go", "")
+	out := tools.ExecuteSearchFiles(context.Background(),"*.go", "")
 	assert.Contains(t, out, "foo.go")
 }
 
 func TestSearchFiles_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	out := tools.ExecuteSearchFiles("*.go", "../../etc")
+	out := tools.ExecuteSearchFiles(context.Background(),"*.go", "../../etc")
 	assert.Contains(t, out, "[error:")
 }
 
@@ -250,7 +250,7 @@ func TestSearchCode_BasicMatch(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "foo.go"), []byte("package foo\nfunc Hello() {}\n"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("Hello", ".", "", 0)
+	out := tools.ExecuteSearchCode(context.Background(),"Hello", ".", "", 0)
 	assert.Contains(t, out, "Hello")
 	assert.Contains(t, out, "foo.go")
 }
@@ -260,7 +260,7 @@ func TestSearchCode_NoMatches(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "foo.go"), []byte("package foo\n"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("NoSuchPattern12345", ".", "", 0)
+	out := tools.ExecuteSearchCode(context.Background(),"NoSuchPattern12345", ".", "", 0)
 	assert.Equal(t, "(no matches)", out)
 }
 
@@ -270,7 +270,7 @@ func TestSearchCode_FileGlobFilter(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "bar.txt"), []byte("needle here\n"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("needle", ".", "*.go", 0)
+	out := tools.ExecuteSearchCode(context.Background(),"needle", ".", "*.go", 0)
 	assert.Contains(t, out, "foo.go")
 	assert.NotContains(t, out, "bar.txt")
 }
@@ -281,14 +281,14 @@ func TestSearchCode_DefaultPath(t *testing.T) {
 	t.Chdir(dir)
 
 	// empty path defaults to "."
-	out := tools.ExecuteSearchCode("findme", "", "", 0)
+	out := tools.ExecuteSearchCode(context.Background(),"findme", "", "", 0)
 	assert.Contains(t, out, "findme")
 }
 
 func TestSearchCode_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	out := tools.ExecuteSearchCode("root", "../../etc", "", 0)
+	out := tools.ExecuteSearchCode(context.Background(),"root", "../../etc", "", 0)
 	assert.Contains(t, out, "[error:")
 	assert.Contains(t, out, "outside the working directory")
 }
@@ -299,7 +299,7 @@ func TestSearchCode_WithContextLines(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "ctx.txt"), []byte(content), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("target", ".", "", 1)
+	out := tools.ExecuteSearchCode(context.Background(),"target", ".", "", 1)
 	assert.Contains(t, out, "target")
 	assert.Contains(t, out, "before")
 	assert.Contains(t, out, "after")
@@ -313,7 +313,7 @@ func TestSearchFiles_DoubleStarRootMatch(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(""), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchFiles("**/*.go", ".")
+	out := tools.ExecuteSearchFiles(context.Background(),"**/*.go", ".")
 	assert.Contains(t, out, "main.go")
 }
 
@@ -325,7 +325,7 @@ func TestSearchFiles_DoubleStarDeep(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(deep, "tools.go"), []byte(""), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchFiles("**/*.go", ".")
+	out := tools.ExecuteSearchFiles(context.Background(),"**/*.go", ".")
 	assert.Contains(t, out, "tools.go")
 	assert.NotContains(t, out, "[error:")
 }
@@ -340,7 +340,7 @@ func TestSearchFiles_DoubleStarMidPattern(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "cmd", "main.go"), []byte(""), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchFiles("internal/**/*.go", ".")
+	out := tools.ExecuteSearchFiles(context.Background(),"internal/**/*.go", ".")
 	assert.Contains(t, out, "top.go")
 	assert.Contains(t, out, "runner.go")
 	assert.NotContains(t, out, "cmd")
@@ -352,7 +352,7 @@ func TestSearchFiles_DoubleStarNoMatch(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte(""), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchFiles("**/*.go", ".")
+	out := tools.ExecuteSearchFiles(context.Background(),"**/*.go", ".")
 	assert.Equal(t, "(no matches)", out)
 }
 
@@ -364,7 +364,7 @@ func TestSearchFiles_DoubleStarTestFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "pkg", "foo_test.go"), []byte(""), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchFiles("**/*_test.go", ".")
+	out := tools.ExecuteSearchFiles(context.Background(),"**/*_test.go", ".")
 	assert.Contains(t, out, "foo_test.go")
 	assert.NotContains(t, out, "foo.go\n")
 	assert.NotContains(t, out, "[error:")
@@ -376,7 +376,7 @@ func TestSearchCode_LineNumbers(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte(content), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteSearchCode("find me", ".", "", 0)
+	out := tools.ExecuteSearchCode(context.Background(),"find me", ".", "", 0)
 	// grep -n output format: filename:linenum:content
 	assert.True(t, strings.Contains(out, ":3:") || strings.Contains(out, "find me"),
 		"expected line number or match content in output: %q", out)
@@ -467,7 +467,7 @@ func TestExecuteEditFile_Success(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(original), 0o644))
 	t.Chdir(dir)
 
-	newContent, errMsg := tools.ExecuteEditFile("main.go", `return "old"`, `return "new"`)
+	newContent, errMsg := tools.ExecuteEditFile(context.Background(),"main.go", `return "old"`, `return "new"`)
 	require.Empty(t, errMsg)
 	assert.Contains(t, newContent, `return "new"`)
 	assert.NotContains(t, newContent, `return "old"`)
@@ -480,7 +480,7 @@ func TestExecuteEditFile_NotFound(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.go"), []byte("package main\n"), 0o644))
 	t.Chdir(dir)
 
-	_, errMsg := tools.ExecuteEditFile("f.go", "nonexistent string xyz", "replacement")
+	_, errMsg := tools.ExecuteEditFile(context.Background(),"f.go", "nonexistent string xyz", "replacement")
 	assert.Contains(t, errMsg, "[error:")
 	assert.Contains(t, errMsg, "not found")
 }
@@ -491,7 +491,7 @@ func TestExecuteEditFile_Ambiguous(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.go"), []byte(content), 0o644))
 	t.Chdir(dir)
 
-	_, errMsg := tools.ExecuteEditFile("f.go", "duplicate", "replacement")
+	_, errMsg := tools.ExecuteEditFile(context.Background(),"f.go", "duplicate", "replacement")
 	assert.Contains(t, errMsg, "[error:")
 	assert.Contains(t, errMsg, "ambiguous")
 	assert.Contains(t, errMsg, "2 matches")
@@ -501,7 +501,7 @@ func TestExecuteEditFile_FileNotFound(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	_, errMsg := tools.ExecuteEditFile("nosuchfile.go", "old", "new")
+	_, errMsg := tools.ExecuteEditFile(context.Background(),"nosuchfile.go", "old", "new")
 	assert.Contains(t, errMsg, "[error:")
 	assert.Contains(t, errMsg, "not found")
 }
@@ -510,7 +510,7 @@ func TestExecuteEditFile_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	_, errMsg := tools.ExecuteEditFile("../../etc/passwd", "root", "toor")
+	_, errMsg := tools.ExecuteEditFile(context.Background(),"../../etc/passwd", "root", "toor")
 	assert.Contains(t, errMsg, "[error:")
 	assert.Contains(t, errMsg, "outside the working directory")
 }
@@ -523,7 +523,7 @@ func TestListDirectory_ShowsFileSizes(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "small.txt"), []byte("hi"), 0o644))
 	t.Chdir(dir)
 
-	out := tools.ExecuteListDirectory(".", 1)
+	out := tools.ExecuteListDirectory(context.Background(),".", 1)
 	assert.Contains(t, out, "small.txt")
 	// Size hint should be present in some form (KB bracket).
 	assert.Contains(t, out, "(")
@@ -535,7 +535,7 @@ func TestListDirectory_DirectoriesHaveNoSizeHint(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "subdir"), 0o755))
 	t.Chdir(dir)
 
-	out := tools.ExecuteListDirectory(".", 1)
+	out := tools.ExecuteListDirectory(context.Background(),".", 1)
 	// The directory line should be "subdir/" with no "(N KB)" attached.
 	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, "subdir/") {
@@ -658,4 +658,110 @@ func TestSnapshotFiles_PathTraversal(t *testing.T) {
 	_, err := tools.SnapshotFiles([]tools.FileWrite{{Path: "../../etc/passwd", Content: "x"}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "outside the working directory")
+}
+
+// ─── WorkDir context tests ──────────────────────────────────────────────────
+
+func TestExecuteRead_WithWorkDir(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dirA, "found.txt"), []byte("in A"), 0o644))
+
+	// Read from dirA via WorkDir — file exists.
+	ctxA := tools.WithWorkDir(context.Background(), dirA)
+	got := tools.ExecuteRead(ctxA, "found.txt", 0, 0)
+	assert.Equal(t, "in A", got)
+
+	// Read from dirB via WorkDir — file does not exist.
+	ctxB := tools.WithWorkDir(context.Background(), dirB)
+	got = tools.ExecuteRead(ctxB, "found.txt", 0, 0)
+	assert.Contains(t, got, "[error:")
+}
+
+func TestExecuteEditFile_WithWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "f.go"), []byte("old content here"), 0o644))
+
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+	newContent, errMsg := tools.ExecuteEditFile(ctx, "f.go", "old content", "new content")
+	require.Empty(t, errMsg)
+	assert.Contains(t, newContent, "new content")
+	assert.NotContains(t, newContent, "old content")
+}
+
+func TestWriteFileDirect(t *testing.T) {
+	workDir := t.TempDir()
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+
+	errMsg := tools.WriteFileDirect(ctx, "sub/output.txt", "hello direct")
+	assert.Empty(t, errMsg)
+
+	got, err := os.ReadFile(filepath.Join(workDir, "sub", "output.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "hello direct", string(got))
+}
+
+func TestWriteFileDirect_MultiEdit(t *testing.T) {
+	workDir := t.TempDir()
+	original := "func hello() {\n\treturn \"old1\"\n\t// old2 marker\n}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "f.go"), []byte(original), 0o644))
+
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+
+	// First edit.
+	newContent, errMsg := tools.ExecuteEditFile(ctx, "f.go", "old1", "new1")
+	require.Empty(t, errMsg)
+	errMsg = tools.WriteFileDirect(ctx, "f.go", newContent)
+	assert.Empty(t, errMsg)
+
+	// Second edit reads from disk (where first edit landed).
+	newContent2, errMsg := tools.ExecuteEditFile(ctx, "f.go", "old2", "new2")
+	require.Empty(t, errMsg)
+	errMsg = tools.WriteFileDirect(ctx, "f.go", newContent2)
+	assert.Empty(t, errMsg)
+
+	// Both edits should be present.
+	got, err := os.ReadFile(filepath.Join(workDir, "f.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(got), "new1")
+	assert.Contains(t, string(got), "new2")
+	assert.NotContains(t, string(got), "old1")
+	assert.NotContains(t, string(got), "old2")
+}
+
+func TestExecuteListDirectory_WithWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "visible.txt"), []byte("v"), 0o644))
+
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+	out := tools.ExecuteListDirectory(ctx, ".", 1)
+	assert.Contains(t, out, "visible.txt")
+}
+
+func TestExecuteSearchFiles_WithWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "app.go"), []byte(""), 0o644))
+
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+	out := tools.ExecuteSearchFiles(ctx, "*.go", ".")
+	assert.Contains(t, out, "app.go")
+}
+
+func TestExecuteBash_WithWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "marker.txt"), []byte("x"), 0o644))
+
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+	out := tools.ExecuteBash(ctx, "ls marker.txt")
+	assert.Contains(t, out, "marker.txt")
+	assert.NotContains(t, out, "[error:")
+}
+
+func TestWriteFileDirect_PathTraversal(t *testing.T) {
+	workDir := t.TempDir()
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+
+	errMsg := tools.WriteFileDirect(ctx, "../../etc/evil", "bad")
+	assert.Contains(t, errMsg, "[error:")
+	assert.Contains(t, errMsg, "outside the working directory")
 }

@@ -82,20 +82,32 @@ func DispatchTool(
 			}
 		}
 		onEvent(models.AgentEvent{Type: models.EventReading, Data: path})
-		return applyOutputProcessing(ctx, name, tools.ExecuteRead(path, offset, limit)), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteRead(ctx, path, offset, limit)), true
 
 	case tools.WriteToolName:
 		path := args["path"]
 		onEvent(models.AgentEvent{Type: models.EventWriting, Data: path})
+		if tools.DirectWriteFromContext(ctx) {
+			if errMsg := tools.WriteFileDirect(ctx, path, args["content"]); errMsg != "" {
+				return errMsg, true
+			}
+			return "File written.", true
+		}
 		*proposed = append(*proposed, tools.FileWrite{Path: path, Content: args["content"]})
 		return writeAck, true
 
 	case tools.EditToolName:
 		path := args["path"]
 		onEvent(models.AgentEvent{Type: models.EventWriting, Data: path})
-		newContent, errMsg := tools.ExecuteEditFile(path, args["old_string"], args["new_string"])
+		newContent, errMsg := tools.ExecuteEditFile(ctx, path, args["old_string"], args["new_string"])
 		if errMsg != "" {
 			return errMsg, true
+		}
+		if tools.DirectWriteFromContext(ctx) {
+			if errMsg := tools.WriteFileDirect(ctx, path, newContent); errMsg != "" {
+				return errMsg, true
+			}
+			return "File written.", true
 		}
 		*proposed = append(*proposed, tools.FileWrite{Path: path, Content: newContent})
 		return writeAck, true
@@ -109,13 +121,13 @@ func DispatchTool(
 			}
 		}
 		onEvent(models.AgentEvent{Type: models.EventReading, Data: path})
-		return applyOutputProcessing(ctx, name, tools.ExecuteListDirectory(path, depth)), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteListDirectory(ctx, path, depth)), true
 
 	case tools.SearchFilesName:
 		pattern := args["pattern"]
 		basePath := args["base_path"]
 		onEvent(models.AgentEvent{Type: models.EventReading, Data: pattern})
-		return applyOutputProcessing(ctx, name, tools.ExecuteSearchFiles(pattern, basePath)), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteSearchFiles(ctx, pattern, basePath)), true
 
 	case tools.SearchCodeName:
 		pattern := args["pattern"]
@@ -128,7 +140,7 @@ func DispatchTool(
 			}
 		}
 		onEvent(models.AgentEvent{Type: models.EventReading, Data: pattern})
-		return applyOutputProcessing(ctx, name, tools.ExecuteSearchCode(pattern, path, fileGlob, contextLines)), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteSearchCode(ctx, pattern, path, fileGlob, contextLines)), true
 
 	case tools.BashToolName:
 		command := args["command"]

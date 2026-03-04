@@ -37,32 +37,56 @@ func matchBashPrefix(command, pattern string) bool {
 	return strings.HasPrefix(command, prefix)
 }
 
+// validatePathIn is the pure core of path validation: resolves path against root
+// and rejects paths that escape it. No os.Getwd() — fully testable in isolation.
+// Returns (absolutePath, root, "") on success or ("", "", errorMessage) on failure.
+func validatePathIn(path, root string) (abs, resolvedRoot, errMsg string) {
+	root = filepath.Clean(root)
+	var resolved string
+	if filepath.IsAbs(path) {
+		resolved = filepath.Clean(path)
+	} else {
+		resolved = filepath.Clean(filepath.Join(root, path))
+	}
+	rootPrefix := root + string(filepath.Separator)
+	if !strings.HasPrefix(resolved+string(filepath.Separator), rootPrefix) {
+		return "", "", fmt.Sprintf("[error: path %q is outside the working directory]", path)
+	}
+	return resolved, root, ""
+}
+
 // validatePath resolves path relative to cwd and rejects paths that escape it.
 // Returns (absolutePath, cwd, "") on success or ("", "", errorMessage) on failure.
+// Used by TUI-only functions: ApplyWrites, SnapshotFiles, RestoreSnapshots.
 func validatePath(path string) (abs, cwd, errMsg string) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", "", fmt.Sprintf("[error: cannot determine working directory: %v]", err)
 	}
-	abs, err = filepath.Abs(path)
-	if err != nil {
-		return "", "", fmt.Sprintf("[error: invalid path %q: %v]", path, err)
-	}
-	cwdClean := filepath.Clean(cwd) + string(filepath.Separator)
-	absClean := filepath.Clean(abs)
-	if !strings.HasPrefix(absClean+string(filepath.Separator), cwdClean) {
-		return "", "", fmt.Sprintf("[error: path %q is outside the working directory]", path)
-	}
-	return abs, cwd, ""
+	return validatePathIn(path, cwd)
 }
 
-// ExecuteRead reads a file relative to cwd.
+// validatePathCtx reads WorkDirFromContext, falling back to os.Getwd().
+// Used by all executor functions called from DispatchTool.
+func validatePathCtx(ctx context.Context, path string) (abs, root, errMsg string) {
+	root = WorkDirFromContext(ctx)
+	if root == "" {
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			return "", "", fmt.Sprintf("[error: cannot determine working directory: %v]", err)
+		}
+	}
+	return validatePathIn(path, root)
+}
+
+// ExecuteRead reads a file relative to the working directory (from context or cwd).
 // offset is 1-indexed (0 or 1 both mean "start at line 1").
 // limit is the max lines to return (0 means use maxReadLines).
 // Returns the file content, or an error string the model can see.
 // Refuses paths that escape the working directory.
-func ExecuteRead(path string, offset, limit int) string {
-	abs, _, errMsg := validatePath(path)
+func ExecuteRead(ctx context.Context, path string, offset, limit int) string {
+	abs, _, errMsg := validatePathCtx(ctx, path)
 	if errMsg != "" {
 		return errMsg
 	}
@@ -110,10 +134,10 @@ func ExecuteRead(path string, offset, limit int) string {
 
 // ExecuteEditFile reads path, replaces exactly one occurrence of oldString with newString,
 // and returns (newContent, ""). Returns ("", errorMessage) on failure.
-// The caller is responsible for queuing the result as a ProposedWrite.
+// The caller is responsible for queuing the result as a ProposedWrite or writing directly.
 // Refuses paths that escape the working directory.
-func ExecuteEditFile(path, oldString, newString string) (string, string) {
-	abs, _, errMsg := validatePath(path)
+func ExecuteEditFile(ctx context.Context, path, oldString, newString string) (string, string) {
+	abs, _, errMsg := validatePathCtx(ctx, path)
 	if errMsg != "" {
 		return "", errMsg
 	}
@@ -218,12 +242,13 @@ func ApplyWrites(writes []FileWrite) error {
 }
 
 // ExecuteListDirectory lists a directory tree up to depth levels deep.
-// path is relative to cwd. Returns an indented tree string, or an error message.
+// path is relative to the working directory (from context or cwd).
+// Returns an indented tree string, or an error message.
 // Directories are suffixed with /. depth is clamped to [1, 5].
 // File entries include a human-readable size hint (e.g. "handlers.go  (12 KB)").
 //
 // DERIVED: BFS indented-tree design from codex list_dir.rs
-func ExecuteListDirectory(path string, depth int) string {
+func ExecuteListDirectory(ctx context.Context, path string, depth int) string {
 	if depth <= 0 {
 		depth = 2
 	}
@@ -231,7 +256,7 @@ func ExecuteListDirectory(path string, depth int) string {
 		depth = 5
 	}
 
-	abs, _, errMsg := validatePath(path)
+	abs, _, errMsg := validatePathCtx(ctx, path)
 	if errMsg != "" {
 		return errMsg
 	}
@@ -295,12 +320,13 @@ func formatFileSize(bytes int64) string {
 }
 
 // ExecuteSearchFiles finds files matching a glob pattern relative to basePath.
-// basePath is relative to cwd. Returns newline-separated matching paths, or an error message.
-func ExecuteSearchFiles(pattern, basePath string) string {
+// basePath is relative to the working directory (from context or cwd).
+// Returns newline-separated matching paths, or an error message.
+func ExecuteSearchFiles(ctx context.Context, pattern, basePath string) string {
 	if basePath == "" {
 		basePath = "."
 	}
-	absBase, cwd, errMsg := validatePath(basePath)
+	absBase, cwd, errMsg := validatePathCtx(ctx, basePath)
 	if errMsg != "" {
 		return errMsg
 	}
@@ -371,6 +397,10 @@ func ExecuteBash(ctx context.Context, command string) string {
 		cmd = sandbox.BuildCmd(timeoutCtx, sbCfg, "sh", "-c", command)
 	} else {
 		cmd = exec.CommandContext(timeoutCtx, "sh", "-c", command)
+	}
+
+	if dir := WorkDirFromContext(ctx); dir != "" {
+		cmd.Dir = dir
 	}
 
 	var out bytes.Buffer
@@ -452,11 +482,11 @@ func matchParts(pat, fp []string) (bool, error) {
 // Returns grep output (path:line:content format) or an error message.
 //
 // DERIVED: subprocess + 30s timeout pattern from codex grep_files.rs
-func ExecuteSearchCode(pattern, path, fileGlob string, contextLines int) string {
+func ExecuteSearchCode(ctx context.Context, pattern, path, fileGlob string, contextLines int) string {
 	if path == "" {
 		path = "."
 	}
-	absPath, _, errMsg := validatePath(path)
+	absPath, _, errMsg := validatePathCtx(ctx, path)
 	if errMsg != "" {
 		return errMsg
 	}
@@ -470,17 +500,17 @@ func ExecuteSearchCode(pattern, path, fileGlob string, contextLines int) string 
 	}
 	args = append(args, "--", pattern, absPath)
 
-	ctx, cancel := context.WithTimeout(context.Background(), searchCommandTimeout)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), searchCommandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "grep", args...)
+	cmd := exec.CommandContext(timeoutCtx, "grep", args...)
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut
 
 	if runErr := cmd.Run(); runErr != nil {
-		if ctx.Err() == context.DeadlineExceeded {
+		if timeoutCtx.Err() == context.DeadlineExceeded {
 			return "[error: search timed out after 30s]"
 		}
 		// grep exit code 1 means no matches — not an error.
@@ -498,4 +528,20 @@ func ExecuteSearchCode(pattern, path, fileGlob string, contextLines int) string 
 		return "(no matches)"
 	}
 	return strings.TrimRight(output, "\n")
+}
+
+// WriteFileDirect writes content to path, resolving against WorkDirFromContext.
+// Creates intermediate directories as needed. Returns "" on success, "[error: ...]" on failure.
+func WriteFileDirect(ctx context.Context, path, content string) string {
+	abs, _, errMsg := validatePathCtx(ctx, path)
+	if errMsg != "" {
+		return errMsg
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
+		return fmt.Sprintf("[error: mkdir for %q: %v]", path, err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: user code files should be world-readable
+		return fmt.Sprintf("[error: write %q: %v]", path, err)
+	}
+	return ""
 }

@@ -916,3 +916,53 @@ func TestCompactHistories_FallsBackToDefaultSummarizationPrompt(t *testing.T) {
 
 	assert.Equal(t, prompt.DefaultSummarizationPrompt, ad.capturedPrompt)
 }
+
+// ─── WorkDirs context wiring ─────────────────────────────────────────────────
+
+// ctxCapturingAdapter records the context passed to RunAgent so tests can
+// verify that RunAll correctly wires WorkDir and DirectWrites.
+type ctxCapturingAdapter struct {
+	id  string
+	ctx context.Context
+	mu  sync.Mutex
+}
+
+func (c *ctxCapturingAdapter) ID() string { return c.id }
+func (c *ctxCapturingAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
+func (c *ctxCapturingAdapter) RunAgent(
+	ctx context.Context,
+	_ []models.ConversationTurn,
+	_ string,
+	_ func(models.AgentEvent),
+) (models.ModelResponse, error) {
+	c.mu.Lock()
+	c.ctx = ctx
+	c.mu.Unlock()
+	return models.ModelResponse{Text: "ok"}, nil
+}
+
+func TestRunAll_WorkDirsSetsContextValues(t *testing.T) {
+	a1 := &ctxCapturingAdapter{id: "model-a"}
+	a2 := &ctxCapturingAdapter{id: "model-b"}
+
+	workDirs := map[string]string{
+		"model-a": "/tmp/worktree-a",
+	}
+
+	ctx := runner.WithRunOptions(context.Background(), runner.RunOptions{
+		WorkDirs: workDirs,
+	})
+
+	runner.RunAll(ctx, []models.ModelAdapter{a1, a2}, nil, "prompt",
+		func(string, models.AgentEvent) {}, nil, false)
+
+	// model-a should have WorkDir and DirectWrites set.
+	assert.Equal(t, "/tmp/worktree-a", tools.WorkDirFromContext(a1.ctx))
+	assert.True(t, tools.DirectWriteFromContext(a1.ctx))
+
+	// model-b has no entry in WorkDirs — should have no WorkDir and no DirectWrites.
+	assert.Empty(t, tools.WorkDirFromContext(a2.ctx))
+	assert.False(t, tools.DirectWriteFromContext(a2.ctx))
+}

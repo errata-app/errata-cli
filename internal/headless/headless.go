@@ -11,6 +11,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/suarezc/errata/internal/adapters"
@@ -80,8 +83,20 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	// Build the tool set once (no session-level disabling in headless mode).
 	activeDefs := buildActiveDefs(rec, opts.MCPDefs)
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("cannot determine working directory: %w", err)
+	}
+
 	fmt.Fprintf(w, "errata: %s (%d tasks, %d models, task_mode=%s)\n",
 		recipeName(rec), len(rec.Tasks), len(opts.Adapters), taskMode)
+
+	// Create per-model working directories for filesystem isolation.
+	workDirs, cleanup, err := createModelWorkDirs(cwd, opts.Adapters)
+	if err != nil {
+		return nil, fmt.Errorf("create work dirs: %w", err)
+	}
+	defer cleanup()
 
 	histories := make(map[string][]models.ConversationTurn)
 	var taskResults []TaskResult
@@ -108,7 +123,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			}
 		}
 
-		runCtx := buildRunContext(ctx, opts, rec, activeDefs)
+		runCtx := buildRunContext(ctx, opts, rec, activeDefs, workDirs)
 
 		collector := output.NewCollector()
 		onEvent := collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
@@ -143,6 +158,17 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			return nil, fmt.Errorf("interrupted at task %d/%d", i+1, len(rec.Tasks))
 		}
 
+		// Post-process: diff each worktree to populate ProposedWrites.
+		for j := range responses {
+			if dir := workDirs[responses[j].ModelID]; dir != "" {
+				writes, diffErr := diffWorktree(dir)
+				if diffErr != nil {
+					fmt.Fprintf(w, "  warning: diff for %s: %v\n", responses[j].ModelID, diffErr)
+				}
+				responses[j].ProposedWrites = writes
+			}
+		}
+
 		// Build the per-task output report.
 		toolNames := toolNameList(activeDefs)
 		report := output.BuildReport(opts.SessionID, rec, taskPrompt, responses, collector, toolNames)
@@ -165,21 +191,6 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			Prompt:          taskPrompt,
 			Report:          report,
 			CriteriaResults: criteriaResults,
-		}
-
-		// Sequential mode: pick winner, apply writes, carry history.
-		if taskMode == "sequential" {
-			winner := selectWinner(responses, criteriaResults)
-			if winner != nil {
-				taskResult.SelectedModel = winner.ModelID
-				if len(winner.ProposedWrites) > 0 {
-					if err := tools.ApplyWrites(winner.ProposedWrites); err != nil {
-						fmt.Fprintf(w, "  warning: could not apply writes from %s: %v\n", winner.ModelID, err)
-					} else {
-						fmt.Fprintf(w, "  → applied %d files from %s\n", len(winner.ProposedWrites), winner.ModelID)
-					}
-				}
-			}
 		}
 
 		// Update conversation histories.
@@ -252,7 +263,7 @@ func buildActiveDefs(rec *recipe.Recipe, mcpDefs []tools.ToolDef) []tools.ToolDe
 }
 
 // buildRunContext creates the fully-wired context for a single task run.
-func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, activeDefs []tools.ToolDef) context.Context {
+func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, activeDefs []tools.ToolDef, workDirs map[string]string) context.Context {
 	var bashPrefixes []string
 	if rec.Tools != nil {
 		bashPrefixes = rec.Tools.BashPrefixes
@@ -279,6 +290,7 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
 		MaxSteps:         opts.Cfg.MaxSteps,
 		CheckpointPath:   opts.CheckpointPath,
+		WorkDirs:         workDirs,
 	})
 	if tools.SubagentEnabled {
 		ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
@@ -297,37 +309,129 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	return ctx
 }
 
-// ─── Winner selection (sequential mode) ───────────────────────────────────────
+// ─── Per-model filesystem isolation ──────────────────────────────────────────
 
-// selectWinner picks the best model for sequential mode.
-// Priority: most criteria passed → lowest cost → lowest latency.
-// Returns nil if no successful responses exist.
-func selectWinner(
-	responses []models.ModelResponse,
-	criteriaResults map[string][]criteria.Result,
-) *models.ModelResponse {
-	var best *models.ModelResponse
-	bestScore := -1
-	var bestCost float64
-	var bestLatency int64
+// sanitizeModelID replaces characters that are unsafe for directory names.
+func sanitizeModelID(id string) string {
+	return strings.NewReplacer("/", "_", ":", "_", " ", "_").Replace(id)
+}
 
-	for i := range responses {
-		resp := &responses[i]
-		if !resp.OK() {
-			continue
+// createModelWorkDirs creates an isolated working directory for each adapter.
+// In a git repo, it creates lightweight worktrees (git worktree add --detach).
+// In a non-git directory, it copies the project and creates a git baseline.
+// Returns the work-dir map (adapter ID → abs path) and a cleanup function.
+func createModelWorkDirs(projectDir string, adpts []models.ModelAdapter) (map[string]string, func(), error) {
+	tmpBase, err := os.MkdirTemp("", "errata-workdirs-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create temp dir: %w", err)
+	}
+
+	dirs := make(map[string]string, len(adpts))
+	isGit := isGitRepo(projectDir)
+
+	for _, a := range adpts {
+		dirName := "errata-" + sanitizeModelID(a.ID())
+		worktree := filepath.Join(tmpBase, dirName)
+
+		if isGit {
+			// Create a detached worktree from HEAD.
+			cmd := exec.Command("git", "-C", projectDir, "worktree", "add", "--detach", worktree, "HEAD")
+			if out, gitErr := cmd.CombinedOutput(); gitErr != nil {
+				// Clean up already-created worktrees.
+				cleanupWorkDirs(projectDir, dirs, isGit, tmpBase)
+				return nil, nil, fmt.Errorf("git worktree add for %s: %w\n%s", a.ID(), gitErr, out)
+			}
+		} else {
+			// Non-git fallback: copy directory and create a baseline commit.
+			cmd := exec.Command("cp", "-a", projectDir+"/.", worktree+"/")
+			if err := os.MkdirAll(worktree, 0o750); err != nil {
+				cleanupWorkDirs(projectDir, dirs, isGit, tmpBase)
+				return nil, nil, fmt.Errorf("mkdir for %s: %w", a.ID(), err)
+			}
+			if out, cpErr := cmd.CombinedOutput(); cpErr != nil {
+				cleanupWorkDirs(projectDir, dirs, isGit, tmpBase)
+				return nil, nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
+			}
+			// Create git baseline for diffing.
+			for _, args := range [][]string{
+				{"init"},
+				{"add", "-A"},
+				{"commit", "-m", "baseline", "--allow-empty"},
+			} {
+				gitCmd := exec.Command("git", args...)
+				gitCmd.Dir = worktree
+				if out, gitErr := gitCmd.CombinedOutput(); gitErr != nil {
+					cleanupWorkDirs(projectDir, dirs, isGit, tmpBase)
+					return nil, nil, fmt.Errorf("git %v for %s: %w\n%s", args[0], a.ID(), gitErr, out)
+				}
+			}
 		}
-		score := criteria.PassCount(criteriaResults[resp.ModelID])
-		better := score > bestScore ||
-			(score == bestScore && resp.CostUSD < bestCost) ||
-			(score == bestScore && resp.CostUSD == bestCost && resp.LatencyMS < bestLatency)
-		if best == nil || better {
-			best = resp
-			bestScore = score
-			bestCost = resp.CostUSD
-			bestLatency = resp.LatencyMS
+		dirs[a.ID()] = worktree
+	}
+
+	return dirs, func() { cleanupWorkDirs(projectDir, dirs, isGit, tmpBase) }, nil
+}
+
+// cleanupWorkDirs removes worktrees (or plain directories) and the temp base.
+func cleanupWorkDirs(projectDir string, dirs map[string]string, isGit bool, tmpBase string) {
+	if isGit {
+		for _, dir := range dirs {
+			_ = exec.Command("git", "-C", projectDir, "worktree", "remove", "--force", dir).Run()
 		}
 	}
-	return best
+	_ = os.RemoveAll(tmpBase)
+}
+
+// isGitRepo checks whether the given directory is inside a git repository.
+func isGitRepo(dir string) bool {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--git-dir")
+	return cmd.Run() == nil
+}
+
+// diffWorktree returns the files changed in the worktree relative to HEAD.
+// Each changed/added file is returned as a FileWrite with its current content.
+func diffWorktree(dir string) ([]tools.FileWrite, error) {
+	// Get modified files.
+	cmd := exec.Command("git", "-C", dir, "diff", "--name-only", "HEAD")
+	modOut, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff: %w", err)
+	}
+
+	// Get newly added (untracked) files.
+	cmd = exec.Command("git", "-C", dir, "ls-files", "--others", "--exclude-standard")
+	untrackedOut, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files: %w", err)
+	}
+
+	// Combine and deduplicate.
+	seen := make(map[string]bool)
+	var files []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(modOut)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !seen[line] {
+			seen[line] = true
+			files = append(files, line)
+		}
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(untrackedOut)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !seen[line] {
+			seen[line] = true
+			files = append(files, line)
+		}
+	}
+
+	var writes []tools.FileWrite
+	for _, f := range files {
+		content, readErr := os.ReadFile(filepath.Join(dir, f))
+		if readErr != nil {
+			continue // file may have been deleted
+		}
+		writes = append(writes, tools.FileWrite{Path: f, Content: string(content)})
+	}
+	return writes, nil
 }
 
 // ─── Summary builder ──────────────────────────────────────────────────────────

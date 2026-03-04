@@ -31,6 +31,7 @@ type RunOptions struct {
 	MaxHistoryTurns  int           // 0 → defaultMaxHistoryTurns (20)
 	MaxSteps         int           // 0 → unlimited agentic loop turns
 	CheckpointPath   string        // "" disables incremental checkpointing
+	WorkDirs         map[string]string // per-adapter working directory (adapter ID → dir path)
 }
 
 // WithRunOptions returns a context carrying the given RunOptions.
@@ -90,6 +91,10 @@ func RunAll(
 			defer cancel()
 			if opts.MaxSteps > 0 {
 				tctx = tools.WithMaxSteps(tctx, opts.MaxSteps)
+			}
+			if dir := opts.WorkDirs[a.ID()]; dir != "" {
+				tctx = tools.WithWorkDir(tctx, dir)
+				tctx = tools.WithDirectWrites(tctx, true)
 			}
 
 			// filtered suppresses "text" and "error" events when not verbose,
