@@ -551,6 +551,7 @@ func printModelResult(w io.Writer, resp models.ModelResponse, cr []criteria.Resu
 	if status == "" {
 		status = "done"
 	}
+	tok := fmtTokens(resp.InputTokens, resp.OutputTokens)
 
 	if totalCriteria > 0 {
 		passed := criteria.PassCount(cr)
@@ -559,21 +560,34 @@ func printModelResult(w io.Writer, resp models.ModelResponse, cr []criteria.Resu
 			mark = "✗"
 		}
 		if resp.Error != "" {
-			fmt.Fprintf(w, "  %-22s %-5s  %s  %s %d/%d criteria\n",
+			fmt.Fprintf(w, "  %-22s %-10s  %s  %s %d/%d criteria\n",
 				resp.ModelID, status, truncate(resp.Error, 30), mark, passed, totalCriteria)
 		} else {
-			fmt.Fprintf(w, "  %-22s %-5s  %5dms  $%.4f  %s %d/%d criteria\n",
-				resp.ModelID, status, resp.LatencyMS, resp.CostUSD, mark, passed, totalCriteria)
+			fmt.Fprintf(w, "  %-22s %-10s  %5dms  %s  $%.4f  %s %d/%d criteria\n",
+				resp.ModelID, status, resp.LatencyMS, tok, resp.CostUSD, mark, passed, totalCriteria)
 		}
 	} else {
 		if resp.Error != "" {
-			fmt.Fprintf(w, "  %-22s %-5s  %s\n",
+			fmt.Fprintf(w, "  %-22s %-10s  %s\n",
 				resp.ModelID, status, truncate(resp.Error, 50))
 		} else {
-			fmt.Fprintf(w, "  %-22s %-5s  %5dms  $%.4f\n",
-				resp.ModelID, status, resp.LatencyMS, resp.CostUSD)
+			fmt.Fprintf(w, "  %-22s %-10s  %5dms  %s  $%.4f\n",
+				resp.ModelID, status, resp.LatencyMS, tok, resp.CostUSD)
 		}
 	}
+}
+
+// fmtTokens formats input/output token counts as a compact string like "12.3k in / 4.5k out".
+func fmtTokens(input, output int64) string {
+	return fmt.Sprintf("%s in / %s out", fmtCount(input), fmtCount(output))
+}
+
+// fmtCount formats a token count: values ≥1000 are shown as "X.Yk", otherwise as-is.
+func fmtCount(n int64) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 // adapterIDs returns the IDs of all adapters.
