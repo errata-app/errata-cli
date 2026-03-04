@@ -24,6 +24,15 @@ type RunReport struct {
 	Tasks []TaskResult `json:"tasks"`
 
 	Summary Summary `json:"summary"`
+	Setup   SetupInfo `json:"setup"`
+}
+
+// SetupInfo records worktree creation metadata for debugging.
+type SetupInfo struct {
+	WorktreeBase string            `json:"worktree_base"`
+	SetupMS      int64             `json:"setup_ms"`
+	GitMode      bool              `json:"git_mode"`
+	ModelDirs    map[string]string `json:"model_dirs"`
 }
 
 // RecipeSnapshot is a JSON-safe subset of recipe.Recipe for the report.

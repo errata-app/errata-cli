@@ -92,11 +92,30 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		recipeName(rec), len(rec.Tasks), len(opts.Adapters), taskMode)
 
 	// Create per-model working directories for filesystem isolation.
-	workDirs, cleanup, err := createModelWorkDirs(cwd, opts.Adapters)
+	setupStart := time.Now()
+	workDirs, workBase, cleanup, err := createModelWorkDirs(cwd, opts.Adapters)
 	if err != nil {
-		return nil, fmt.Errorf("create work dirs: %w", err)
+		return nil, fmt.Errorf("create work dirs (is there enough disk space?): %w", err)
 	}
-	defer cleanup()
+	setupMs := time.Since(setupStart).Milliseconds()
+
+	isGit := isGitRepo(cwd)
+	mode := "copy"
+	if isGit {
+		mode = "git worktree"
+	}
+	fmt.Fprintf(w, "errata: worktrees ready (%s mode, %dms, base: %s)\n", mode, setupMs, workBase)
+
+	if opts.Verbose {
+		for id, dir := range workDirs {
+			fmt.Fprintf(w, "  %s → %s\n", id, dir)
+		}
+	}
+
+	defer func() {
+		cleanup()
+		fmt.Fprintf(w, "errata: worktrees cleaned up\n")
+	}()
 
 	histories := make(map[string][]models.ConversationTurn)
 	var taskResults []TaskResult
@@ -214,6 +233,12 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		TaskMode:  taskMode,
 		Tasks:     taskResults,
 		Summary:   summary,
+		Setup: SetupInfo{
+			WorktreeBase: workBase,
+			SetupMS:      setupMs,
+			GitMode:      isGit,
+			ModelDirs:    workDirs,
+		},
 	}
 
 	outputDir := opts.OutputDir
@@ -320,14 +345,15 @@ func sanitizeModelID(id string) string {
 // createModelWorkDirs creates an isolated working directory for each adapter.
 // In a git repo, it creates lightweight worktrees (git worktree add --detach).
 // In a non-git directory, it copies the project and creates a git baseline.
-// Returns the work-dir map (adapter ID → abs path) and a cleanup function.
-func createModelWorkDirs(projectDir string, adpts []models.ModelAdapter) (map[string]string, func(), error) {
-	tmpBase, err := os.MkdirTemp("", "errata-workdirs-*")
-	if err != nil {
-		return nil, nil, fmt.Errorf("create temp dir: %w", err)
+// Returns the work-dir map (adapter ID → abs path), the temp base directory,
+// and a cleanup function.
+func createModelWorkDirs(projectDir string, adpts []models.ModelAdapter) (dirs map[string]string, base string, cleanup func(), err error) {
+	tmpBase, mkErr := os.MkdirTemp("", "errata-workdirs-*")
+	if mkErr != nil {
+		return nil, "", nil, fmt.Errorf("create temp dir: %w", mkErr)
 	}
 
-	dirs := make(map[string]string, len(adpts))
+	dirMap := make(map[string]string, len(adpts))
 	isGit := isGitRepo(projectDir)
 
 	for _, a := range adpts {
@@ -339,19 +365,19 @@ func createModelWorkDirs(projectDir string, adpts []models.ModelAdapter) (map[st
 			cmd := exec.Command("git", "-C", projectDir, "worktree", "add", "--detach", worktree, "HEAD")
 			if out, gitErr := cmd.CombinedOutput(); gitErr != nil {
 				// Clean up already-created worktrees.
-				cleanupWorkDirs(projectDir, dirs, isGit, tmpBase)
-				return nil, nil, fmt.Errorf("git worktree add for %s: %w\n%s", a.ID(), gitErr, out)
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, fmt.Errorf("git worktree add for %s: %w\n%s", a.ID(), gitErr, out)
 			}
 		} else {
 			// Non-git fallback: copy directory and create a baseline commit.
 			cmd := exec.Command("cp", "-a", projectDir+"/.", worktree+"/")
-			if err := os.MkdirAll(worktree, 0o750); err != nil {
-				cleanupWorkDirs(projectDir, dirs, isGit, tmpBase)
-				return nil, nil, fmt.Errorf("mkdir for %s: %w", a.ID(), err)
+			if mkdirErr := os.MkdirAll(worktree, 0o750); mkdirErr != nil {
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, fmt.Errorf("mkdir for %s: %w", a.ID(), mkdirErr)
 			}
 			if out, cpErr := cmd.CombinedOutput(); cpErr != nil {
-				cleanupWorkDirs(projectDir, dirs, isGit, tmpBase)
-				return nil, nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
 			}
 			// Create git baseline for diffing.
 			for _, args := range [][]string{
@@ -362,15 +388,15 @@ func createModelWorkDirs(projectDir string, adpts []models.ModelAdapter) (map[st
 				gitCmd := exec.Command("git", args...)
 				gitCmd.Dir = worktree
 				if out, gitErr := gitCmd.CombinedOutput(); gitErr != nil {
-					cleanupWorkDirs(projectDir, dirs, isGit, tmpBase)
-					return nil, nil, fmt.Errorf("git %v for %s: %w\n%s", args[0], a.ID(), gitErr, out)
+					cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+					return nil, "", nil, fmt.Errorf("git %v for %s: %w\n%s", args[0], a.ID(), gitErr, out)
 				}
 			}
 		}
-		dirs[a.ID()] = worktree
+		dirMap[a.ID()] = worktree
 	}
 
-	return dirs, func() { cleanupWorkDirs(projectDir, dirs, isGit, tmpBase) }, nil
+	return dirMap, tmpBase, func() { cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase) }, nil
 }
 
 // cleanupWorkDirs removes worktrees (or plain directories) and the temp base.

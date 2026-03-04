@@ -331,6 +331,35 @@ func TestRunReport_RoundTrip(t *testing.T) {
 	assert.Equal(t, 1, loaded.Summary.TotalTasks)
 }
 
+// ─── SetupInfo round-trip test ────────────────────────────────────────────────
+
+func TestRunReport_SetupInfo_RoundTrip(t *testing.T) {
+	report := &headless.RunReport{
+		ID:       "rpt_test",
+		TaskMode: "independent",
+		Recipe:   headless.RecipeSnapshot{Name: "test", Tasks: []string{"t"}},
+		Tasks:    []headless.TaskResult{{Index: 0, Prompt: "t"}},
+		Summary:  headless.Summary{TotalTasks: 1},
+		Setup: headless.SetupInfo{
+			WorktreeBase: "/tmp/errata-workdirs-123",
+			SetupMS:      42,
+			GitMode:      true,
+			ModelDirs:    map[string]string{"model-a": "/tmp/errata-workdirs-123/errata-model-a"},
+		},
+	}
+
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+
+	var loaded headless.RunReport
+	require.NoError(t, json.Unmarshal(data, &loaded))
+
+	assert.Equal(t, "/tmp/errata-workdirs-123", loaded.Setup.WorktreeBase)
+	assert.Equal(t, int64(42), loaded.Setup.SetupMS)
+	assert.True(t, loaded.Setup.GitMode)
+	assert.Equal(t, "/tmp/errata-workdirs-123/errata-model-a", loaded.Setup.ModelDirs["model-a"])
+}
+
 // ─── recipeName ──────────────────────────────────────────────────────────────
 
 func TestRecipeName_UsesName(t *testing.T) {
@@ -467,17 +496,22 @@ func TestCreateModelWorkDirs(t *testing.T) {
 		&mockAdapter{id: "provider/model-b"},
 	}
 
-	dirs, cleanup, err := headless.CreateModelWorkDirs(dir, adapters)
+	dirs, base, cleanup, err := headless.CreateModelWorkDirs(dir, adapters)
 	require.NoError(t, err)
 	defer cleanup()
 
 	require.Len(t, dirs, 2)
+	assert.NotEmpty(t, base, "base directory should be non-empty")
 
-	// Each worktree should have the file from the original repo.
+	// Each worktree should have the file from the original repo and be under base.
 	for _, d := range dirs {
 		got, readErr := os.ReadFile(filepath.Join(d, "hello.txt"))
 		require.NoError(t, readErr)
 		assert.Equal(t, "hello", string(got))
+
+		rel, relErr := filepath.Rel(base, d)
+		require.NoError(t, relErr)
+		assert.False(t, filepath.IsAbs(rel), "model dir should be under base")
 	}
 
 	// Sanitized: provider/model-b should not have "/" in dir name.
