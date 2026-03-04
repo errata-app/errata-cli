@@ -29,7 +29,7 @@ OPENAI_API_KEY=sk...
 
 The example recipe assumes the OpenRouter naming convention Errata uses for models. If you are running provider APIs directly you may be able to remove the */ before the model names.
 
-Run the example recipe:
+Run the example recipe (The recipe costs between $1-2 dollars per run):
 
 ```bash
 ./errata run -r go_docstore.md --verbose
