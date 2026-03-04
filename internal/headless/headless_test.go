@@ -509,7 +509,7 @@ func TestCreateModelWorkDirs(t *testing.T) {
 	}
 
 	baseDir := filepath.Join(t.TempDir(), "worktrees")
-	dirs, base, cleanup, err := headless.CreateModelWorkDirs(dir, baseDir, adapters)
+	dirs, base, _, cleanup, err := headless.CreateModelWorkDirs(dir, baseDir, adapters)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -560,10 +560,123 @@ func TestDiffWorktree_ModifiedFile(t *testing.T) {
 	assert.Equal(t, "modified", writes[0].Content)
 }
 
+func TestDiffWorktree_DeletedFile(t *testing.T) {
+	dir := setupGitDir(t)
+
+	// Delete the committed file.
+	require.NoError(t, os.Remove(filepath.Join(dir, "hello.txt")))
+
+	writes, err := headless.DiffWorktree(dir)
+	require.NoError(t, err)
+	require.Len(t, writes, 1)
+	assert.Equal(t, "hello.txt", writes[0].Path)
+	assert.True(t, writes[0].Delete, "deleted file should have Delete: true")
+	assert.Empty(t, writes[0].Content, "deleted file should have empty content")
+}
+
 func TestDiffWorktree_NoChanges(t *testing.T) {
 	dir := setupGitDir(t)
 
 	writes, err := headless.DiffWorktree(dir)
 	require.NoError(t, err)
 	assert.Empty(t, writes)
+}
+
+// ─── snapshotDir tests ──────────────────────────────────────────────────────
+
+func TestSnapshotDir(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create some files and a .git/ subdirectory that should be skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "b.txt"), []byte("beta"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git", "objects"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/main"), 0o600))
+
+	snap, err := headless.SnapshotDir(dir)
+	require.NoError(t, err)
+
+	// Should contain the two real files but not .git/HEAD.
+	assert.Contains(t, snap, "a.txt")
+	assert.Contains(t, snap, filepath.Join("sub", "b.txt"))
+	assert.NotContains(t, snap, filepath.Join(".git", "HEAD"))
+	assert.Len(t, snap, 2)
+
+	// Hashes should be non-empty hex strings.
+	for _, h := range snap {
+		assert.Len(t, h, 64, "SHA-256 hex should be 64 chars")
+	}
+}
+
+// ─── diffSnapshot tests ────────────────────────────────────────────────────
+
+func TestDiffSnapshot_NewFile(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "existing.txt"), []byte("hello"), 0o600))
+
+	baseline, err := headless.SnapshotDir(dir)
+	require.NoError(t, err)
+
+	// Add a new file.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new content"), 0o600))
+
+	writes, err := headless.DiffSnapshot(dir, baseline)
+	require.NoError(t, err)
+	require.Len(t, writes, 1)
+	assert.Equal(t, "new.txt", writes[0].Path)
+	assert.Equal(t, "new content", writes[0].Content)
+}
+
+func TestDiffSnapshot_ModifiedFile(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("original"), 0o600))
+
+	baseline, err := headless.SnapshotDir(dir)
+	require.NoError(t, err)
+
+	// Modify the file.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("modified"), 0o600))
+
+	writes, err := headless.DiffSnapshot(dir, baseline)
+	require.NoError(t, err)
+	require.Len(t, writes, 1)
+	assert.Equal(t, "file.txt", writes[0].Path)
+	assert.Equal(t, "modified", writes[0].Content)
+}
+
+func TestDiffSnapshot_NoChanges(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("stable"), 0o600))
+
+	baseline, err := headless.SnapshotDir(dir)
+	require.NoError(t, err)
+
+	writes, err := headless.DiffSnapshot(dir, baseline)
+	require.NoError(t, err)
+	assert.Empty(t, writes)
+}
+
+func TestDiffSnapshot_DeletedFile(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("gone soon"), 0o600))
+
+	baseline, err := headless.SnapshotDir(dir)
+	require.NoError(t, err)
+
+	// Delete the file.
+	require.NoError(t, os.Remove(filepath.Join(dir, "file.txt")))
+
+	writes, err := headless.DiffSnapshot(dir, baseline)
+	require.NoError(t, err)
+	require.Len(t, writes, 1)
+	assert.Equal(t, "file.txt", writes[0].Path)
+	assert.True(t, writes[0].Delete, "deleted file should have Delete: true")
+	assert.Empty(t, writes[0].Content, "deleted file should have empty content")
+}
+
+func TestGitAvailable(t *testing.T) {
+	// On CI and dev machines git is expected to be available.
+	// This test just verifies the function runs without panicking.
+	_ = headless.GitAvailable()
 }

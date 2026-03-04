@@ -39,6 +39,7 @@ type DiffLine struct {
 type FileDiff struct {
 	Path      string
 	IsNew     bool
+	IsDeleted bool
 	Adds      int
 	Removes   int
 	Lines     []DiffLine // capped at MaxDiffLines body lines
@@ -118,6 +119,38 @@ func makeSpans(diffs []diffmatchpatch.Diff, side diffmatchpatch.Operation) []Wor
 		// The other side's operations are omitted from this view.
 	}
 	return spans
+}
+
+// ComputeDeleted produces a diff for a file being deleted.
+// It reads the file from disk and produces a diff where all lines are removals.
+// If the file does not exist or cannot be read, it returns a minimal FileDiff.
+func ComputeDeleted(path string) FileDiff {
+	fd := FileDiff{
+		Path:      path,
+		IsDeleted: true,
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fd
+	}
+
+	lines := splitLines(string(data))
+	fd.Removes = len(lines)
+
+	var bodyLines []DiffLine
+	for _, line := range lines {
+		bodyLines = append(bodyLines, DiffLine{Kind: Remove, Content: "-" + line})
+	}
+
+	if len(bodyLines) > MaxDiffLines {
+		fd.Truncated = len(bodyLines) - MaxDiffLines
+		fd.Lines = bodyLines[:MaxDiffLines]
+	} else {
+		fd.Lines = bodyLines
+	}
+
+	return fd
 }
 
 func splitLines(s string) []string {

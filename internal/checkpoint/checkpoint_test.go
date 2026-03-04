@@ -467,6 +467,60 @@ func TestFromModelResponse_ToolCalls_RoundTrip(t *testing.T) {
 	}
 }
 
+// ─── Delete flag round-trip ──────────────────────────────────────────────────
+
+func TestWriteSnapshot_Delete_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.json")
+
+	responses := []models.ModelResponse{
+		{
+			ModelID: "model-a",
+			Text:    "deleted a file",
+			ProposedWrites: []tools.FileWrite{
+				{Path: "kept.go", Content: "package kept"},
+				{Path: "removed.go", Delete: true},
+			},
+			Interrupted: true,
+		},
+	}
+
+	cp := Build("prompt", []string{"model-a"}, responses, false)
+	if cp == nil {
+		t.Fatal("Build returned nil")
+	}
+	if err := Save(path, *cp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	writes := loaded.Responses[0].ProposedWrites
+	if len(writes) != 2 {
+		t.Fatalf("ProposedWrites len = %d, want 2", len(writes))
+	}
+	if writes[0].Delete {
+		t.Error("writes[0] should not be Delete")
+	}
+	if !writes[1].Delete {
+		t.Error("writes[1] should be Delete")
+	}
+	if writes[1].Path != "removed.go" {
+		t.Errorf("writes[1].Path = %q, want removed.go", writes[1].Path)
+	}
+
+	// Round-trip through ToModelResponse.
+	mr := loaded.Responses[0].ToModelResponse()
+	if len(mr.ProposedWrites) != 2 {
+		t.Fatalf("ToModelResponse ProposedWrites len = %d", len(mr.ProposedWrites))
+	}
+	if !mr.ProposedWrites[1].Delete {
+		t.Error("ToModelResponse: writes[1].Delete should be true")
+	}
+}
+
 func TestSnapshotFromPartial_ToolCalls(t *testing.T) {
 	tc := map[string]int{"write_file": 2}
 	ps := models.PartialSnapshot{

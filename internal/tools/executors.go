@@ -173,6 +173,8 @@ type FileSnapshot struct {
 // SnapshotFiles reads the current on-disk content for each path in writes.
 // Files that don't exist get DidNotExist: true. Paths are validated against
 // the current working directory.
+// For deletion entries (fw.Delete), the file's current content is captured so
+// /rewind can restore it. If the file already doesn't exist, it is skipped.
 func SnapshotFiles(writes []FileWrite) ([]FileSnapshot, error) {
 	var snaps []FileSnapshot
 	for _, fw := range writes {
@@ -182,6 +184,10 @@ func SnapshotFiles(writes []FileWrite) ([]FileSnapshot, error) {
 		}
 		data, err := os.ReadFile(abs)
 		if os.IsNotExist(err) {
+			if fw.Delete {
+				// File already gone — nothing to snapshot for rewind.
+				continue
+			}
 			snaps = append(snaps, FileSnapshot{Path: abs, DidNotExist: true})
 			continue
 		}
@@ -223,6 +229,7 @@ func RestoreSnapshots(snaps []FileSnapshot) error {
 }
 
 // ApplyWrites writes each FileWrite to disk, creating parent directories as needed.
+// Deletion entries (fw.Delete) remove the file instead of writing it.
 // All paths are validated against the current working directory; writes that
 // would escape it via ".." sequences are rejected with an error.
 func ApplyWrites(writes []FileWrite) error {
@@ -230,6 +237,12 @@ func ApplyWrites(writes []FileWrite) error {
 		abs, _, errMsg := validatePath(fw.Path)
 		if errMsg != "" {
 			return fmt.Errorf("%s", errMsg)
+		}
+		if fw.Delete {
+			if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("delete %q: %w", fw.Path, err)
+			}
+			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 			return fmt.Errorf("mkdir for %q: %w", fw.Path, err)

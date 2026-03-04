@@ -79,7 +79,12 @@ func RenderDiffs(responses []models.ModelResponse, width ...int) string {
 		}
 
 		for _, fw := range resp.ProposedWrites {
-			fd := diff.Compute(fw.Path, fw.Content)
+			var fd diff.FileDiff
+			if fw.Delete {
+				fd = diff.ComputeDeleted(fw.Path)
+			} else {
+				fd = diff.Compute(fw.Path, fw.Content)
+			}
 			sb.WriteString(renderFileDiff(fd))
 		}
 		if resp.Text != "" {
@@ -104,7 +109,9 @@ func renderFileDiff(fd diff.FileDiff) string {
 	var sb strings.Builder
 
 	header := fmt.Sprintf("    %s", fd.Path)
-	if fd.IsNew {
+	if fd.IsDeleted {
+		header += "  (deleted)"
+	} else if fd.IsNew {
 		header += "  (new file)"
 	} else {
 		header += fmt.Sprintf("  +%d -%d", fd.Adds, fd.Removes)

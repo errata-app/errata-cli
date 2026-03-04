@@ -8,6 +8,9 @@ func RecipeName(rec *recipe.Recipe) string { return recipeName(rec) }
 func Truncate(s string, max int) string    { return truncate(s, max) }
 
 // CreateModelWorkDirs wraps createModelWorkDirs for testing.
-// Signature: (projectDir, baseDir, adapters) → (dirs, base, cleanup, err)
+// Signature: (projectDir, baseDir, adapters) → (dirs, base, baselines, cleanup, err)
 var CreateModelWorkDirs = createModelWorkDirs
 var DiffWorktree = diffWorktree
+var SnapshotDir = snapshotDir
+var DiffSnapshot = diffSnapshot
+var GitAvailable = gitAvailable

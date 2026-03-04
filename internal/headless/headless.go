@@ -7,9 +7,12 @@ package headless
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,16 +100,18 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	workBase := filepath.Join(opts.OutputDir, reportID+"_worktrees")
 
 	setupStart := time.Now()
-	workDirs, _, cleanupFn, err := createModelWorkDirs(cwd, workBase, opts.Adapters)
+	workDirs, _, baselines, cleanupFn, err := createModelWorkDirs(cwd, workBase, opts.Adapters)
 	if err != nil {
 		return nil, fmt.Errorf("create work dirs (is there enough disk space?): %w", err)
 	}
 	setupMs := time.Since(setupStart).Milliseconds()
 
 	isGit := isGitRepo(cwd)
-	mode := "copy"
+	mode := "snapshot"
 	if isGit {
 		mode = "git worktree"
+	} else if baselines == nil {
+		mode = "copy"
 	}
 	fmt.Fprintf(w, "errata: worktrees ready (%s mode, %dms, base: %s)\n", mode, setupMs, workBase)
 
@@ -180,7 +185,13 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		// Post-process: diff each worktree to populate ProposedWrites.
 		for j := range responses {
 			if dir := workDirs[responses[j].ModelID]; dir != "" {
-				writes, diffErr := diffWorktree(dir)
+				var writes []tools.FileWrite
+				var diffErr error
+				if snap, ok := baselines[responses[j].ModelID]; ok {
+					writes, diffErr = diffSnapshot(dir, snap)
+				} else {
+					writes, diffErr = diffWorktree(dir)
+				}
 				if diffErr != nil {
 					fmt.Fprintf(w, "  warning: diff for %s: %v\n", responses[j].ModelID, diffErr)
 				}
@@ -345,27 +356,30 @@ func sanitizeModelID(id string) string {
 
 // createModelWorkDirs creates an isolated working directory for each adapter.
 // In a git repo, it creates lightweight worktrees (git worktree add --detach).
-// In a non-git directory, it copies the project and creates a git baseline.
+// In a non-git directory with git available, it copies the project and creates a git baseline.
+// Without git, it copies the project and takes a checksum snapshot for diffing.
 // baseDir specifies where to create the worktrees. If empty, a temp directory is used.
 // Returns the work-dir map (adapter ID → abs path), the base directory,
-// and a cleanup function.
-func createModelWorkDirs(projectDir, baseDir string, adpts []models.ModelAdapter) (dirs map[string]string, base string, cleanup func(), err error) {
+// baselines (non-nil only for snapshot mode), and a cleanup function.
+func createModelWorkDirs(projectDir, baseDir string, adpts []models.ModelAdapter) (dirs map[string]string, base string, baselines map[string]map[string]string, cleanup func(), err error) {
 	var tmpBase string
 	if baseDir != "" {
 		if mkErr := os.MkdirAll(baseDir, 0o750); mkErr != nil {
-			return nil, "", nil, fmt.Errorf("create base dir: %w", mkErr)
+			return nil, "", nil, nil, fmt.Errorf("create base dir: %w", mkErr)
 		}
 		tmpBase = baseDir
 	} else {
 		var mkErr error
 		tmpBase, mkErr = os.MkdirTemp("", "errata-workdirs-*")
 		if mkErr != nil {
-			return nil, "", nil, fmt.Errorf("create temp dir: %w", mkErr)
+			return nil, "", nil, nil, fmt.Errorf("create temp dir: %w", mkErr)
 		}
 	}
 
 	dirMap := make(map[string]string, len(adpts))
 	isGit := isGitRepo(projectDir)
+	gitAvail := gitAvailable()
+	var snapshotBaselines map[string]map[string]string
 
 	for _, a := range adpts {
 		dirName := "errata-" + sanitizeModelID(a.ID())
@@ -377,18 +391,18 @@ func createModelWorkDirs(projectDir, baseDir string, adpts []models.ModelAdapter
 			if out, gitErr := cmd.CombinedOutput(); gitErr != nil {
 				// Clean up already-created worktrees.
 				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
-				return nil, "", nil, fmt.Errorf("git worktree add for %s: %w\n%s", a.ID(), gitErr, out)
+				return nil, "", nil, nil, fmt.Errorf("git worktree add for %s: %w\n%s", a.ID(), gitErr, out)
 			}
-		} else {
-			// Non-git fallback: copy directory and create a baseline commit.
+		} else if gitAvail {
+			// Non-git fallback with git available: copy directory and create a baseline commit.
 			cmd := exec.Command("cp", "-a", projectDir+"/.", worktree+"/")
 			if mkdirErr := os.MkdirAll(worktree, 0o750); mkdirErr != nil {
 				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
-				return nil, "", nil, fmt.Errorf("mkdir for %s: %w", a.ID(), mkdirErr)
+				return nil, "", nil, nil, fmt.Errorf("mkdir for %s: %w", a.ID(), mkdirErr)
 			}
 			if out, cpErr := cmd.CombinedOutput(); cpErr != nil {
 				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
-				return nil, "", nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
+				return nil, "", nil, nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
 			}
 			// Create git baseline for diffing.
 			for _, args := range [][]string{
@@ -400,14 +414,34 @@ func createModelWorkDirs(projectDir, baseDir string, adpts []models.ModelAdapter
 				gitCmd.Dir = worktree
 				if out, gitErr := gitCmd.CombinedOutput(); gitErr != nil {
 					cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
-					return nil, "", nil, fmt.Errorf("git %v for %s: %w\n%s", args[0], a.ID(), gitErr, out)
+					return nil, "", nil, nil, fmt.Errorf("git %v for %s: %w\n%s", args[0], a.ID(), gitErr, out)
 				}
 			}
+		} else {
+			// No git: copy directory and take a checksum snapshot for diffing.
+			cmd := exec.Command("cp", "-a", projectDir+"/.", worktree+"/")
+			if mkdirErr := os.MkdirAll(worktree, 0o750); mkdirErr != nil {
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, nil, fmt.Errorf("mkdir for %s: %w", a.ID(), mkdirErr)
+			}
+			if out, cpErr := cmd.CombinedOutput(); cpErr != nil {
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
+			}
+			snap, snapErr := snapshotDir(worktree)
+			if snapErr != nil {
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, nil, fmt.Errorf("snapshot for %s: %w", a.ID(), snapErr)
+			}
+			if snapshotBaselines == nil {
+				snapshotBaselines = make(map[string]map[string]string, len(adpts))
+			}
+			snapshotBaselines[a.ID()] = snap
 		}
 		dirMap[a.ID()] = worktree
 	}
 
-	return dirMap, tmpBase, func() { cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase) }, nil
+	return dirMap, tmpBase, snapshotBaselines, func() { cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase) }, nil
 }
 
 // cleanupWorkDirs removes worktrees (or plain directories) and the temp base.
@@ -426,14 +460,115 @@ func isGitRepo(dir string) bool {
 	return cmd.Run() == nil
 }
 
+// gitAvailable reports whether a git binary is on $PATH.
+func gitAvailable() bool {
+	_, err := exec.LookPath("git")
+	return err == nil
+}
+
+// snapshotDir walks root and returns a map of relative-path → SHA-256 hex digest
+// for every regular file. It skips .git/ directories and symlinks.
+func snapshotDir(root string) (map[string]string, error) {
+	snap := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil // skip symlinks and other non-regular files
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		h := sha256.Sum256(data)
+		snap[rel] = hex.EncodeToString(h[:])
+		return nil
+	})
+	return snap, err
+}
+
+// diffSnapshot compares the current state of dir against a baseline snapshot
+// and returns FileWrite entries for every added, modified, or deleted file.
+func diffSnapshot(dir string, baseline map[string]string) ([]tools.FileWrite, error) {
+	var writes []tools.FileWrite
+	seen := make(map[string]bool)
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return relErr
+		}
+		seen[rel] = true
+		h := sha256.Sum256(data)
+		hexHash := hex.EncodeToString(h[:])
+		if oldHash, exists := baseline[rel]; !exists || oldHash != hexHash {
+			writes = append(writes, tools.FileWrite{Path: rel, Content: string(data)})
+		}
+		return nil
+	})
+	if err != nil {
+		return writes, err
+	}
+
+	// Detect deletions: baseline paths no longer present on disk.
+	for rel := range baseline {
+		if !seen[rel] {
+			writes = append(writes, tools.FileWrite{Path: rel, Delete: true})
+		}
+	}
+	return writes, nil
+}
+
 // diffWorktree returns the files changed in the worktree relative to HEAD.
 // Each changed/added file is returned as a FileWrite with its current content.
+// Deleted files are returned with Delete: true.
 func diffWorktree(dir string) ([]tools.FileWrite, error) {
 	// Get modified files.
 	cmd := exec.Command("git", "-C", dir, "diff", "--name-only", "HEAD")
 	modOut, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
+	}
+
+	// Get deleted files.
+	cmd = exec.Command("git", "-C", dir, "diff", "--name-only", "--diff-filter=D", "HEAD")
+	delOut, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff --diff-filter=D: %w", err)
+	}
+
+	deleted := make(map[string]bool)
+	for line := range strings.SplitSeq(strings.TrimSpace(string(delOut)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			deleted[line] = true
+		}
 	}
 
 	// Get newly added (untracked) files.
@@ -463,9 +598,13 @@ func diffWorktree(dir string) ([]tools.FileWrite, error) {
 
 	var writes []tools.FileWrite
 	for _, f := range files {
+		if deleted[f] {
+			writes = append(writes, tools.FileWrite{Path: f, Delete: true})
+			continue
+		}
 		content, readErr := os.ReadFile(filepath.Join(dir, f))
 		if readErr != nil {
-			continue // file may have been deleted
+			continue // file may have been deleted outside git tracking
 		}
 		writes = append(writes, tools.FileWrite{Path: f, Content: string(content)})
 	}

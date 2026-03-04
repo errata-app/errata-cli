@@ -765,3 +765,60 @@ func TestWriteFileDirect_PathTraversal(t *testing.T) {
 	assert.Contains(t, errMsg, "[error:")
 	assert.Contains(t, errMsg, "outside the working directory")
 }
+
+// ─── Delete support ──────────────────────────────────────────────────────────
+
+func TestApplyWrites_Delete(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	// Create a file, then delete it via ApplyWrites.
+	path := filepath.Join(dir, "doomed.txt")
+	require.NoError(t, os.WriteFile(path, []byte("bye"), 0o644))
+
+	require.NoError(t, tools.ApplyWrites([]tools.FileWrite{
+		{Path: "doomed.txt", Delete: true},
+	}))
+
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err), "file should be deleted")
+}
+
+func TestApplyWrites_DeleteNonexistent(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	// Deleting a file that doesn't exist should not error.
+	err := tools.ApplyWrites([]tools.FileWrite{
+		{Path: "ghost.txt", Delete: true},
+	})
+	require.NoError(t, err)
+}
+
+func TestSnapshotFiles_Delete(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	// Create a file that will be deleted.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "victim.txt"), []byte("save me"), 0o644))
+
+	snaps, err := tools.SnapshotFiles([]tools.FileWrite{
+		{Path: "victim.txt", Delete: true},
+	})
+	require.NoError(t, err)
+	require.Len(t, snaps, 1)
+	assert.Equal(t, "save me", snaps[0].Content, "snapshot should capture content for rewind")
+	assert.False(t, snaps[0].DidNotExist)
+}
+
+func TestSnapshotFiles_DeleteNonexistent(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	// Deleting a non-existent file should produce no snapshot entry.
+	snaps, err := tools.SnapshotFiles([]tools.FileWrite{
+		{Path: "ghost.txt", Delete: true},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, snaps)
+}

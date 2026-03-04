@@ -83,6 +83,7 @@ type ModelResult struct {
 type WriteEntry struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	Delete  bool   `json:"delete,omitempty"`
 }
 
 // EventEntry captures a single tool event during execution.
@@ -314,7 +315,7 @@ func BuildReport(
 	for i, resp := range responses {
 		var writes []WriteEntry
 		for _, fw := range resp.ProposedWrites {
-			writes = append(writes, WriteEntry{Path: fw.Path, Content: fw.Content})
+			writes = append(writes, WriteEntry{Path: fw.Path, Content: fw.Content, Delete: fw.Delete})
 		}
 
 		var events []EventEntry

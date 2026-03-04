@@ -42,6 +42,7 @@ type ResponseSnapshot struct {
 type WriteSnapshot struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	Delete  bool   `json:"delete,omitempty"`
 }
 
 // toWriteSnapshots converts FileWrite slices to WriteSnapshot slices.
@@ -51,7 +52,7 @@ func toWriteSnapshots(writes []tools.FileWrite) []WriteSnapshot {
 	}
 	out := make([]WriteSnapshot, len(writes))
 	for i, w := range writes {
-		out[i] = WriteSnapshot{Path: w.Path, Content: w.Content}
+		out[i] = WriteSnapshot{Path: w.Path, Content: w.Content, Delete: w.Delete}
 	}
 	return out
 }
@@ -63,7 +64,7 @@ func fromWriteSnapshots(snaps []WriteSnapshot) []tools.FileWrite {
 	}
 	out := make([]tools.FileWrite, len(snaps))
 	for i, s := range snaps {
-		out[i] = tools.FileWrite{Path: s.Path, Content: s.Content}
+		out[i] = tools.FileWrite{Path: s.Path, Content: s.Content, Delete: s.Delete}
 	}
 	return out
 }
