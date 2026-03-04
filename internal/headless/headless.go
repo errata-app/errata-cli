@@ -176,7 +176,8 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		// Evaluate criteria.
 		criteriaResults := make(map[string][]criteria.Result)
 		for _, resp := range responses {
-			results := criteria.Evaluate(parsedCriteria, resp)
+			ectx := criteria.EvalContext{WorkDir: workDirs[resp.ModelID]}
+			results := criteria.Evaluate(parsedCriteria, resp, ectx)
 			criteriaResults[resp.ModelID] = results
 		}
 

@@ -253,6 +253,51 @@ func TestRun_AllModelsError(t *testing.T) {
 }
 
 
+// ─── Run criterion integration test ──────────────────────────────────────────
+
+func TestRun_WithRunCriterion(t *testing.T) {
+	dir := setupGitDir(t)
+	t.Chdir(dir)
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	// The run criterion checks for a file that only model-a will create via DispatchTool.
+	rec := testRecipe([]string{"create marker"}, []string{
+		"no_errors",
+		"run: test -f marker.txt",
+	})
+
+	// model-a writes marker.txt through DispatchTool → ends up in its worktree.
+	a1 := &dispatchingMockAdapter{
+		id:       "model-a",
+		response: models.ModelResponse{Text: "done", LatencyMS: 100},
+		toolCalls: []mockToolCall{
+			{name: tools.WriteToolName, args: map[string]string{"path": "marker.txt", "content": "present"}},
+		},
+	}
+	// model-b does nothing → marker.txt absent in its worktree.
+	a2 := &mockAdapter{
+		id:       "model-b",
+		response: models.ModelResponse{Text: "done but no writes", LatencyMS: 200},
+	}
+
+	opts := testOpts(rec, []models.ModelAdapter{a1, a2}, outDir)
+	report, err := headless.Run(context.Background(), opts)
+	require.NoError(t, err)
+
+	require.Len(t, report.Tasks, 1)
+	cr := report.Tasks[0].CriteriaResults
+
+	// model-a: both no_errors and run: test -f marker.txt should pass.
+	require.Len(t, cr["model-a"], 2)
+	assert.True(t, cr["model-a"][0].Passed, "model-a: no_errors should pass")
+	assert.True(t, cr["model-a"][1].Passed, "model-a: run criterion should pass (marker.txt written)")
+
+	// model-b: no_errors passes, but run: test -f marker.txt fails.
+	require.Len(t, cr["model-b"], 2)
+	assert.True(t, cr["model-b"][0].Passed, "model-b: no_errors should pass")
+	assert.False(t, cr["model-b"][1].Passed, "model-b: run criterion should fail (no marker.txt)")
+}
+
 // ─── Report round-trip test ──────────────────────────────────────────────────
 
 func TestRunReport_RoundTrip(t *testing.T) {
