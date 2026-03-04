@@ -120,17 +120,9 @@ Available criteria:
 
 ## Example Recipes
 
-### `go_gauntlet.md` — Go Bug Fix Gauntlet
-
-Ten independent Go debugging challenges (off-by-one, nil map, fence post, goroutine race, etc.). Each task points models at a small Go package with failing tests and asks them to fix the source without touching the test file. Tests which model can autonomously diagnose and fix common Go bugs. An interesting result: frontier models sweep all ten, while smaller models consistently fail on concurrency bugs (challenge04, challenge05).
-
-```
-errata run go_gauntlet.md --verbose
-```
-
 ### `go_docstore.md` — Multi-File DocStore Bug Fix
 
-A single harder challenge: a multi-file in-memory document store with bugs spread across `collection.go`, `index.go`, `query.go`, and `document.go`. Models must trace failures across file boundaries and fix multiple interacting bugs. Tests which model can hold a multi-file mental model. An interesting result: models that fix each file in isolation often miss the index/query interaction bug.
+A multi-file in-memory document store with bugs spread across `collection.go`, `index.go`, `query.go`, and `document.go`. Models must trace failures across file boundaries and fix multiple interacting bugs. Tests which model can hold a multi-file mental model. An interesting result: models that fix each file in isolation often miss the index/query interaction bug.
 
 ```
 errata run go_docstore.md --verbose
