@@ -52,7 +52,15 @@ func runOpenAIAgentLoop(
 	var totalInput, totalOutput int64
 	start := time.Now()
 
+	maxSteps := tools.MaxStepsFromContext(ctx)
+	step := 0
 	for {
+		step++
+		if maxSteps > 0 && step > maxSteps {
+			r := BuildMaxStepsResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+			r.Steps = step - 1
+			return r, nil
+		}
 		params := openai.ChatCompletionNewParams{
 			Model:    openai.ChatModel(cfg.apiModelID),
 			Tools:    toolParams,
@@ -65,9 +73,16 @@ func runOpenAIAgentLoop(
 		resp, err := cfg.client.Chat.Completions.New(ctx, params)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err), err
+				r := BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err)
+				if ctx.Err() == context.DeadlineExceeded {
+					r.StopReason = models.StopReasonTimeout
+				}
+				r.Steps = step
+				return r, err
 			}
-			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err), err
+			r := BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err)
+			r.Steps = step
+			return r, err
 		}
 
 		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
@@ -109,7 +124,9 @@ func runOpenAIAgentLoop(
 		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
 	}
 
-	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls), nil
+	r := BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+	r.Steps = step
+	return r, nil
 }
 
 // buildOpenAITools converts the active tool definitions from context into

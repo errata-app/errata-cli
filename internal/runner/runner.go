@@ -13,6 +13,7 @@ import (
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/pricing"
 	"github.com/suarezc/errata/internal/prompt"
+	"github.com/suarezc/errata/internal/tools"
 )
 
 const agentTimeout = 5 * time.Minute
@@ -28,7 +29,9 @@ type RunOptions struct {
 	Timeout          time.Duration // 0 → agentTimeout (5 min)
 	CompactThreshold float64       // 0 → autoCompactThreshold (0.80)
 	MaxHistoryTurns  int           // 0 → defaultMaxHistoryTurns (20)
+	MaxSteps         int           // 0 → unlimited agentic loop turns
 	CheckpointPath   string        // "" disables incremental checkpointing
+	WorkDirs         map[string]string // per-adapter working directory (adapter ID → dir path)
 }
 
 // WithRunOptions returns a context carrying the given RunOptions.
@@ -86,6 +89,13 @@ func RunAll(
 		wg.Go(func() {
 			tctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 			defer cancel()
+			if opts.MaxSteps > 0 {
+				tctx = tools.WithMaxSteps(tctx, opts.MaxSteps)
+			}
+			if dir := opts.WorkDirs[a.ID()]; dir != "" {
+				tctx = tools.WithWorkDir(tctx, dir)
+				tctx = tools.WithDirectWrites(tctx, true)
+			}
 
 			// filtered suppresses "text" and "error" events when not verbose,
 			// and intercepts "snapshot" events for incremental checkpointing.
@@ -120,6 +130,9 @@ func RunAll(
 				}
 				if resp.Error == "" {
 					resp.Error = err.Error()
+				}
+				if IsContextOverflowError(resp.Error) {
+					resp.StopReason = models.StopReasonContextOverflow
 				}
 				if !resp.Interrupted {
 					filtered(models.AgentEvent{Type: models.EventError, Data: err.Error()})

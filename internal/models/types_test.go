@@ -56,6 +56,24 @@ func TestAgentEvent(t *testing.T) {
 	assert.Equal(t, "foo.go", e.Data)
 }
 
+func TestStopReason_ConstantsDistinct(t *testing.T) {
+	reasons := []models.StopReason{
+		models.StopReasonComplete,
+		models.StopReasonTimeout,
+		models.StopReasonMaxSteps,
+		models.StopReasonContextOverflow,
+		models.StopReasonCancelled,
+		models.StopReasonError,
+	}
+	seen := make(map[models.StopReason]bool, len(reasons))
+	for _, r := range reasons {
+		assert.False(t, seen[r], "duplicate StopReason: %s", r)
+		assert.NotEmpty(t, string(r), "StopReason should not be empty")
+		seen[r] = true
+	}
+	assert.Len(t, seen, 6)
+}
+
 func TestStubAdapter_RunAgent(t *testing.T) {
 	a := &stubAdapter{
 		id: "stub",

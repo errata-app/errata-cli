@@ -354,6 +354,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+			MaxSteps:         cfg.MaxSteps,
 			CheckpointPath:   cpPath,
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, recSystemPrompt)

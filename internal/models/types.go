@@ -47,6 +47,18 @@ type PartialSnapshot struct {
 	ToolCalls    map[string]int    `json:"tool_calls,omitempty"`
 }
 
+// StopReason indicates why a model's agentic loop terminated.
+type StopReason string
+
+const (
+	StopReasonComplete        StopReason = "complete"         // model finished naturally (no more tool calls)
+	StopReasonTimeout         StopReason = "timeout"          // context deadline exceeded
+	StopReasonMaxSteps        StopReason = "max_steps"        // hit max_steps limit
+	StopReasonContextOverflow StopReason = "context_overflow" // context window exceeded
+	StopReasonCancelled       StopReason = "cancelled"        // user cancelled (ESC/Ctrl-C/SIGINT)
+	StopReasonError           StopReason = "error"            // API or other error
+)
+
 // ModelResponse is the final result from one agent run.
 type ModelResponse struct {
 	ModelID             string
@@ -57,8 +69,10 @@ type ModelResponse struct {
 	CostUSD             float64
 	ProposedWrites      []tools.FileWrite
 	ToolCalls           map[string]int // tool_name → call count across all turns
+	Steps               int    // number of agentic loop iterations (API round-trips)
 	Error               string // empty = success
 	Interrupted         bool   // true when run was cancelled mid-flight (partial data preserved)
+	StopReason          StopReason `json:"stop_reason,omitempty"`
 }
 
 // OK returns true when the response carries no error.

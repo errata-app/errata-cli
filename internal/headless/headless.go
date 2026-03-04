@@ -11,6 +11,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/suarezc/errata/internal/adapters"
@@ -80,8 +83,41 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	// Build the tool set once (no session-level disabling in headless mode).
 	activeDefs := buildActiveDefs(rec, opts.MCPDefs)
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("cannot determine working directory: %w", err)
+	}
+
 	fmt.Fprintf(w, "errata: %s (%d tasks, %d models, task_mode=%s)\n",
 		recipeName(rec), len(rec.Tasks), len(opts.Adapters), taskMode)
+
+	// Create per-model working directories for filesystem isolation.
+	// Generate the report ID early so we can use it for the worktree directory.
+	reportID := newReportID()
+	workBase := filepath.Join(opts.OutputDir, reportID+"_worktrees")
+
+	setupStart := time.Now()
+	workDirs, _, cleanupFn, err := createModelWorkDirs(cwd, workBase, opts.Adapters)
+	if err != nil {
+		return nil, fmt.Errorf("create work dirs (is there enough disk space?): %w", err)
+	}
+	setupMs := time.Since(setupStart).Milliseconds()
+
+	isGit := isGitRepo(cwd)
+	mode := "copy"
+	if isGit {
+		mode = "git worktree"
+	}
+	fmt.Fprintf(w, "errata: worktrees ready (%s mode, %dms, base: %s)\n", mode, setupMs, workBase)
+
+	if opts.Verbose {
+		for id, dir := range workDirs {
+			fmt.Fprintf(w, "  %s → %s\n", id, dir)
+		}
+	}
+
+	// cleanupFn is kept for error-path cleanup only; worktrees are preserved for inspection.
+	_ = cleanupFn
 
 	histories := make(map[string][]models.ConversationTurn)
 	var taskResults []TaskResult
@@ -108,7 +144,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			}
 		}
 
-		runCtx := buildRunContext(ctx, opts, rec, activeDefs)
+		runCtx := buildRunContext(ctx, opts, rec, activeDefs, workDirs)
 
 		collector := output.NewCollector()
 		onEvent := collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
@@ -131,16 +167,25 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			}
 			// Print partial results for the interrupted task.
 			for _, resp := range responses {
-				status := "done"
-				if resp.Interrupted {
-					status = "interrupted"
-				} else if resp.Error != "" {
-					status = "error"
+				status := string(resp.StopReason)
+				if status == "" {
+					status = "done"
 				}
 				fmt.Fprintf(w, "  %-22s %-11s  %5dms  $%.4f\n",
 					resp.ModelID, status, resp.LatencyMS, resp.CostUSD)
 			}
 			return nil, fmt.Errorf("interrupted at task %d/%d", i+1, len(rec.Tasks))
+		}
+
+		// Post-process: diff each worktree to populate ProposedWrites.
+		for j := range responses {
+			if dir := workDirs[responses[j].ModelID]; dir != "" {
+				writes, diffErr := diffWorktree(dir)
+				if diffErr != nil {
+					fmt.Fprintf(w, "  warning: diff for %s: %v\n", responses[j].ModelID, diffErr)
+				}
+				responses[j].ProposedWrites = writes
+			}
 		}
 
 		// Build the per-task output report.
@@ -150,7 +195,8 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		// Evaluate criteria.
 		criteriaResults := make(map[string][]criteria.Result)
 		for _, resp := range responses {
-			results := criteria.Evaluate(parsedCriteria, resp)
+			ectx := criteria.EvalContext{WorkDir: workDirs[resp.ModelID]}
+			results := criteria.Evaluate(parsedCriteria, resp, ectx)
 			criteriaResults[resp.ModelID] = results
 		}
 
@@ -167,21 +213,6 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			CriteriaResults: criteriaResults,
 		}
 
-		// Sequential mode: pick winner, apply writes, carry history.
-		if taskMode == "sequential" {
-			winner := selectWinner(responses, criteriaResults)
-			if winner != nil {
-				taskResult.SelectedModel = winner.ModelID
-				if len(winner.ProposedWrites) > 0 {
-					if err := tools.ApplyWrites(winner.ProposedWrites); err != nil {
-						fmt.Fprintf(w, "  warning: could not apply writes from %s: %v\n", winner.ModelID, err)
-					} else {
-						fmt.Fprintf(w, "  → applied %d files from %s\n", len(winner.ProposedWrites), winner.ModelID)
-					}
-				}
-			}
-		}
-
 		// Update conversation histories.
 		histories = runner.AppendHistory(histories, adapterIDs(opts.Adapters), responses, taskPrompt)
 
@@ -195,13 +226,19 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	summary := buildSummary(taskResults, parsedCriteria, totalCost)
 
 	headlessReport := &RunReport{
-		ID:        newReportID(),
+		ID:        reportID,
 		Timestamp: time.Now().UTC(),
 		SessionID: opts.SessionID,
 		Recipe:    snapshotRecipe(rec),
 		TaskMode:  taskMode,
 		Tasks:     taskResults,
 		Summary:   summary,
+		Setup: SetupInfo{
+			WorktreeBase: workBase,
+			SetupMS:      setupMs,
+			GitMode:      isGit,
+			ModelDirs:    workDirs,
+		},
 	}
 
 	outputDir := opts.OutputDir
@@ -212,6 +249,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		fmt.Fprintf(w, "\nReport saved to %s\n", path)
 	}
 
+	fmt.Fprintf(w, "Worktrees preserved at %s\n", workBase)
 	fmt.Fprintf(w, "Summary: %d tasks, $%.4f total cost\n", len(rec.Tasks), totalCost)
 
 	if opts.JSON {
@@ -252,7 +290,7 @@ func buildActiveDefs(rec *recipe.Recipe, mcpDefs []tools.ToolDef) []tools.ToolDe
 }
 
 // buildRunContext creates the fully-wired context for a single task run.
-func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, activeDefs []tools.ToolDef) context.Context {
+func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, activeDefs []tools.ToolDef, workDirs map[string]string) context.Context {
 	var bashPrefixes []string
 	if rec.Tools != nil {
 		bashPrefixes = rec.Tools.BashPrefixes
@@ -277,7 +315,9 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		Timeout:          opts.Cfg.AgentTimeout,
 		CompactThreshold: opts.Cfg.CompactThreshold,
 		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
+		MaxSteps:         opts.Cfg.MaxSteps,
 		CheckpointPath:   opts.CheckpointPath,
+		WorkDirs:         workDirs,
 	})
 	if tools.SubagentEnabled {
 		ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
@@ -296,37 +336,140 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	return ctx
 }
 
-// ─── Winner selection (sequential mode) ───────────────────────────────────────
+// ─── Per-model filesystem isolation ──────────────────────────────────────────
 
-// selectWinner picks the best model for sequential mode.
-// Priority: most criteria passed → lowest cost → lowest latency.
-// Returns nil if no successful responses exist.
-func selectWinner(
-	responses []models.ModelResponse,
-	criteriaResults map[string][]criteria.Result,
-) *models.ModelResponse {
-	var best *models.ModelResponse
-	bestScore := -1
-	var bestCost float64
-	var bestLatency int64
+// sanitizeModelID replaces characters that are unsafe for directory names.
+func sanitizeModelID(id string) string {
+	return strings.NewReplacer("/", "_", ":", "_", " ", "_").Replace(id)
+}
 
-	for i := range responses {
-		resp := &responses[i]
-		if !resp.OK() {
-			continue
+// createModelWorkDirs creates an isolated working directory for each adapter.
+// In a git repo, it creates lightweight worktrees (git worktree add --detach).
+// In a non-git directory, it copies the project and creates a git baseline.
+// baseDir specifies where to create the worktrees. If empty, a temp directory is used.
+// Returns the work-dir map (adapter ID → abs path), the base directory,
+// and a cleanup function.
+func createModelWorkDirs(projectDir, baseDir string, adpts []models.ModelAdapter) (dirs map[string]string, base string, cleanup func(), err error) {
+	var tmpBase string
+	if baseDir != "" {
+		if mkErr := os.MkdirAll(baseDir, 0o750); mkErr != nil {
+			return nil, "", nil, fmt.Errorf("create base dir: %w", mkErr)
 		}
-		score := criteria.PassCount(criteriaResults[resp.ModelID])
-		better := score > bestScore ||
-			(score == bestScore && resp.CostUSD < bestCost) ||
-			(score == bestScore && resp.CostUSD == bestCost && resp.LatencyMS < bestLatency)
-		if best == nil || better {
-			best = resp
-			bestScore = score
-			bestCost = resp.CostUSD
-			bestLatency = resp.LatencyMS
+		tmpBase = baseDir
+	} else {
+		var mkErr error
+		tmpBase, mkErr = os.MkdirTemp("", "errata-workdirs-*")
+		if mkErr != nil {
+			return nil, "", nil, fmt.Errorf("create temp dir: %w", mkErr)
 		}
 	}
-	return best
+
+	dirMap := make(map[string]string, len(adpts))
+	isGit := isGitRepo(projectDir)
+
+	for _, a := range adpts {
+		dirName := "errata-" + sanitizeModelID(a.ID())
+		worktree := filepath.Join(tmpBase, dirName)
+
+		if isGit {
+			// Create a detached worktree from HEAD.
+			cmd := exec.Command("git", "-C", projectDir, "worktree", "add", "--detach", worktree, "HEAD")
+			if out, gitErr := cmd.CombinedOutput(); gitErr != nil {
+				// Clean up already-created worktrees.
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, fmt.Errorf("git worktree add for %s: %w\n%s", a.ID(), gitErr, out)
+			}
+		} else {
+			// Non-git fallback: copy directory and create a baseline commit.
+			cmd := exec.Command("cp", "-a", projectDir+"/.", worktree+"/")
+			if mkdirErr := os.MkdirAll(worktree, 0o750); mkdirErr != nil {
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, fmt.Errorf("mkdir for %s: %w", a.ID(), mkdirErr)
+			}
+			if out, cpErr := cmd.CombinedOutput(); cpErr != nil {
+				cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+				return nil, "", nil, fmt.Errorf("cp for %s: %w\n%s", a.ID(), cpErr, out)
+			}
+			// Create git baseline for diffing.
+			for _, args := range [][]string{
+				{"init"},
+				{"add", "-A"},
+				{"commit", "-m", "baseline", "--allow-empty"},
+			} {
+				gitCmd := exec.Command("git", args...)
+				gitCmd.Dir = worktree
+				if out, gitErr := gitCmd.CombinedOutput(); gitErr != nil {
+					cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase)
+					return nil, "", nil, fmt.Errorf("git %v for %s: %w\n%s", args[0], a.ID(), gitErr, out)
+				}
+			}
+		}
+		dirMap[a.ID()] = worktree
+	}
+
+	return dirMap, tmpBase, func() { cleanupWorkDirs(projectDir, dirMap, isGit, tmpBase) }, nil
+}
+
+// cleanupWorkDirs removes worktrees (or plain directories) and the temp base.
+func cleanupWorkDirs(projectDir string, dirs map[string]string, isGit bool, tmpBase string) {
+	if isGit {
+		for _, dir := range dirs {
+			_ = exec.Command("git", "-C", projectDir, "worktree", "remove", "--force", dir).Run()
+		}
+	}
+	_ = os.RemoveAll(tmpBase)
+}
+
+// isGitRepo checks whether the given directory is inside a git repository.
+func isGitRepo(dir string) bool {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--git-dir")
+	return cmd.Run() == nil
+}
+
+// diffWorktree returns the files changed in the worktree relative to HEAD.
+// Each changed/added file is returned as a FileWrite with its current content.
+func diffWorktree(dir string) ([]tools.FileWrite, error) {
+	// Get modified files.
+	cmd := exec.Command("git", "-C", dir, "diff", "--name-only", "HEAD")
+	modOut, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff: %w", err)
+	}
+
+	// Get newly added (untracked) files.
+	cmd = exec.Command("git", "-C", dir, "ls-files", "--others", "--exclude-standard")
+	untrackedOut, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files: %w", err)
+	}
+
+	// Combine and deduplicate.
+	seen := make(map[string]bool)
+	var files []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(modOut)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !seen[line] {
+			seen[line] = true
+			files = append(files, line)
+		}
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(untrackedOut)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !seen[line] {
+			seen[line] = true
+			files = append(files, line)
+		}
+	}
+
+	var writes []tools.FileWrite
+	for _, f := range files {
+		content, readErr := os.ReadFile(filepath.Join(dir, f))
+		if readErr != nil {
+			continue // file may have been deleted
+		}
+		writes = append(writes, tools.FileWrite{Path: f, Content: string(content)})
+	}
+	return writes, nil
 }
 
 // ─── Summary builder ──────────────────────────────────────────────────────────
@@ -404,10 +547,12 @@ func recipeName(rec *recipe.Recipe) string {
 }
 
 func printModelResult(w io.Writer, resp models.ModelResponse, cr []criteria.Result, totalCriteria int) {
-	status := "done"
-	if resp.Error != "" {
-		status = "error"
+	status := string(resp.StopReason)
+	if status == "" {
+		status = "done"
 	}
+	tok := fmtTokens(resp.InputTokens, resp.OutputTokens)
+	steps := fmt.Sprintf("%d steps", resp.Steps)
 
 	if totalCriteria > 0 {
 		passed := criteria.PassCount(cr)
@@ -416,21 +561,34 @@ func printModelResult(w io.Writer, resp models.ModelResponse, cr []criteria.Resu
 			mark = "✗"
 		}
 		if resp.Error != "" {
-			fmt.Fprintf(w, "  %-22s %-5s  %s  %s %d/%d criteria\n",
+			fmt.Fprintf(w, "  %-22s %-10s  %s  %s %d/%d criteria\n",
 				resp.ModelID, status, truncate(resp.Error, 30), mark, passed, totalCriteria)
 		} else {
-			fmt.Fprintf(w, "  %-22s %-5s  %5dms  $%.4f  %s %d/%d criteria\n",
-				resp.ModelID, status, resp.LatencyMS, resp.CostUSD, mark, passed, totalCriteria)
+			fmt.Fprintf(w, "  %-22s %-10s  %5dms  %s  %s  $%.4f  %s %d/%d criteria\n",
+				resp.ModelID, status, resp.LatencyMS, steps, tok, resp.CostUSD, mark, passed, totalCriteria)
 		}
 	} else {
 		if resp.Error != "" {
-			fmt.Fprintf(w, "  %-22s %-5s  %s\n",
+			fmt.Fprintf(w, "  %-22s %-10s  %s\n",
 				resp.ModelID, status, truncate(resp.Error, 50))
 		} else {
-			fmt.Fprintf(w, "  %-22s %-5s  %5dms  $%.4f\n",
-				resp.ModelID, status, resp.LatencyMS, resp.CostUSD)
+			fmt.Fprintf(w, "  %-22s %-10s  %5dms  %s  %s  $%.4f\n",
+				resp.ModelID, status, resp.LatencyMS, steps, tok, resp.CostUSD)
 		}
 	}
+}
+
+// fmtTokens formats input/output token counts as a compact string like "12.3k in / 4.5k out".
+func fmtTokens(input, output int64) string {
+	return fmt.Sprintf("%s in / %s out", fmtCount(input), fmtCount(output))
+}
+
+// fmtCount formats a token count: values ≥1000 are shown as "X.Yk", otherwise as-is.
+func fmtCount(n int64) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 // adapterIDs returns the IDs of all adapters.

@@ -73,6 +73,8 @@ type ModelResult struct {
 	OutputTokens        int64        `json:"output_tokens"`
 	CostUSD             float64      `json:"cost_usd"`
 	Error               string       `json:"error,omitempty"`
+	StopReason          string       `json:"stop_reason,omitempty"`
+	Steps               int          `json:"steps,omitempty"`
 	ProposedWrites      []WriteEntry `json:"proposed_writes,omitempty"`
 	Events              []EventEntry `json:"events"`
 }
@@ -331,6 +333,8 @@ func BuildReport(
 			OutputTokens:        resp.OutputTokens,
 			CostUSD:             resp.CostUSD,
 			Error:               resp.Error,
+			StopReason:          string(resp.StopReason),
+			Steps:               resp.Steps,
 			ProposedWrites:      writes,
 			Events:              events,
 		}

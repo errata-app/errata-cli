@@ -58,7 +58,15 @@ func runAnthropicAgentLoop(
 		temperature = &zero
 	}
 
+	maxSteps := tools.MaxStepsFromContext(ctx)
+	step := 0
 	for {
+		step++
+		if maxSteps > 0 && step > maxSteps {
+			r := BuildMaxStepsResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+			r.Steps = step - 1
+			return r, nil
+		}
 		params := anthropic.MessageNewParams{
 			Model:     anthropic.Model(cfg.modelID),
 			MaxTokens: cfg.maxOutputTokens,
@@ -75,9 +83,16 @@ func runAnthropicAgentLoop(
 		resp, err := client.Messages.New(ctx, params)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err), err
+				r := BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err)
+				if ctx.Err() == context.DeadlineExceeded {
+					r.StopReason = models.StopReasonTimeout
+				}
+				r.Steps = step
+				return r, err
 			}
-			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err), err
+			r := BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err)
+			r.Steps = step
+			return r, err
 		}
 		totalInput += resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens
 		totalOutput += resp.Usage.OutputTokens
@@ -119,7 +134,9 @@ func runAnthropicAgentLoop(
 		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
 	}
 
-	return BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls), nil
+	r := BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+	r.Steps = step
+	return r, nil
 }
 
 // buildAnthropicTools converts the active tool definitions from context into

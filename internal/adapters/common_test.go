@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -556,6 +557,31 @@ func TestDispatchTool_UnknownToolDoesNotTrack(t *testing.T) {
 	assert.Empty(t, tc, "unknown tools should not be tracked")
 }
 
+// ─── StopReason ─────────────────────────────────────────────────────────────
+
+func TestBuildSuccessResponse_SetsStopReasonComplete(t *testing.T) {
+	resp := BuildSuccessResponse("m", "m", []string{"hi"}, time.Now(), 100, 50, nil, nil)
+	assert.Equal(t, models.StopReasonComplete, resp.StopReason)
+}
+
+func TestBuildErrorResponse_SetsStopReasonError(t *testing.T) {
+	resp := BuildErrorResponse("m", "m", time.Now(), 0, 0, fmt.Errorf("boom"))
+	assert.Equal(t, models.StopReasonError, resp.StopReason)
+}
+
+func TestBuildInterruptedResponse_SetsStopReasonCancelled(t *testing.T) {
+	resp := BuildInterruptedResponse("m", "m", nil, time.Now(), 0, 0, nil, nil, fmt.Errorf("cancelled"))
+	assert.Equal(t, models.StopReasonCancelled, resp.StopReason)
+}
+
+func TestBuildMaxStepsResponse_SetsStopReasonMaxSteps(t *testing.T) {
+	resp := BuildMaxStepsResponse("m", "m", []string{"partial"}, time.Now(), 200, 100, nil, map[string]int{"read_file": 3})
+	assert.Equal(t, models.StopReasonMaxSteps, resp.StopReason)
+	assert.Equal(t, "partial", resp.Text)
+	assert.Equal(t, int64(200), resp.InputTokens)
+	assert.Equal(t, 3, resp.ToolCalls["read_file"])
+}
+
 func TestBuildSuccessResponse_IncludesToolCalls(t *testing.T) {
 	tc := map[string]int{"read_file": 3, "bash": 1}
 	resp := BuildSuccessResponse("m", "m", []string{"hi"}, time.Now(), 100, 50,
@@ -582,4 +608,119 @@ func TestEmitSnapshot_IncludesToolCalls(t *testing.T) {
 	require.Len(t, events, 1)
 	assert.Contains(t, events[0].Data, `"tool_calls"`)
 	assert.Contains(t, events[0].Data, `"read_file":2`)
+}
+
+// ─── DispatchTool direct writes ─────────────────────────────────────────────
+
+func TestDispatchTool_DirectWrite(t *testing.T) {
+	workDir := t.TempDir()
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+	ctx = tools.WithDirectWrites(ctx, true)
+
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+
+	result, ok := DispatchTool(ctx, tools.WriteToolName,
+		map[string]string{"path": "direct.txt", "content": "direct content"},
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed, nil)
+
+	assert.True(t, ok)
+	assert.Equal(t, "File written.", result)
+	assert.Empty(t, proposed, "direct writes should NOT queue proposals")
+
+	// Verify file exists in the work dir.
+	got, err := os.ReadFile(filepath.Join(workDir, "direct.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "direct content", string(got))
+}
+
+func TestDispatchTool_DirectEdit(t *testing.T) {
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "edit.go"), []byte("func old() {}"), 0o644))
+
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+	ctx = tools.WithDirectWrites(ctx, true)
+
+	var events []models.AgentEvent
+	var proposed []tools.FileWrite
+
+	result, ok := DispatchTool(ctx, tools.EditToolName,
+		map[string]string{"path": "edit.go", "old_string": "old", "new_string": "new"},
+		func(e models.AgentEvent) { events = append(events, e) }, &proposed, nil)
+
+	assert.True(t, ok)
+	assert.Equal(t, "File written.", result)
+	assert.Empty(t, proposed)
+
+	got, err := os.ReadFile(filepath.Join(workDir, "edit.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(got), "new")
+	assert.NotContains(t, string(got), "old")
+}
+
+func TestDispatchTool_DirectMultiEdit(t *testing.T) {
+	workDir := t.TempDir()
+	original := "func alpha() {}\nfunc beta() {}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "multi.go"), []byte(original), 0o644))
+
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+	ctx = tools.WithDirectWrites(ctx, true)
+
+	var proposed []tools.FileWrite
+
+	// First edit.
+	result1, ok1 := DispatchTool(ctx, tools.EditToolName,
+		map[string]string{"path": "multi.go", "old_string": "alpha", "new_string": "ALPHA"},
+		func(models.AgentEvent) {}, &proposed, nil)
+	assert.True(t, ok1)
+	assert.Equal(t, "File written.", result1)
+
+	// Second edit — reads from disk where first edit landed.
+	result2, ok2 := DispatchTool(ctx, tools.EditToolName,
+		map[string]string{"path": "multi.go", "old_string": "beta", "new_string": "BETA"},
+		func(models.AgentEvent) {}, &proposed, nil)
+	assert.True(t, ok2)
+	assert.Equal(t, "File written.", result2)
+
+	assert.Empty(t, proposed, "no proposals in direct mode")
+
+	got, err := os.ReadFile(filepath.Join(workDir, "multi.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(got), "ALPHA")
+	assert.Contains(t, string(got), "BETA")
+	assert.NotContains(t, string(got), "alpha")
+	assert.NotContains(t, string(got), "beta")
+}
+
+func TestDispatchTool_TUIWriteUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(context.Background(), tools.WriteToolName,
+		map[string]string{"path": "queued.txt", "content": "queued"},
+		func(models.AgentEvent) {}, &proposed, nil)
+
+	assert.True(t, ok)
+	assert.Equal(t, writeAck, result)
+	require.Len(t, proposed, 1)
+
+	// File should NOT exist on disk.
+	_, err := os.Stat(filepath.Join(dir, "queued.txt"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestDispatchTool_ReadFromWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "data.txt"), []byte("work dir content"), 0o644))
+
+	ctx := tools.WithWorkDir(context.Background(), workDir)
+
+	var proposed []tools.FileWrite
+	result, ok := DispatchTool(ctx, tools.ReadToolName,
+		map[string]string{"path": "data.txt"},
+		func(models.AgentEvent) {}, &proposed, nil)
+
+	assert.True(t, ok)
+	assert.Equal(t, "work dir content", result)
 }

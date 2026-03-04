@@ -926,6 +926,9 @@ func (r *Recipe) ApplyTo(cfg *config.Config) {
 	if r.Context.MaxHistoryTurns > 0 {
 		cfg.MaxHistoryTurns = r.Context.MaxHistoryTurns
 	}
+	if r.Constraints.MaxSteps > 0 {
+		cfg.MaxSteps = r.Constraints.MaxSteps
+	}
 	if r.Constraints.Timeout > 0 {
 		cfg.AgentTimeout = r.Constraints.Timeout
 	}

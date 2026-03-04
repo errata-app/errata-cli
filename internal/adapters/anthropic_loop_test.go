@@ -298,3 +298,28 @@ func TestAnthropicLoop_EndTurnStopsLoop(t *testing.T) {
 	assert.Equal(t, "Final answer.", resp.Text)
 	assert.True(t, resp.OK())
 }
+
+func TestAnthropicLoop_MaxSteps(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile("f.txt", []byte("data"), 0o600))
+
+	ts := newAnthropicMockServer(t, []string{
+		// Turn 1: tool call
+		anthropicToolUseResponse("toolu_1", "read_file", `{"path":"f.txt"}`, 100, 30),
+		// Turn 2: tool call — should be skipped by maxSteps=1
+		anthropicToolUseResponse("toolu_2", "read_file", `{"path":"f.txt"}`, 200, 40),
+		// Turn 3: text — should never be reached
+		anthropicTextResponse("done", 300, 50),
+	})
+	defer ts.Close()
+
+	ctx := tools.WithMaxSteps(anthropicToolCtx(), 1)
+	resp, err := runAnthropicAgentLoop(ctx, testAnthropicConfig(ts), nil, "test",
+		func(models.AgentEvent) {})
+
+	require.NoError(t, err)
+	// Only 1 API call made; turn 2+ never executed.
+	assert.Equal(t, int64(100), resp.InputTokens)
+	assert.Equal(t, int64(30), resp.OutputTokens)
+}

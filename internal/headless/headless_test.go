@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/suarezc/errata/internal/adapters"
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/headless"
 	"github.com/suarezc/errata/internal/models"
@@ -48,6 +50,54 @@ func (m *mockAdapter) RunAgent(
 }
 
 var _ models.ModelAdapter = (*mockAdapter)(nil)
+
+// dispatchingMockAdapter is a mock that writes files through the real
+// adapters.DispatchTool path, exercising the full chain:
+//   runner context (WorkDir+DirectWrites) → DispatchTool → WriteFileDirect
+//
+// This avoids coupling tests to internal implementation details.
+type dispatchingMockAdapter struct {
+	id       string
+	response models.ModelResponse
+	// toolCalls is a sequence of (toolName, args) to dispatch via DispatchTool.
+	toolCalls []mockToolCall
+}
+
+type mockToolCall struct {
+	name string
+	args map[string]string
+}
+
+func (m *dispatchingMockAdapter) ID() string { return m.id }
+
+func (m *dispatchingMockAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
+
+func (m *dispatchingMockAdapter) RunAgent(
+	ctx context.Context,
+	_ []models.ConversationTurn,
+	_ string,
+	_ func(models.AgentEvent),
+) (models.ModelResponse, error) {
+	var proposed []tools.FileWrite
+	for _, tc := range m.toolCalls {
+		result, ok := adapters.DispatchTool(ctx, tc.name, tc.args,
+			func(models.AgentEvent) {}, &proposed, nil)
+		if !ok {
+			return models.ModelResponse{Error: "unknown tool: " + tc.name}, nil
+		}
+		if len(result) > 0 && result[0] == '[' {
+			return models.ModelResponse{Error: result}, nil
+		}
+	}
+	resp := m.response
+	resp.ModelID = m.id
+	resp.ProposedWrites = proposed // carry any queued writes (TUI mode)
+	return resp, nil
+}
+
+var _ models.ModelAdapter = (*dispatchingMockAdapter)(nil)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -98,6 +148,12 @@ func TestRun_IndependentMode(t *testing.T) {
 	// Each adapter should be called once per task = 2 times total.
 	assert.Equal(t, 2, a1.calls)
 	assert.Equal(t, 2, a2.calls)
+
+	// Worktrees should be preserved under the output directory.
+	assert.DirExists(t, report.Setup.WorktreeBase)
+	for _, dir := range report.Setup.ModelDirs {
+		assert.DirExists(t, dir)
+	}
 }
 
 func TestRun_SequentialMode(t *testing.T) {
@@ -108,16 +164,11 @@ func TestRun_SequentialMode(t *testing.T) {
 	rec := testRecipe([]string{"write something", "check it"}, nil)
 	rec.Context.TaskMode = "sequential"
 
-	writePath := filepath.Join(dir, "output.txt")
-
 	a1 := &mockAdapter{
 		id: "model-a",
 		response: models.ModelResponse{
 			Text:      "wrote file",
 			LatencyMS: 100,
-			ProposedWrites: []tools.FileWrite{
-				{Path: writePath, Content: "hello from model-a"},
-			},
 		},
 	}
 	a2 := &mockAdapter{
@@ -133,13 +184,11 @@ func TestRun_SequentialMode(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "sequential", report.TaskMode)
-	// model-a should be selected as winner (it has writes, model-b doesn't; same score otherwise).
-	assert.Equal(t, "model-a", report.Tasks[0].SelectedModel)
+	require.Len(t, report.Tasks, 2)
 
-	// Verify the file was written to disk.
-	data, err := os.ReadFile(writePath)
-	require.NoError(t, err)
-	assert.Equal(t, "hello from model-a", string(data))
+	// Both adapters called twice (sequential carries history).
+	assert.Equal(t, 2, a1.calls)
+	assert.Equal(t, 2, a2.calls)
 }
 
 func TestRun_WithCriteria(t *testing.T) {
@@ -148,14 +197,15 @@ func TestRun_WithCriteria(t *testing.T) {
 
 	rec := testRecipe([]string{"do it"}, []string{"no_errors", "has_writes"})
 
-	a1 := &mockAdapter{
-		id: "model-a",
-		response: models.ModelResponse{
-			Text:           "done",
-			LatencyMS:      100,
-			ProposedWrites: []tools.FileWrite{{Path: "f.go", Content: "x"}},
+	// model-a writes a file through DispatchTool → diffWorktree picks it up → has_writes passes.
+	a1 := &dispatchingMockAdapter{
+		id:       "model-a",
+		response: models.ModelResponse{Text: "done", LatencyMS: 100},
+		toolCalls: []mockToolCall{
+			{name: tools.WriteToolName, args: map[string]string{"path": "f.go", "content": "package main"}},
 		},
 	}
+	// model-b produces no writes → has_writes fails.
 	a2 := &mockAdapter{
 		id:       "model-b",
 		response: models.ModelResponse{Text: "done but no writes", LatencyMS: 200},
@@ -208,71 +258,50 @@ func TestRun_AllModelsError(t *testing.T) {
 	assert.Equal(t, 0, report.Summary.PerModel["model-a"].TasksSucceeded)
 }
 
-func TestSelectWinner_ByCriteria(t *testing.T) {
-	// This tests the public behavior through the sequential mode path.
-	dir := t.TempDir()
+
+// ─── Run criterion integration test ──────────────────────────────────────────
+
+func TestRun_WithRunCriterion(t *testing.T) {
+	dir := setupGitDir(t)
 	t.Chdir(dir)
 	outDir := filepath.Join(t.TempDir(), "out")
 
-	rec := testRecipe([]string{"task"}, []string{"no_errors", "has_writes"})
-	rec.Context.TaskMode = "sequential"
+	// The run criterion checks for a file that only model-a will create via DispatchTool.
+	rec := testRecipe([]string{"create marker"}, []string{
+		"no_errors",
+		"run: test -f marker.txt",
+	})
 
-	// model-a: 2/2 criteria, slower
-	a1 := &mockAdapter{
-		id: "model-a",
-		response: models.ModelResponse{
-			Text:           "done",
-			LatencyMS:      500,
-			ProposedWrites: []tools.FileWrite{{Path: filepath.Join(dir, "f.go"), Content: "x"}},
+	// model-a writes marker.txt through DispatchTool → ends up in its worktree.
+	a1 := &dispatchingMockAdapter{
+		id:       "model-a",
+		response: models.ModelResponse{Text: "done", LatencyMS: 100},
+		toolCalls: []mockToolCall{
+			{name: tools.WriteToolName, args: map[string]string{"path": "marker.txt", "content": "present"}},
 		},
 	}
-	// model-b: 1/2 criteria (no writes), faster
+	// model-b does nothing → marker.txt absent in its worktree.
 	a2 := &mockAdapter{
 		id:       "model-b",
-		response: models.ModelResponse{Text: "done", LatencyMS: 100},
+		response: models.ModelResponse{Text: "done but no writes", LatencyMS: 200},
 	}
 
 	opts := testOpts(rec, []models.ModelAdapter{a1, a2}, outDir)
 	report, err := headless.Run(context.Background(), opts)
 	require.NoError(t, err)
 
-	// model-a should win because it passes more criteria despite being slower.
-	assert.Equal(t, "model-a", report.Tasks[0].SelectedModel)
-}
+	require.Len(t, report.Tasks, 1)
+	cr := report.Tasks[0].CriteriaResults
 
-func TestSelectWinner_ByCost(t *testing.T) {
-	// When criteria scores are tied, the cheaper model should win.
-	dir := t.TempDir()
-	t.Chdir(dir)
-	outDir := filepath.Join(t.TempDir(), "out")
+	// model-a: both no_errors and run: test -f marker.txt should pass.
+	require.Len(t, cr["model-a"], 2)
+	assert.True(t, cr["model-a"][0].Passed, "model-a: no_errors should pass")
+	assert.True(t, cr["model-a"][1].Passed, "model-a: run criterion should pass (marker.txt written)")
 
-	rec := testRecipe([]string{"task"}, []string{"no_errors"})
-	rec.Context.TaskMode = "sequential"
-
-	// Both pass 1/1 criteria. model-a is cheaper but slower.
-	a1 := &mockAdapter{
-		id: "model-a",
-		response: models.ModelResponse{
-			Text:      "done",
-			LatencyMS: 500,
-			CostUSD:   0.001,
-		},
-	}
-	a2 := &mockAdapter{
-		id: "model-b",
-		response: models.ModelResponse{
-			Text:      "done",
-			LatencyMS: 100,
-			CostUSD:   0.010,
-		},
-	}
-
-	opts := testOpts(rec, []models.ModelAdapter{a1, a2}, outDir)
-	report, err := headless.Run(context.Background(), opts)
-	require.NoError(t, err)
-
-	// model-a wins: same criteria score, lower cost (despite higher latency).
-	assert.Equal(t, "model-a", report.Tasks[0].SelectedModel)
+	// model-b: no_errors passes, but run: test -f marker.txt fails.
+	require.Len(t, cr["model-b"], 2)
+	assert.True(t, cr["model-b"][0].Passed, "model-b: no_errors should pass")
+	assert.False(t, cr["model-b"][1].Passed, "model-b: run criterion should fail (no marker.txt)")
 }
 
 // ─── Report round-trip test ──────────────────────────────────────────────────
@@ -291,13 +320,19 @@ func TestRunReport_RoundTrip(t *testing.T) {
 	report, err := headless.Run(context.Background(), opts)
 	require.NoError(t, err)
 
-	// Find the saved file.
+	// Find the saved report file (skip the worktrees directory).
 	entries, err := os.ReadDir(outDir)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
+	var reportPath string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
+			reportPath = filepath.Join(outDir, e.Name())
+			break
+		}
+	}
+	require.NotEmpty(t, reportPath, "expected a .json report file in outDir")
 
-	path := filepath.Join(outDir, entries[0].Name())
-	loaded, err := headless.Load(path)
+	loaded, err := headless.Load(reportPath)
 	require.NoError(t, err)
 
 	assert.Equal(t, report.ID, loaded.ID)
@@ -306,6 +341,35 @@ func TestRunReport_RoundTrip(t *testing.T) {
 	require.Len(t, loaded.Tasks, 1)
 	assert.Equal(t, "task", loaded.Tasks[0].Prompt)
 	assert.Equal(t, 1, loaded.Summary.TotalTasks)
+}
+
+// ─── SetupInfo round-trip test ────────────────────────────────────────────────
+
+func TestRunReport_SetupInfo_RoundTrip(t *testing.T) {
+	report := &headless.RunReport{
+		ID:       "rpt_test",
+		TaskMode: "independent",
+		Recipe:   headless.RecipeSnapshot{Name: "test", Tasks: []string{"t"}},
+		Tasks:    []headless.TaskResult{{Index: 0, Prompt: "t"}},
+		Summary:  headless.Summary{TotalTasks: 1},
+		Setup: headless.SetupInfo{
+			WorktreeBase: "/tmp/errata-workdirs-123",
+			SetupMS:      42,
+			GitMode:      true,
+			ModelDirs:    map[string]string{"model-a": "/tmp/errata-workdirs-123/errata-model-a"},
+		},
+	}
+
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+
+	var loaded headless.RunReport
+	require.NoError(t, json.Unmarshal(data, &loaded))
+
+	assert.Equal(t, "/tmp/errata-workdirs-123", loaded.Setup.WorktreeBase)
+	assert.Equal(t, int64(42), loaded.Setup.SetupMS)
+	assert.True(t, loaded.Setup.GitMode)
+	assert.Equal(t, "/tmp/errata-workdirs-123/errata-model-a", loaded.Setup.ModelDirs["model-a"])
 }
 
 // ─── recipeName ──────────────────────────────────────────────────────────────
@@ -390,4 +454,116 @@ func TestRunReport_JSONOutput(t *testing.T) {
 	var parsed headless.RunReport
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &parsed))
 	assert.Equal(t, "Test Recipe", parsed.Recipe.Name)
+}
+
+// ─── setupGitDir helper ─────────────────────────────────────────────────────
+
+// setupGitDir creates a temp dir with a git repo containing hello.txt.
+func setupGitDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test.com"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		require.NoError(t, cmd.Run())
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello"), 0o644))
+	cmd := exec.Command("git", "add", "-A")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "baseline")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+	return dir
+}
+
+// ─── createModelWorkDirs tests ──────────────────────────────────────────────
+
+func TestCreateModelWorkDirs(t *testing.T) {
+	// Set up a minimal git repo.
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test.com"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		require.NoError(t, cmd.Run())
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello"), 0o644))
+	cmd := exec.Command("git", "add", "-A")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "init")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+
+	adapters := []models.ModelAdapter{
+		&mockAdapter{id: "model-a"},
+		&mockAdapter{id: "provider/model-b"},
+	}
+
+	baseDir := filepath.Join(t.TempDir(), "worktrees")
+	dirs, base, cleanup, err := headless.CreateModelWorkDirs(dir, baseDir, adapters)
+	require.NoError(t, err)
+	defer cleanup()
+
+	require.Len(t, dirs, 2)
+	assert.NotEmpty(t, base, "base directory should be non-empty")
+
+	// Each worktree should have the file from the original repo and be under base.
+	for _, d := range dirs {
+		got, readErr := os.ReadFile(filepath.Join(d, "hello.txt"))
+		require.NoError(t, readErr)
+		assert.Equal(t, "hello", string(got))
+
+		rel, relErr := filepath.Rel(base, d)
+		require.NoError(t, relErr)
+		assert.False(t, filepath.IsAbs(rel), "model dir should be under base")
+	}
+
+	// Sanitized: provider/model-b should not have "/" in dir name.
+	dirB := dirs["provider/model-b"]
+	assert.NotContains(t, filepath.Base(dirB), "/")
+}
+
+// ─── diffWorktree tests ─────────────────────────────────────────────────────
+
+func TestDiffWorktree_NewFile(t *testing.T) {
+	dir := setupGitDir(t)
+
+	// Add a new file.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new content"), 0o644))
+
+	writes, err := headless.DiffWorktree(dir)
+	require.NoError(t, err)
+	require.Len(t, writes, 1)
+	assert.Equal(t, "new.txt", writes[0].Path)
+	assert.Equal(t, "new content", writes[0].Content)
+}
+
+func TestDiffWorktree_ModifiedFile(t *testing.T) {
+	dir := setupGitDir(t)
+
+	// Modify existing file.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("modified"), 0o644))
+
+	writes, err := headless.DiffWorktree(dir)
+	require.NoError(t, err)
+	require.Len(t, writes, 1)
+	assert.Equal(t, "hello.txt", writes[0].Path)
+	assert.Equal(t, "modified", writes[0].Content)
+}
+
+func TestDiffWorktree_NoChanges(t *testing.T) {
+	dir := setupGitDir(t)
+
+	writes, err := headless.DiffWorktree(dir)
+	require.NoError(t, err)
+	assert.Empty(t, writes)
 }
