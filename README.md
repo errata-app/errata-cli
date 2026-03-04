@@ -5,6 +5,14 @@ Compare AI models on real tasks. Same prompt, same tools, different models.
 ## Install
 
 ```bash
+git clone https://github.com/suarezc/Errata.git
+cd Errata
+go build -o errata ./cmd/errata
+```
+
+or
+
+```bash
 go install github.com/suarezc/errata/cmd/errata@latest
 ```
 
