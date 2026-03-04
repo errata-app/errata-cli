@@ -7,6 +7,7 @@ version: 1
 - openai/o3
 - openai/gpt-4.1
 - anthropic/claude-haiku-4.5
+- meta-llama/llama-3.1-8b-instruct
 
 ## System Prompt
 You are a Go developer debugging a multi-file in-memory document store.
@@ -23,7 +24,7 @@ Start by running the tests:
 
 cd go_gauntlet_test/challenge11_docstore && go test -v ./...
 
-Read the failing test cases, trace the logic through the source files, and fix all bugs to make every test pass. Only modify implementation files — never touch the test file.
+Read the failing test cases, trace the logic through the source files, and fix all bugs to make every test pass. Only modify implementation files — never touch the test file. Do not ask for permission to use tools or wait for user input. You are operating autonomously.
 
 ## Tools
 - read_file
