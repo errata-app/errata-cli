@@ -186,6 +186,30 @@ func TestCompute_ContentPrefixCharacters(t *testing.T) {
 	}
 }
 
+func TestComputeDeleted(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "victim.txt")
+	require.NoError(t, os.WriteFile(file, []byte("line1\nline2\nline3\n"), 0o644))
+
+	fd := diff.ComputeDeleted(file)
+	assert.True(t, fd.IsDeleted)
+	assert.False(t, fd.IsNew)
+	assert.Equal(t, 3, fd.Removes)
+	assert.Equal(t, 0, fd.Adds)
+	require.Len(t, fd.Lines, 3)
+	for _, line := range fd.Lines {
+		assert.Equal(t, diff.Remove, line.Kind)
+		assert.True(t, strings.HasPrefix(line.Content, "-"), "expected '-' prefix, got %q", line.Content)
+	}
+}
+
+func TestComputeDeleted_NonexistentFile(t *testing.T) {
+	fd := diff.ComputeDeleted("/no/such/file.txt")
+	assert.True(t, fd.IsDeleted)
+	assert.Equal(t, 0, fd.Removes)
+	assert.Empty(t, fd.Lines)
+}
+
 func TestCompute_WordSpans_SpanTextReconstructsLine(t *testing.T) {
 	// Concatenating span texts should equal the line content minus the leading prefix char.
 	dir := t.TempDir()

@@ -549,6 +549,39 @@ func TestSave_MkdirAllError(t *testing.T) {
 	}
 }
 
+func TestBuildReport_DeleteField(t *testing.T) {
+	responses := []models.ModelResponse{
+		{
+			ModelID:      "model-a",
+			Text:         "deleted a file",
+			LatencyMS:    100,
+			InputTokens:  50,
+			OutputTokens: 25,
+			ProposedWrites: []tools.FileWrite{
+				{Path: "kept.go", Content: "package kept"},
+				{Path: "removed.go", Delete: true},
+			},
+		},
+	}
+	report := BuildReport("sess", nil, "hello", responses, nil, nil)
+	if len(report.Models) != 1 {
+		t.Fatalf("Models len = %d, want 1", len(report.Models))
+	}
+	writes := report.Models[0].ProposedWrites
+	if len(writes) != 2 {
+		t.Fatalf("ProposedWrites len = %d, want 2", len(writes))
+	}
+	if writes[0].Delete {
+		t.Error("writes[0] should not be Delete")
+	}
+	if !writes[1].Delete {
+		t.Error("writes[1] should be Delete")
+	}
+	if writes[1].Path != "removed.go" {
+		t.Errorf("writes[1].Path = %q", writes[1].Path)
+	}
+}
+
 func TestLoad_InvalidJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {

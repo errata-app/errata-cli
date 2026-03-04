@@ -65,6 +65,7 @@ const bashOutputLimit = 10_000
 type FileWrite struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	Delete  bool   `json:"delete,omitempty"`
 }
 
 // ToolParam is a provider-agnostic tool property description.
