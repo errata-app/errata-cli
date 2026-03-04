@@ -1240,3 +1240,92 @@ func TestRewind_WipeClearsStack(t *testing.T) {
 	a = appFrom(t, result)
 	assert.False(t, a.store.CanRewind())
 }
+
+func TestLastRunInView_FlushedOnNewRun(t *testing.T) {
+	ads := []models.ModelAdapter{&scenarioAdapter{id: "m1"}}
+	a := newAppForTest(t, ads)
+	setupRunState(&a,"first prompt", []string{"m1"})
+
+	// Complete the first run.
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	assert.True(t, a.lastRunInView)
+
+	// Launch a new run — should flush previous run to scrollback.
+	result, _ = a.launchRun("second prompt")
+	a = appFrom(t, result)
+	assert.False(t, a.lastRunInView, "launchRun should flush last run to scrollback")
+	assert.Equal(t, modeRunning, a.mode)
+}
+
+func TestLastRunInView_ClearedBySlashClear(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a,"prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	assert.True(t, a.lastRunInView)
+
+	result, cmd := a.handleClearCmd()
+	a = appFrom(t, result)
+	assert.False(t, a.lastRunInView, "/clear should reset lastRunInView")
+	assert.NotNil(t, cmd, "/clear should return tea.ClearScreen cmd")
+}
+
+func TestLastRunInView_ClearedBySlashWipe(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	setupRunState(&a,"prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	assert.True(t, a.lastRunInView)
+
+	result, cmd := a.handleWipeCmd()
+	a = appFrom(t, result)
+	assert.False(t, a.lastRunInView, "/wipe should reset lastRunInView")
+	assert.NotNil(t, cmd, "/wipe should return tea.ClearScreen cmd")
+}
+
+func TestLastRunInView_SetOnRunComplete(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	assert.False(t, a.lastRunInView, "should start false")
+
+	setupRunState(&a,"prompt", []string{"m1"})
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	assert.True(t, a.lastRunInView, "runCompleteMsg should set lastRunInView=true")
+}
+
+func TestLastRunInView_FlushedByWithMessage(t *testing.T) {
+	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
+	a.width = 80
+	setupRunState(&a,"prompt", []string{"m1"})
+
+	msg := runCompleteMsg{responses: []models.ModelResponse{
+		{ModelID: "m1", Text: "answer", LatencyMS: 100},
+	}}
+	result, _ := a.Update(msg)
+	a = appFrom(t, result)
+	a.mode = modeIdle
+	assert.True(t, a.lastRunInView)
+
+	// withMessage should flush the last run first.
+	flushed, cmd := a.withMessage("some message")
+	assert.False(t, flushed.lastRunInView, "withMessage should flush last run")
+	assert.NotNil(t, cmd, "should return a cmd")
+}

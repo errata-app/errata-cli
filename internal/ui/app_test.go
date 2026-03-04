@@ -250,7 +250,7 @@ func TestHandleStatsCmd_NoData(t *testing.T) {
 	app := result.(App)
 	require.NotEmpty(t, app.feed, "expected message in feed")
 	msg := app.feed[len(app.feed)-1].text
-	assert.Contains(t, msg, "Stats")
+	assert.Contains(t, msg, "Stats (session)")
 }
 
 func TestHandleStatsCmd_WithSessionCost(t *testing.T) {

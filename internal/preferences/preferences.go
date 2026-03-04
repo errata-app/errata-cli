@@ -37,6 +37,7 @@ type Entry struct {
 // A nil filter matches all entries.
 type StatsFilter struct {
 	ConfigHash string // if non-empty, only include entries with this config hash
+	SessionID  string // if non-empty, only include entries with this session ID
 }
 
 // Record appends one preference entry to the JSONL log at path.
@@ -228,6 +229,9 @@ func matchesFilter(e Entry, f *StatsFilter) bool {
 		return true
 	}
 	if f.ConfigHash != "" && e.ConfigHash != f.ConfigHash {
+		return false
+	}
+	if f.SessionID != "" && e.SessionID != f.SessionID {
 		return false
 	}
 	return true

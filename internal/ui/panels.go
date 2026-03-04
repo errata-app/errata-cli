@@ -34,7 +34,6 @@ type panelState struct {
 	histTokens      int64 // estimated history tokens at run start (for fill % display)
 
 	toolUseCount int       // count of tool-use events (reading, writing, bash)
-	expanded     bool      // when done: true = show events, false = collapsed summary
 	startedAt    time.Time // creation time for live elapsed display
 }
 
@@ -138,7 +137,8 @@ func renderInlineEvent(e models.AgentEvent, termWidth int) string {
 	case models.EventError:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).Render("error   ") + truncateLine(e.Data, max(termWidth-13, 20))
 	case models.EventText:
-		return dimStyle.Render(truncateLine(e.Data, max(termWidth-5, 20)))
+		textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#BBBBBB"))
+		return textStyle.Render(truncateLine(e.Data, max(termWidth-5, 20)))
 	default:
 		return dimStyle.Render(truncateLine(e.Data, max(termWidth-5, 20)))
 	}
@@ -174,8 +174,8 @@ func renderInlinePanel(p *panelState, termWidth int) string {
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#AF0000")).
 				Render("Error: " + short))
 			sb.WriteByte('\n')
-		} else if p.expanded {
-			// Expanded view: full event list + summary
+		} else {
+			// Event list + summary
 			for i, e := range p.events {
 				if i == 0 {
 					sb.WriteString(connector)
@@ -191,14 +191,6 @@ func renderInlinePanel(p *panelState, termWidth int) string {
 				sb.WriteString(cont)
 			}
 			sb.WriteString(dimStyle.Render(formatDoneSummary(p)))
-			sb.WriteByte('\n')
-		} else {
-			// Collapsed view (default): summary line only
-			sb.WriteString(connector)
-			sb.WriteString(dimStyle.Render(formatDoneSummary(p)))
-			sb.WriteByte('\n')
-			sb.WriteString(cont)
-			sb.WriteString(dimStyle.Render("(ctrl+o to expand)"))
 			sb.WriteByte('\n')
 		}
 	} else {

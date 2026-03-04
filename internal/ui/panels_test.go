@@ -146,7 +146,7 @@ func TestRenderInlinePanel_RunningShowsLastEvents(t *testing.T) {
 	}
 }
 
-func TestRenderInlinePanel_DoneCollapsedShowsSummary(t *testing.T) {
+func TestRenderInlinePanel_DoneShowsSummary(t *testing.T) {
 	p := newPanelState("gpt-4o", 1)
 	p.done = true
 	p.toolUseCount = 3
@@ -155,36 +155,29 @@ func TestRenderInlinePanel_DoneCollapsedShowsSummary(t *testing.T) {
 	p.costUSD = 0.0042
 	out := renderInlinePanel(p, 80)
 	if !strings.Contains(out, "Done") {
-		t.Errorf("expected 'Done' in collapsed output, got:\n%s", out)
+		t.Errorf("expected 'Done' in output, got:\n%s", out)
 	}
 	if !strings.Contains(out, "3 tool uses") {
 		t.Errorf("expected tool count in summary, got:\n%s", out)
 	}
-	if !strings.Contains(out, "ctrl+o to expand") {
-		t.Errorf("expected expand hint in collapsed view, got:\n%s", out)
-	}
 }
 
-func TestRenderInlinePanel_DoneExpandedShowsEvents(t *testing.T) {
+func TestRenderInlinePanel_DoneShowsEvents(t *testing.T) {
 	p := newPanelState("gpt-4o", 1)
 	p.addEvent(models.AgentEvent{Type: models.EventReading, Data: "foo.go"})
 	p.addEvent(models.AgentEvent{Type: models.EventWriting, Data: "bar.go"})
 	p.done = true
-	p.expanded = true
 	p.toolUseCount = 2
 	p.latencyMS = 500
 	out := renderInlinePanel(p, 80)
 	if !strings.Contains(out, "foo.go") {
-		t.Errorf("expanded view should show events, got:\n%s", out)
+		t.Errorf("done view should show events, got:\n%s", out)
 	}
 	if !strings.Contains(out, "bar.go") {
-		t.Errorf("expanded view should show all events, got:\n%s", out)
+		t.Errorf("done view should show all events, got:\n%s", out)
 	}
 	if !strings.Contains(out, "Done") {
-		t.Errorf("expanded view should still show summary, got:\n%s", out)
-	}
-	if strings.Contains(out, "ctrl+o to expand") {
-		t.Errorf("expanded view should not show expand hint, got:\n%s", out)
+		t.Errorf("done view should still show summary, got:\n%s", out)
 	}
 }
 

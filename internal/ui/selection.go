@@ -27,8 +27,6 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 		switch msg.Code {
 		case 'd', 'c':
 			return a, tea.Quit
-		case 'o':
-			return a.toggleExpandLastRun()
 		}
 	}
 
@@ -86,8 +84,6 @@ func (a App) handleSelectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 		switch msg.Code {
 		case 'd', 'c':
 			return a, tea.Quit
-		case 'o':
-			return a.toggleExpandLastRun()
 		}
 	}
 
