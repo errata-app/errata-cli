@@ -305,6 +305,75 @@ func TestSearchCode_WithContextLines(t *testing.T) {
 	assert.Contains(t, out, "after")
 }
 
+func TestSearchCode_SkipsBinaryFiles(t *testing.T) {
+	dir := t.TempDir()
+	// File with a null byte in the first 512 bytes is treated as binary.
+	content := []byte("needle\x00 in binary\n")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bin.dat"), content, 0o644))
+	t.Chdir(dir)
+
+	out := tools.ExecuteSearchCode(context.Background(), "needle", ".", "", 0)
+	assert.Equal(t, "(no matches)", out)
+}
+
+func TestSearchCode_SkipsGitDir(t *testing.T) {
+	dir := t.TempDir()
+	gitDir := filepath.Join(dir, ".git")
+	require.NoError(t, os.MkdirAll(gitDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("findme\n"), 0o644))
+	// Also place a matching file outside .git to ensure walk continues.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "real.txt"), []byte("findme\n"), 0o644))
+	t.Chdir(dir)
+
+	out := tools.ExecuteSearchCode(context.Background(), "findme", ".", "", 0)
+	assert.Contains(t, out, "real.txt")
+	assert.NotContains(t, out, ".git")
+}
+
+func TestSearchCode_InvalidRegex(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte("text\n"), 0o644))
+	t.Chdir(dir)
+
+	out := tools.ExecuteSearchCode(context.Background(), "[invalid", ".", "", 0)
+	assert.Contains(t, out, "[error:")
+	assert.Contains(t, out, "invalid regex")
+}
+
+func TestSearchCode_ContextGroupSeparator(t *testing.T) {
+	dir := t.TempDir()
+	// Two matches far apart should produce a "--" separator between groups.
+	var sb strings.Builder
+	sb.WriteString("matchA\n")        // line 1
+	for range 10 {
+		sb.WriteString("filler\n")    // lines 2-11
+	}
+	sb.WriteString("matchB\n")        // line 12
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sep.txt"), []byte(sb.String()), 0o644))
+	t.Chdir(dir)
+
+	out := tools.ExecuteSearchCode(context.Background(), "match", ".", "", 1)
+	assert.Contains(t, out, "--", "expected group separator between distant matches")
+	assert.Contains(t, out, "matchA")
+	assert.Contains(t, out, "matchB")
+}
+
+func TestSearchCode_ContextMergesOverlap(t *testing.T) {
+	dir := t.TempDir()
+	// Two matches close together — context windows overlap, no "--" separator.
+	content := "before\nmatchA\nmiddle\nmatchB\nafter\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "merge.txt"), []byte(content), 0o644))
+	t.Chdir(dir)
+
+	out := tools.ExecuteSearchCode(context.Background(), "match", ".", "", 1)
+	assert.NotContains(t, out, "--", "overlapping context groups should merge without separator")
+	assert.Contains(t, out, "before")
+	assert.Contains(t, out, "matchA")
+	assert.Contains(t, out, "middle")
+	assert.Contains(t, out, "matchB")
+	assert.Contains(t, out, "after")
+}
+
 // --- ExecuteSearchFiles: ** glob patterns ---
 
 func TestSearchFiles_DoubleStarRootMatch(t *testing.T) {

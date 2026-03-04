@@ -680,3 +680,96 @@ func TestGitAvailable(t *testing.T) {
 	// This test just verifies the function runs without panicking.
 	_ = headless.GitAvailable()
 }
+
+// ─── copyDir tests ──────────────────────────────────────────────────────────
+
+func TestCopyDir(t *testing.T) {
+	src := t.TempDir()
+
+	// Create files in a subdirectory.
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "sub"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(src, "a.txt"), []byte("alpha"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(src, "sub", "b.txt"), []byte("beta"), 0o600))
+
+	// Create a .git/ directory that should be skipped.
+	require.NoError(t, os.MkdirAll(filepath.Join(src, ".git", "objects"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(src, ".git", "HEAD"), []byte("ref: refs/heads/main"), 0o600))
+
+	// Create a symlink.
+	require.NoError(t, os.Symlink("a.txt", filepath.Join(src, "link.txt")))
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, headless.CopyDir(src, dst))
+
+	// Regular files should be copied with correct content.
+	got, err := os.ReadFile(filepath.Join(dst, "a.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "alpha", string(got))
+
+	got, err = os.ReadFile(filepath.Join(dst, "sub", "b.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "beta", string(got))
+
+	// File permissions should be preserved.
+	info, err := os.Lstat(filepath.Join(dst, "sub", "b.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	// .git/ should NOT be copied.
+	assert.NoDirExists(t, filepath.Join(dst, ".git"))
+
+	// Symlink should be preserved as a symlink.
+	linkTarget, err := os.Readlink(filepath.Join(dst, "link.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "a.txt", linkTarget)
+}
+
+func TestCopyDir_EmptyDir(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "empty-copy")
+
+	require.NoError(t, headless.CopyDir(src, dst))
+	assert.DirExists(t, dst)
+}
+
+// ─── Snapshot-mode integration test ─────────────────────────────────────────
+
+func TestRun_SnapshotMode(t *testing.T) {
+	// Create a project directory (non-git) with an initial file.
+	projectDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "existing.txt"), []byte("original"), 0o644))
+	t.Chdir(projectDir)
+
+	// Hide git so we fall through to snapshot mode.
+	t.Setenv("PATH", t.TempDir())
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	rec := testRecipe([]string{"modify project"}, nil)
+
+	// Use a dispatching mock that writes a new file and deletes an existing one
+	// via the real DispatchTool path (direct writes in snapshot mode).
+	a1 := &dispatchingMockAdapter{
+		id:       "model-a",
+		response: models.ModelResponse{Text: "done", LatencyMS: 100},
+		toolCalls: []mockToolCall{
+			{name: tools.WriteToolName, args: map[string]string{"path": "added.txt", "content": "new file"}},
+		},
+	}
+
+	opts := testOpts(rec, []models.ModelAdapter{a1}, outDir)
+	report, err := headless.Run(context.Background(), opts)
+	require.NoError(t, err)
+
+	require.Len(t, report.Tasks, 1)
+	writes := report.Tasks[0].Report.Models[0].ProposedWrites
+
+	// Should detect the added file.
+	var foundAdd bool
+	for _, w := range writes {
+		if w.Path == "added.txt" {
+			foundAdd = true
+			assert.Equal(t, "new file", w.Content)
+		}
+	}
+	assert.True(t, foundAdd, "expected added.txt in ProposedWrites")
+}
