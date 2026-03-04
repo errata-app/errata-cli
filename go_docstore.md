@@ -1,10 +1,12 @@
 # DocStore Bug Fix Challenge
+version: 1
 
 ## Models
 - anthropic/claude-sonnet-4-6
 - google/gemini-2.5-pro
 - openai/o3
 - openai/gpt-4.1
+- anthropic/claude-haiku-4.5
 
 ## System Prompt
 You are a Go developer debugging a multi-file in-memory document store.
@@ -35,6 +37,11 @@ Read the failing test cases, trace the logic through the source files, and fix a
 ## Constraints
 max_steps: 50
 
+## Tasks
+- The Go project at go_gauntlet_test/challenge11_docstore/ has failing tests. Run `cd go_gauntlet_test/challenge11_docstore && go test -v ./...` to see the failures. Read all source files, trace the bugs across files, and fix them so every test passes. Do not modify the test file.
+
 ## Success Criteria
 - no_errors
 - files_written >= 2
+- tool_used: edit_file
+- run: cd go_gauntlet_test/challenge11_docstore && go test -v ./...
