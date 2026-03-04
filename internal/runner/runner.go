@@ -131,6 +131,9 @@ func RunAll(
 				if resp.Error == "" {
 					resp.Error = err.Error()
 				}
+				if IsContextOverflowError(resp.Error) {
+					resp.StopReason = models.StopReasonContextOverflow
+				}
 				if !resp.Interrupted {
 					filtered(models.AgentEvent{Type: models.EventError, Data: err.Error()})
 				}

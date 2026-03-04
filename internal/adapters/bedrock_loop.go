@@ -87,7 +87,7 @@ func runBedrockAgentLoop(
 	for {
 		step++
 		if maxSteps > 0 && step > maxSteps {
-			break
+			return BuildMaxStepsResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls), nil
 		}
 		input := &bedrockruntime.ConverseInput{
 			ModelId:    aws.String(cfg.bareModelID),
@@ -107,7 +107,11 @@ func runBedrockAgentLoop(
 		resp, err := cfg.client.Converse(ctx, input)
 		if err != nil {
 			if ctx.Err() != nil {
-				return BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err), err
+				r := BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err)
+				if ctx.Err() == context.DeadlineExceeded {
+					r.StopReason = models.StopReasonTimeout
+				}
+				return r, err
 			}
 			return BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err), err
 		}

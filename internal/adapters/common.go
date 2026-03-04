@@ -250,6 +250,7 @@ func BuildErrorResponse(modelID, qualifiedID string, start time.Time, totalInput
 		OutputTokens: totalOutput,
 		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, totalOutput),
 		Error:        err.Error(),
+		StopReason:   models.StopReasonError,
 	}
 }
 
@@ -269,6 +270,7 @@ func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
 		ToolCalls:      toolCalls,
 		Error:          err.Error(),
 		Interrupted:    true,
+		StopReason:     models.StopReasonCancelled,
 	}
 }
 
@@ -286,5 +288,15 @@ func BuildSuccessResponse(modelID, qualifiedID string, textParts []string, start
 		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, totalOutput),
 		ProposedWrites: proposed,
 		ToolCalls:      toolCalls,
+		StopReason:     models.StopReasonComplete,
 	}
+}
+
+// BuildMaxStepsResponse constructs a ModelResponse when the agentic loop hit the max_steps limit.
+func BuildMaxStepsResponse(modelID, qualifiedID string, textParts []string, start time.Time,
+	totalInput, totalOutput int64,
+	proposed []tools.FileWrite, toolCalls map[string]int) models.ModelResponse {
+	resp := BuildSuccessResponse(modelID, qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+	resp.StopReason = models.StopReasonMaxSteps
+	return resp
 }

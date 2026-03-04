@@ -92,8 +92,12 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		recipeName(rec), len(rec.Tasks), len(opts.Adapters), taskMode)
 
 	// Create per-model working directories for filesystem isolation.
+	// Generate the report ID early so we can use it for the worktree directory.
+	reportID := newReportID()
+	workBase := filepath.Join(opts.OutputDir, reportID+"_worktrees")
+
 	setupStart := time.Now()
-	workDirs, workBase, cleanup, err := createModelWorkDirs(cwd, opts.Adapters)
+	workDirs, _, cleanupFn, err := createModelWorkDirs(cwd, workBase, opts.Adapters)
 	if err != nil {
 		return nil, fmt.Errorf("create work dirs (is there enough disk space?): %w", err)
 	}
@@ -112,10 +116,8 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		}
 	}
 
-	defer func() {
-		cleanup()
-		fmt.Fprintf(w, "errata: worktrees cleaned up\n")
-	}()
+	// cleanupFn is kept for error-path cleanup only; worktrees are preserved for inspection.
+	_ = cleanupFn
 
 	histories := make(map[string][]models.ConversationTurn)
 	var taskResults []TaskResult
@@ -165,11 +167,9 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			}
 			// Print partial results for the interrupted task.
 			for _, resp := range responses {
-				status := "done"
-				if resp.Interrupted {
-					status = "interrupted"
-				} else if resp.Error != "" {
-					status = "error"
+				status := string(resp.StopReason)
+				if status == "" {
+					status = "done"
 				}
 				fmt.Fprintf(w, "  %-22s %-11s  %5dms  $%.4f\n",
 					resp.ModelID, status, resp.LatencyMS, resp.CostUSD)
@@ -226,7 +226,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	summary := buildSummary(taskResults, parsedCriteria, totalCost)
 
 	headlessReport := &RunReport{
-		ID:        newReportID(),
+		ID:        reportID,
 		Timestamp: time.Now().UTC(),
 		SessionID: opts.SessionID,
 		Recipe:    snapshotRecipe(rec),
@@ -249,6 +249,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		fmt.Fprintf(w, "\nReport saved to %s\n", path)
 	}
 
+	fmt.Fprintf(w, "Worktrees preserved at %s\n", workBase)
 	fmt.Fprintf(w, "Summary: %d tasks, $%.4f total cost\n", len(rec.Tasks), totalCost)
 
 	if opts.JSON {
@@ -345,12 +346,22 @@ func sanitizeModelID(id string) string {
 // createModelWorkDirs creates an isolated working directory for each adapter.
 // In a git repo, it creates lightweight worktrees (git worktree add --detach).
 // In a non-git directory, it copies the project and creates a git baseline.
-// Returns the work-dir map (adapter ID → abs path), the temp base directory,
+// baseDir specifies where to create the worktrees. If empty, a temp directory is used.
+// Returns the work-dir map (adapter ID → abs path), the base directory,
 // and a cleanup function.
-func createModelWorkDirs(projectDir string, adpts []models.ModelAdapter) (dirs map[string]string, base string, cleanup func(), err error) {
-	tmpBase, mkErr := os.MkdirTemp("", "errata-workdirs-*")
-	if mkErr != nil {
-		return nil, "", nil, fmt.Errorf("create temp dir: %w", mkErr)
+func createModelWorkDirs(projectDir, baseDir string, adpts []models.ModelAdapter) (dirs map[string]string, base string, cleanup func(), err error) {
+	var tmpBase string
+	if baseDir != "" {
+		if mkErr := os.MkdirAll(baseDir, 0o750); mkErr != nil {
+			return nil, "", nil, fmt.Errorf("create base dir: %w", mkErr)
+		}
+		tmpBase = baseDir
+	} else {
+		var mkErr error
+		tmpBase, mkErr = os.MkdirTemp("", "errata-workdirs-*")
+		if mkErr != nil {
+			return nil, "", nil, fmt.Errorf("create temp dir: %w", mkErr)
+		}
 	}
 
 	dirMap := make(map[string]string, len(adpts))
@@ -536,9 +547,9 @@ func recipeName(rec *recipe.Recipe) string {
 }
 
 func printModelResult(w io.Writer, resp models.ModelResponse, cr []criteria.Result, totalCriteria int) {
-	status := "done"
-	if resp.Error != "" {
-		status = "error"
+	status := string(resp.StopReason)
+	if status == "" {
+		status = "done"
 	}
 
 	if totalCriteria > 0 {

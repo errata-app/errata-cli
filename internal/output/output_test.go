@@ -90,6 +90,7 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 				InputTokens:         1000,
 				OutputTokens:        500,
 				CostUSD:             0.0042,
+				StopReason:          "complete",
 				ProposedWrites: []WriteEntry{
 					{Path: "main.go", Content: "package main\n"},
 				},
@@ -106,6 +107,7 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 				OutputTokens: 100,
 				CostUSD:      0.001,
 				Error:        "context limit exceeded",
+				StopReason:   "error",
 				Events:       []EventEntry{},
 			},
 		},
@@ -208,6 +210,14 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 	m1 := loaded.Models[1]
 	if m1.Error != "context limit exceeded" {
 		t.Errorf("Models[1].Error = %q", m1.Error)
+	}
+
+	// StopReason round-trip.
+	if m0.StopReason != "complete" {
+		t.Errorf("Models[0].StopReason = %q, want %q", m0.StopReason, "complete")
+	}
+	if m1.StopReason != "error" {
+		t.Errorf("Models[1].StopReason = %q, want %q", m1.StopReason, "error")
 	}
 
 	// Aggregate.

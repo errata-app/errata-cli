@@ -148,6 +148,12 @@ func TestRun_IndependentMode(t *testing.T) {
 	// Each adapter should be called once per task = 2 times total.
 	assert.Equal(t, 2, a1.calls)
 	assert.Equal(t, 2, a2.calls)
+
+	// Worktrees should be preserved under the output directory.
+	assert.DirExists(t, report.Setup.WorktreeBase)
+	for _, dir := range report.Setup.ModelDirs {
+		assert.DirExists(t, dir)
+	}
 }
 
 func TestRun_SequentialMode(t *testing.T) {
@@ -314,13 +320,19 @@ func TestRunReport_RoundTrip(t *testing.T) {
 	report, err := headless.Run(context.Background(), opts)
 	require.NoError(t, err)
 
-	// Find the saved file.
+	// Find the saved report file (skip the worktrees directory).
 	entries, err := os.ReadDir(outDir)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
+	var reportPath string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
+			reportPath = filepath.Join(outDir, e.Name())
+			break
+		}
+	}
+	require.NotEmpty(t, reportPath, "expected a .json report file in outDir")
 
-	path := filepath.Join(outDir, entries[0].Name())
-	loaded, err := headless.Load(path)
+	loaded, err := headless.Load(reportPath)
 	require.NoError(t, err)
 
 	assert.Equal(t, report.ID, loaded.ID)
@@ -496,7 +508,8 @@ func TestCreateModelWorkDirs(t *testing.T) {
 		&mockAdapter{id: "provider/model-b"},
 	}
 
-	dirs, base, cleanup, err := headless.CreateModelWorkDirs(dir, adapters)
+	baseDir := filepath.Join(t.TempDir(), "worktrees")
+	dirs, base, cleanup, err := headless.CreateModelWorkDirs(dir, baseDir, adapters)
 	require.NoError(t, err)
 	defer cleanup()
 

@@ -557,6 +557,31 @@ func TestDispatchTool_UnknownToolDoesNotTrack(t *testing.T) {
 	assert.Empty(t, tc, "unknown tools should not be tracked")
 }
 
+// ─── StopReason ─────────────────────────────────────────────────────────────
+
+func TestBuildSuccessResponse_SetsStopReasonComplete(t *testing.T) {
+	resp := BuildSuccessResponse("m", "m", []string{"hi"}, time.Now(), 100, 50, nil, nil)
+	assert.Equal(t, models.StopReasonComplete, resp.StopReason)
+}
+
+func TestBuildErrorResponse_SetsStopReasonError(t *testing.T) {
+	resp := BuildErrorResponse("m", "m", time.Now(), 0, 0, fmt.Errorf("boom"))
+	assert.Equal(t, models.StopReasonError, resp.StopReason)
+}
+
+func TestBuildInterruptedResponse_SetsStopReasonCancelled(t *testing.T) {
+	resp := BuildInterruptedResponse("m", "m", nil, time.Now(), 0, 0, nil, nil, fmt.Errorf("cancelled"))
+	assert.Equal(t, models.StopReasonCancelled, resp.StopReason)
+}
+
+func TestBuildMaxStepsResponse_SetsStopReasonMaxSteps(t *testing.T) {
+	resp := BuildMaxStepsResponse("m", "m", []string{"partial"}, time.Now(), 200, 100, nil, map[string]int{"read_file": 3})
+	assert.Equal(t, models.StopReasonMaxSteps, resp.StopReason)
+	assert.Equal(t, "partial", resp.Text)
+	assert.Equal(t, int64(200), resp.InputTokens)
+	assert.Equal(t, 3, resp.ToolCalls["read_file"])
+}
+
 func TestBuildSuccessResponse_IncludesToolCalls(t *testing.T) {
 	tc := map[string]int{"read_file": 3, "bash": 1}
 	resp := BuildSuccessResponse("m", "m", []string{"hi"}, time.Now(), 100, 50,
