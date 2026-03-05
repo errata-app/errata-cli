@@ -266,6 +266,9 @@ func runREPL(cmd *cobra.Command, args []string) error {
 
 func runHeadless(cmd *cobra.Command, args []string) error {
 	rec := loadRecipe()
+	if len(rec.Models) == 0 {
+		return fmt.Errorf("recipe has no models — ## Models section is required for `errata run`")
+	}
 	if len(rec.Tasks) == 0 {
 		return fmt.Errorf("recipe has no tasks — ## Tasks section is required for `errata run`")
 	}
@@ -281,7 +284,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	defer cleanup()
 
 	if len(ads) == 0 {
-		return fmt.Errorf("no models available — set at least one API key in .env")
+		return fmt.Errorf("no models available — check that API keys are set for the models in your recipe")
 	}
 
 	for _, w := range warnings {

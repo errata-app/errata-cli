@@ -494,8 +494,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case welcomeMsg:
 		return a.withMessage(
-			"Welcome to Errata! No API keys are configured.\n" +
-				"Set API keys in .env and restart, or use /config to view settings.",
+			"Welcome to Errata! No models are active. Use /config to add models.",
 		)
 
 	case compactCompleteMsg:
