@@ -236,7 +236,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	}
 
 	if len(toRun) == 0 {
-		return a.withMessage("No models configured. Set API keys in .env and restart.")
+		return a.withMessage("No models active. Use /config to add models.")
 	}
 
 	// Flush the previous run's output from View() to scrollback.
