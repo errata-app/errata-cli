@@ -2,6 +2,9 @@
 
 Compare AI models on real tasks. Same prompt, same tools, different models.
 
+## Prerequisites
+You'll need to install [go](https://go.dev/).
+
 ## Install
 
 ```bash
