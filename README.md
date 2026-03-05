@@ -16,6 +16,15 @@ or
 go install github.com/suarezc/errata/cmd/errata@latest
 ```
 
+or
+
+ Windows
+ ```bash
+git clone https://github.com/suarezc/Errata.git
+cd Errata
+go build -o errata.exe ./cmd/errata
+```
+
 ## Quick Start
 
 Set your API keys in a `.env` file:
@@ -38,6 +47,12 @@ or
 
 ```bash
 errata run -r go_docstore.md --verbose
+```
+or
+
+Windows
+```bash
+.\errata.exe run -r go_docstore.md --verbose
 ```
 
 Sample output:
