@@ -260,7 +260,7 @@ func TestExtractStringMap_EmptyInput(t *testing.T) {
 
 func TestBuildErrorResponse_Fields(t *testing.T) {
 	start := time.Now().Add(-50 * time.Millisecond)
-	resp := BuildErrorResponse("gpt-4o", "openai/gpt-4o", start, 100, 50, fmt.Errorf("api error"))
+	resp := BuildErrorResponse("gpt-4o", "openai/gpt-4o", start, 100, 50, 0, fmt.Errorf("api error"))
 
 	assert.Equal(t, "gpt-4o", resp.ModelID)
 	assert.GreaterOrEqual(t, resp.LatencyMS, int64(0))
@@ -271,7 +271,7 @@ func TestBuildErrorResponse_Fields(t *testing.T) {
 }
 
 func TestBuildErrorResponse_ZeroTokensZeroCost(t *testing.T) {
-	resp := BuildErrorResponse("m", "m", time.Now(), 0, 0, fmt.Errorf("e"))
+	resp := BuildErrorResponse("m", "m", time.Now(), 0, 0, 0, fmt.Errorf("e"))
 	assert.Zero(t, resp.CostUSD)
 }
 
@@ -282,7 +282,7 @@ func TestBuildSuccessResponse_Fields(t *testing.T) {
 	fw := []tools.FileWrite{{Path: "a.go", Content: "package a"}}
 
 	resp := BuildSuccessResponse("claude-sonnet-4-6", "anthropic/claude-sonnet-4-6",
-		[]string{"hello ", "world"}, start, 200, 80, fw, nil)
+		[]string{"hello ", "world"}, start, 200, 80, 0, fw, nil)
 
 	assert.Equal(t, "claude-sonnet-4-6", resp.ModelID)
 	assert.Equal(t, "hello world", resp.Text)
@@ -295,7 +295,7 @@ func TestBuildSuccessResponse_Fields(t *testing.T) {
 }
 
 func TestBuildSuccessResponse_EmptyParts(t *testing.T) {
-	resp := BuildSuccessResponse("m", "m", nil, time.Now(), 0, 0, nil, nil)
+	resp := BuildSuccessResponse("m", "m", nil, time.Now(), 0, 0, 0, nil, nil)
 	assert.Empty(t, resp.Text)
 	assert.Empty(t, resp.ProposedWrites)
 }
@@ -307,7 +307,7 @@ func TestBuildInterruptedResponse_Fields(t *testing.T) {
 	fw := []tools.FileWrite{{Path: "partial.go", Content: "package partial"}}
 
 	resp := BuildInterruptedResponse("gpt-4o", "openai/gpt-4o",
-		[]string{"partial ", "text"}, start, 300, 100, fw, nil, fmt.Errorf("context cancelled"))
+		[]string{"partial ", "text"}, start, 300, 100, 0, fw, nil, fmt.Errorf("context cancelled"))
 
 	assert.Equal(t, "gpt-4o", resp.ModelID)
 	assert.Equal(t, "partial text", resp.Text)
@@ -322,7 +322,7 @@ func TestBuildInterruptedResponse_Fields(t *testing.T) {
 }
 
 func TestBuildInterruptedResponse_NilWrites(t *testing.T) {
-	resp := BuildInterruptedResponse("m", "m", nil, time.Now(), 0, 0, nil, nil, fmt.Errorf("cancelled"))
+	resp := BuildInterruptedResponse("m", "m", nil, time.Now(), 0, 0, 0, nil, nil, fmt.Errorf("cancelled"))
 	assert.True(t, resp.Interrupted)
 	assert.Empty(t, resp.ProposedWrites)
 	assert.Empty(t, resp.Text)
@@ -338,7 +338,7 @@ func TestEmitSnapshot_EmitsSnapshotEvent(t *testing.T) {
 		func(e models.AgentEvent) { events = append(events, e) },
 		"openai/gpt-4o",
 		[]string{"hello ", "world"},
-		start, 500, 100,
+		start, 500, 100, 0,
 		[]tools.FileWrite{{Path: "f.go", Content: "c"}}, nil,
 	)
 
@@ -353,7 +353,7 @@ func TestEmitSnapshot_NilWritesOK(t *testing.T) {
 	var events []models.AgentEvent
 	EmitSnapshot(
 		func(e models.AgentEvent) { events = append(events, e) },
-		"m", nil, time.Now(), 0, 0, nil, nil,
+		"m", nil, time.Now(), 0, 0, 0, nil, nil,
 	)
 	require.Len(t, events, 1)
 	assert.Equal(t, models.EventSnapshot, events[0].Type)
@@ -560,22 +560,22 @@ func TestDispatchTool_UnknownToolDoesNotTrack(t *testing.T) {
 // ─── StopReason ─────────────────────────────────────────────────────────────
 
 func TestBuildSuccessResponse_SetsStopReasonComplete(t *testing.T) {
-	resp := BuildSuccessResponse("m", "m", []string{"hi"}, time.Now(), 100, 50, nil, nil)
+	resp := BuildSuccessResponse("m", "m", []string{"hi"}, time.Now(), 100, 50, 0, nil, nil)
 	assert.Equal(t, models.StopReasonComplete, resp.StopReason)
 }
 
 func TestBuildErrorResponse_SetsStopReasonError(t *testing.T) {
-	resp := BuildErrorResponse("m", "m", time.Now(), 0, 0, fmt.Errorf("boom"))
+	resp := BuildErrorResponse("m", "m", time.Now(), 0, 0, 0, fmt.Errorf("boom"))
 	assert.Equal(t, models.StopReasonError, resp.StopReason)
 }
 
 func TestBuildInterruptedResponse_SetsStopReasonCancelled(t *testing.T) {
-	resp := BuildInterruptedResponse("m", "m", nil, time.Now(), 0, 0, nil, nil, fmt.Errorf("cancelled"))
+	resp := BuildInterruptedResponse("m", "m", nil, time.Now(), 0, 0, 0, nil, nil, fmt.Errorf("cancelled"))
 	assert.Equal(t, models.StopReasonCancelled, resp.StopReason)
 }
 
 func TestBuildMaxStepsResponse_SetsStopReasonMaxSteps(t *testing.T) {
-	resp := BuildMaxStepsResponse("m", "m", []string{"partial"}, time.Now(), 200, 100, nil, map[string]int{"read_file": 3})
+	resp := BuildMaxStepsResponse("m", "m", []string{"partial"}, time.Now(), 200, 100, 0, nil, map[string]int{"read_file": 3})
 	assert.Equal(t, models.StopReasonMaxSteps, resp.StopReason)
 	assert.Equal(t, "partial", resp.Text)
 	assert.Equal(t, int64(200), resp.InputTokens)
@@ -584,14 +584,14 @@ func TestBuildMaxStepsResponse_SetsStopReasonMaxSteps(t *testing.T) {
 
 func TestBuildSuccessResponse_IncludesToolCalls(t *testing.T) {
 	tc := map[string]int{"read_file": 3, "bash": 1}
-	resp := BuildSuccessResponse("m", "m", []string{"hi"}, time.Now(), 100, 50,
+	resp := BuildSuccessResponse("m", "m", []string{"hi"}, time.Now(), 100, 50, 0,
 		[]tools.FileWrite{{Path: "f.go", Content: "c"}}, tc)
 	assert.Equal(t, tc, resp.ToolCalls)
 }
 
 func TestBuildInterruptedResponse_IncludesToolCalls(t *testing.T) {
 	tc := map[string]int{"read_file": 2}
-	resp := BuildInterruptedResponse("m", "m", []string{"partial"}, time.Now(), 100, 50,
+	resp := BuildInterruptedResponse("m", "m", []string{"partial"}, time.Now(), 100, 50, 0,
 		nil, tc, fmt.Errorf("cancelled"))
 	assert.Equal(t, tc, resp.ToolCalls)
 }
@@ -602,7 +602,7 @@ func TestEmitSnapshot_IncludesToolCalls(t *testing.T) {
 
 	EmitSnapshot(
 		func(e models.AgentEvent) { events = append(events, e) },
-		"m", nil, time.Now(), 0, 0, nil, tc,
+		"m", nil, time.Now(), 0, 0, 0, nil, tc,
 	)
 
 	require.Len(t, events, 1)

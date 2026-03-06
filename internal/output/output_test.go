@@ -549,6 +549,27 @@ func TestSave_MkdirAllError(t *testing.T) {
 	}
 }
 
+func TestBuildReport_ReasoningTokens(t *testing.T) {
+	responses := []models.ModelResponse{
+		{
+			ModelID:         "o3",
+			Text:            "answer",
+			LatencyMS:       1000,
+			InputTokens:     529000,
+			OutputTokens:    15000,
+			ReasoningTokens: 14500,
+			CostUSD:         1.18,
+		},
+	}
+	report := BuildReport("sess", nil, "test", responses, nil, nil)
+	if len(report.Models) != 1 {
+		t.Fatalf("Models len = %d, want 1", len(report.Models))
+	}
+	if report.Models[0].ReasoningTokens != 14500 {
+		t.Errorf("ReasoningTokens = %d, want 14500", report.Models[0].ReasoningTokens)
+	}
+}
+
 func TestBuildReport_DeleteField(t *testing.T) {
 	responses := []models.ModelResponse{
 		{

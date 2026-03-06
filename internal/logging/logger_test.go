@@ -167,6 +167,34 @@ func TestWrap_LogsEntryWithAllFields(t *testing.T) {
 	assert.Empty(t, entry.Response.Error)
 }
 
+// TestWrap_LogsReasoningTokens verifies that ReasoningTokens are included in the log entry.
+func TestWrap_LogsReasoningTokens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.jsonl")
+	l, err := logging.NewLogger(path)
+	require.NoError(t, err)
+
+	inner := &stubAdapter{
+		id: "o3",
+		response: models.ModelResponse{
+			ModelID:         "o3",
+			Text:            "done",
+			InputTokens:     529000,
+			OutputTokens:    15000,
+			ReasoningTokens: 14500,
+			CostUSD:         1.18,
+			LatencyMS:       5000,
+		},
+	}
+
+	wrapped := logging.Wrap(inner, "s", l)
+	_, err = wrapped.RunAgent(context.Background(), nil, "p", func(models.AgentEvent) {})
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+
+	entry := readEntry(t, path)
+	assert.Equal(t, int64(14500), entry.Response.ReasoningTokens)
+}
+
 // TestWrapAll_WithRealLogger_WrapsAllAdapters verifies that WrapAll with a non-nil
 // logger returns a slice of the same length with wrapped adapters.
 func TestWrapAll_WithRealLogger_WrapsAllAdapters(t *testing.T) {

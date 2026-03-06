@@ -71,6 +71,7 @@ type ModelResult struct {
 	LatencyMS           int64        `json:"latency_ms"`
 	InputTokens         int64        `json:"input_tokens"`
 	OutputTokens        int64        `json:"output_tokens"`
+	ReasoningTokens     int64        `json:"reasoning_tokens,omitempty"`
 	CostUSD             float64      `json:"cost_usd"`
 	Error               string       `json:"error,omitempty"`
 	StopReason          string       `json:"stop_reason,omitempty"`
@@ -332,6 +333,7 @@ func BuildReport(
 			LatencyMS:           resp.LatencyMS,
 			InputTokens:         resp.InputTokens,
 			OutputTokens:        resp.OutputTokens,
+			ReasoningTokens:     resp.ReasoningTokens,
 			CostUSD:             resp.CostUSD,
 			Error:               resp.Error,
 			StopReason:          string(resp.StopReason),

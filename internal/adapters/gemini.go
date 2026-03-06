@@ -47,7 +47,7 @@ func (a *GeminiAdapter) RunAgent(
 	start := time.Now()
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: a.apiKey})
 	if err != nil {
-		return BuildErrorResponse(a.modelID, "google/"+a.modelID, start, 0, 0, err), err
+		return BuildErrorResponse(a.modelID, "google/"+a.modelID, start, 0, 0, 0, err), err
 	}
 
 	return runGeminiAgentLoop(ctx, geminiRunConfig{

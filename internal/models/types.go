@@ -39,9 +39,10 @@ type AgentEvent struct {
 // without import cycles.
 type PartialSnapshot struct {
 	Text         string            `json:"text"`
-	InputTokens  int64             `json:"input_tokens"`
-	OutputTokens int64             `json:"output_tokens"`
-	CostUSD      float64           `json:"cost_usd"`
+	InputTokens     int64             `json:"input_tokens"`
+	OutputTokens    int64             `json:"output_tokens"`
+	ReasoningTokens int64             `json:"reasoning_tokens,omitempty"`
+	CostUSD         float64           `json:"cost_usd"`
 	LatencyMS    int64             `json:"latency_ms"`
 	Writes       []tools.FileWrite `json:"writes,omitempty"`
 	ToolCalls    map[string]int    `json:"tool_calls,omitempty"`
@@ -64,8 +65,9 @@ type ModelResponse struct {
 	ModelID             string
 	Text                string
 	LatencyMS           int64
-	InputTokens  int64 // total input tokens
-	OutputTokens int64
+	InputTokens     int64 // total input tokens
+	OutputTokens    int64
+	ReasoningTokens int64 // reasoning/thinking tokens (subset of OutputTokens; 0 when unavailable)
 	CostUSD             float64
 	ProposedWrites      []tools.FileWrite
 	ToolCalls           map[string]int // tool_name → call count across all turns

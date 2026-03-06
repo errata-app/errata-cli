@@ -36,7 +36,7 @@ Read the failing test cases, trace the logic through the source files, and fix a
 - bash
 
 ## Constraints
-max_steps: 50
+max_steps: 30
 
 ## Tasks
 - The Go project at go_gauntlet_test/challenge11_docstore/ has failing tests. Run `cd go_gauntlet_test/challenge11_docstore && go test -v ./...` to see the failures. Read all source files, trace the bugs across files, and fix them so every test passes. Do not modify the test file. Do not ask for user input, act autonomously.

@@ -49,7 +49,7 @@ func runOpenAIAgentLoop(
 	var textParts []string
 	var proposed []tools.FileWrite
 	toolCalls := map[string]int{}
-	var totalInput, totalOutput int64
+	var totalInput, totalOutput, totalReasoning int64
 	start := time.Now()
 
 	maxSteps := tools.MaxStepsFromContext(ctx)
@@ -57,7 +57,7 @@ func runOpenAIAgentLoop(
 	for {
 		step++
 		if maxSteps > 0 && step > maxSteps {
-			r := BuildMaxStepsResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+			r := BuildMaxStepsResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, totalReasoning, proposed, toolCalls)
 			r.Steps = step - 1
 			return r, nil
 		}
@@ -73,14 +73,14 @@ func runOpenAIAgentLoop(
 		resp, err := cfg.client.Chat.Completions.New(ctx, params)
 		if err != nil {
 			if ctx.Err() != nil {
-				r := BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err)
+				r := BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, totalReasoning, proposed, toolCalls, err)
 				if ctx.Err() == context.DeadlineExceeded {
 					r.StopReason = models.StopReasonTimeout
 				}
 				r.Steps = step
 				return r, err
 			}
-			r := BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err)
+			r := BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, totalReasoning, err)
 			r.Steps = step
 			return r, err
 		}
@@ -88,6 +88,9 @@ func runOpenAIAgentLoop(
 		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
 			totalInput += resp.Usage.PromptTokens
 			totalOutput += resp.Usage.CompletionTokens
+			if resp.Usage.CompletionTokensDetails.ReasoningTokens > 0 {
+				totalReasoning += resp.Usage.CompletionTokensDetails.ReasoningTokens
+			}
 		}
 
 		if len(resp.Choices) == 0 {
@@ -121,10 +124,10 @@ func runOpenAIAgentLoop(
 				messages = append(messages, openai.ToolMessage(fmt.Sprintf("error: unrecognized tool %q", tc.Function.Name), tc.ID))
 			}
 		}
-		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, totalReasoning, proposed, toolCalls)
 	}
 
-	r := BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+	r := BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, totalReasoning, proposed, toolCalls)
 	r.Steps = step
 	return r, nil
 }

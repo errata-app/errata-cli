@@ -497,6 +497,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		ps.latencyMS = resp.LatencyMS
 		ps.inputTokens = resp.InputTokens
 		ps.outputTokens = resp.OutputTokens
+		ps.reasoningTokens = resp.ReasoningTokens
 		ps.costUSD = resp.CostUSD
 		a.panels = append(a.panels, ps)
 		a.panelIdx[resp.ModelID] = i

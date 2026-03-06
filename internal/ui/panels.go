@@ -30,6 +30,7 @@ type panelState struct {
 	latencyMS       int64
 	inputTokens     int64
 	outputTokens    int64
+	reasoningTokens int64
 	costUSD         float64
 	histTokens      int64 // estimated history tokens at run start (for fill % display)
 
@@ -106,7 +107,11 @@ func formatDoneSummary(p *panelState) string {
 		parts = append(parts, fmt.Sprintf("%d %s", p.toolUseCount, noun))
 	}
 	if tot := p.inputTokens + p.outputTokens; tot > 0 {
-		parts = append(parts, fmtTokens(tot)+" tokens")
+		tokStr := fmtTokens(tot) + " tokens"
+		if p.reasoningTokens > 0 {
+			tokStr += " (" + fmtTokens(p.reasoningTokens) + " reasoning)"
+		}
+		parts = append(parts, tokStr)
 	}
 	if p.latencyMS > 0 {
 		parts = append(parts, formatElapsed(time.Duration(p.latencyMS)*time.Millisecond))
