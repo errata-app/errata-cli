@@ -188,6 +188,62 @@ func TestApplyRecipe_AllFields_Simultaneous(t *testing.T) {
 	assert.Equal(t, int64(42), *cfg.Seed)
 }
 
+// ─── Atomic section tests ─────────────────────────────────────────────────────
+
+func TestApplyRecipe_AtomicConstraints(t *testing.T) {
+	// User sets max_steps only in ## Constraints → timeout must zero out.
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\nmax_steps: 50\n")))
+	cfg := defaultCfg()
+	cfg.AgentTimeout = 5 * time.Minute // pre-existing default
+	cfg.MaxSteps = 100
+	config.ApplyRecipe(r, &cfg)
+	assert.Equal(t, 50, cfg.MaxSteps)
+	assert.Equal(t, time.Duration(0), cfg.AgentTimeout, "timeout must be zeroed when section is present but timeout not declared")
+}
+
+func TestApplyRecipe_AtomicContext(t *testing.T) {
+	// User sets max_history_turns only → compact_threshold must zero out.
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Context\nmax_history_turns: 10\n")))
+	cfg := defaultCfg()
+	cfg.CompactThreshold = 0.8
+	cfg.MaxHistoryTurns = 20
+	config.ApplyRecipe(r, &cfg)
+	assert.Equal(t, 10, cfg.MaxHistoryTurns)
+	assert.InDelta(t, 0.0, cfg.CompactThreshold, 1e-9, "compact_threshold must be zeroed when section present but field not declared")
+}
+
+func TestApplyRecipe_AtomicModelParams(t *testing.T) {
+	// User sets temperature only → seed must nil out.
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Model Parameters\ntemperature: 0.5\n")))
+	cfg := defaultCfg()
+	existing := int64(42)
+	cfg.Seed = &existing
+	config.ApplyRecipe(r, &cfg)
+	assert.Nil(t, cfg.Seed, "seed must be nil when section present but seed not declared")
+}
+
+func TestApplyRecipe_AtomicSubAgent(t *testing.T) {
+	// User sets model only → max_depth must zero out (disabled).
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Sub-Agent\nmodel: claude-haiku-3\n")))
+	cfg := defaultCfg()
+	cfg.SubagentMaxDepth = 3
+	cfg.SubagentModel = "old-model"
+	config.ApplyRecipe(r, &cfg)
+	assert.Equal(t, "claude-haiku-3", cfg.SubagentModel)
+	assert.Equal(t, 0, cfg.SubagentMaxDepth, "max_depth must be 0 (disabled) when section present but max_depth not mentioned")
+}
+
+func TestApplyRecipe_AbsentSection_PreservesDefaults(t *testing.T) {
+	// No ## Constraints in recipe → existing timeout preserved.
+	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- m1\n")))
+	cfg := defaultCfg()
+	cfg.AgentTimeout = 5 * time.Minute
+	cfg.MaxSteps = 100
+	config.ApplyRecipe(r, &cfg)
+	assert.Equal(t, 5*time.Minute, cfg.AgentTimeout, "absent section must preserve existing timeout")
+	assert.Equal(t, 100, cfg.MaxSteps, "absent section must preserve existing max_steps")
+}
+
 func TestApplyRecipe_UnsetFields_PreserveAll(t *testing.T) {
 	// Pre-populate Config with non-default values for all non-Models fields.
 	// Parse a recipe with only ## Models set.

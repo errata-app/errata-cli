@@ -966,3 +966,15 @@ func TestRunAll_WorkDirsSetsContextValues(t *testing.T) {
 	assert.Empty(t, tools.WorkDirFromContext(a2.ctx))
 	assert.False(t, tools.DirectWriteFromContext(a2.ctx))
 }
+
+func TestRunAll_ZeroTimeoutNoDeadline(t *testing.T) {
+	a := &ctxCapturingAdapter{id: "m"}
+
+	// Timeout=0 → no deadline should be set on the context.
+	ctx := runner.WithRunOptions(context.Background(), runner.RunOptions{})
+	runner.RunAll(ctx, []models.ModelAdapter{a}, nil, "prompt",
+		func(string, models.AgentEvent) {}, nil, false)
+
+	_, hasDeadline := a.ctx.Deadline()
+	assert.False(t, hasDeadline, "Timeout=0 should not set a context deadline")
+}
