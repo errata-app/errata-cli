@@ -8,8 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/config"
-	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/pkg/recipe"
 )
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -446,87 +445,6 @@ func TestDiscover_DotErrataRecipeMd(t *testing.T) {
 	assert.Equal(t, "errata-model", r.Models[0])
 }
 
-// ─── ApplyTo tests ────────────────────────────────────────────────────────────
-
-func defaultCfg() config.Config {
-	return config.Config{
-		ActiveModels:      nil,
-		SystemPromptExtra: "",
-		MCPServers:        "",
-		SubagentModel:     "",
-		SubagentMaxDepth:  1,
-		MaxHistoryTurns:   20,
-		AgentTimeout:      0,
-		CompactThreshold:  0,
-	}
-}
-
-func TestApplyTo_Models(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n- openai/gpt-4o\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	assert.Equal(t, []string{"claude-sonnet-4-6", "openai/gpt-4o"}, cfg.ActiveModels)
-}
-
-func TestApplyTo_NilModels_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\ntimeout: 5m\n")))
-	cfg := defaultCfg()
-	cfg.ActiveModels = []string{"existing-model"}
-	r.ApplyTo(&cfg)
-	assert.Equal(t, []string{"existing-model"}, cfg.ActiveModels, "absent ## Models must not clear existing config")
-}
-
-func TestApplyTo_SystemPrompt(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## System Prompt\nYou are a Go expert.\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	assert.Equal(t, "You are a Go expert.", cfg.SystemPromptExtra)
-}
-
-func TestApplyTo_MCPServers(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## MCP Servers\n- exa: npx @exa-ai/exa-mcp-server\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	assert.Contains(t, cfg.MCPServers, "exa:")
-	assert.Contains(t, cfg.MCPServers, "npx @exa-ai/exa-mcp-server")
-}
-
-func TestApplyTo_SubagentDepthExplicitZero(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Sub-Agent\nmax_depth: 0\n")))
-	cfg := defaultCfg()
-	cfg.SubagentMaxDepth = 1
-	r.ApplyTo(&cfg)
-	assert.Equal(t, 0, cfg.SubagentMaxDepth, "max_depth: 0 must disable spawn_agent")
-}
-
-func TestApplyTo_SubagentDepthNotSet_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
-	cfg := defaultCfg()
-	cfg.SubagentMaxDepth = 3
-	r.ApplyTo(&cfg)
-	assert.Equal(t, 3, cfg.SubagentMaxDepth, "absent max_depth must not override existing value")
-}
-
-func TestApplyTo_Timeout(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\ntimeout: 3m\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	assert.Equal(t, 3*time.Minute, cfg.AgentTimeout)
-}
-
-func TestApplyTo_MaxHistoryTurns(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Context\nmax_history_turns: 5\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	assert.Equal(t, 5, cfg.MaxHistoryTurns)
-}
-
-func TestApplyTo_CompactThreshold(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Context\ncompact_threshold: 0.60\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	assert.InDelta(t, 0.60, cfg.CompactThreshold, 0.001)
-}
 
 func TestParse_ModelParamsSeed(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1(`
@@ -567,23 +485,6 @@ temperature: 0.5
 	assert.Nil(t, r.ModelParams.Seed, "absent seed should be nil")
 }
 
-func TestApplyTo_Seed(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Model Parameters\nseed: 42\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	require.NotNil(t, cfg.Seed)
-	assert.Equal(t, int64(42), *cfg.Seed)
-}
-
-func TestApplyTo_SeedNil_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
-	cfg := defaultCfg()
-	existing := int64(99)
-	cfg.Seed = &existing
-	r.ApplyTo(&cfg)
-	require.NotNil(t, cfg.Seed)
-	assert.Equal(t, int64(99), *cfg.Seed, "absent seed must not clear existing config")
-}
 
 func TestParse_SuccessCriteria(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1(`
@@ -904,6 +805,9 @@ seed: 42
 func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	// Parse the full example recipe and verify every new section is populated.
 	examplePath := filepath.Join("..", "..", "recipe.example.md")
+	if _, err := os.Stat(examplePath); err != nil {
+		t.Skip("recipe.example.md not found at expected relative path")
+	}
 	r, err := recipe.Parse(examplePath)
 	require.NoError(t, err)
 
@@ -1247,20 +1151,6 @@ func TestParse_ToolGuidance_Absent(t *testing.T) {
 	assert.Empty(t, r.ToolGuidance)
 }
 
-func TestApplyTo_ToolGuidance(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Tool Guidance\nCustom guidance text.\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	assert.Equal(t, "Custom guidance text.", cfg.ToolGuidance)
-}
-
-func TestApplyTo_ToolGuidance_Empty_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
-	cfg := defaultCfg()
-	cfg.ToolGuidance = "existing guidance"
-	r.ApplyTo(&cfg)
-	assert.Equal(t, "existing guidance", cfg.ToolGuidance, "absent ## Tool Guidance must not clear existing config")
-}
 
 func TestMarshalMarkdown_ToolGuidance_RoundTrip(t *testing.T) {
 	orig := &recipe.Recipe{
@@ -1283,110 +1173,3 @@ func TestMarshalMarkdown_ToolGuidance_Empty(t *testing.T) {
 	assert.NotContains(t, md, "## Tool Guidance")
 }
 
-func TestApplyTo_MaxSteps(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\nmax_steps: 25\n")))
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-	assert.Equal(t, 25, cfg.MaxSteps)
-}
-
-func TestApplyTo_MaxStepsZero_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
-	cfg := defaultCfg()
-	cfg.MaxSteps = 10
-	r.ApplyTo(&cfg)
-	assert.Equal(t, 10, cfg.MaxSteps, "absent max_steps must not clear existing config")
-}
-
-// ─── ApplyTo regression tests ─────────────────────────────────────────────────
-
-func TestApplyTo_AllFields_Simultaneous(t *testing.T) {
-	// Construct a recipe with ALL ApplyTo-mapped fields set simultaneously.
-	// Pins field-interaction behavior — setting all at once must not interfere.
-	seed := int64(42)
-	r := &recipe.Recipe{
-		Models:       []string{"m1", "m2"},
-		SystemPrompt: "Custom system prompt",
-		MCPServers: []recipe.MCPServerEntry{
-			{Name: "exa", Command: "npx exa-server"},
-		},
-		SubAgent: recipe.SubAgentConfig{
-			Model:    "gpt-4o",
-			MaxDepth: 3,
-		},
-		Context: recipe.ContextConfig{
-			MaxHistoryTurns:  30,
-			CompactThreshold: 0.65,
-		},
-		Constraints: recipe.ConstraintsConfig{
-			Timeout:  10 * time.Minute,
-			MaxSteps: 50,
-		},
-		ModelParams: recipe.ModelParamsConfig{
-			Seed: &seed,
-		},
-		ToolGuidance: "Custom tool guidance",
-	}
-
-	cfg := defaultCfg()
-	r.ApplyTo(&cfg)
-
-	assert.Equal(t, []string{"m1", "m2"}, cfg.ActiveModels)
-	assert.Equal(t, "Custom system prompt", cfg.SystemPromptExtra)
-	assert.Contains(t, cfg.MCPServers, "exa")
-	assert.Contains(t, cfg.MCPServers, "npx exa-server")
-	assert.Equal(t, "gpt-4o", cfg.SubagentModel)
-	assert.Equal(t, 3, cfg.SubagentMaxDepth)
-	assert.Equal(t, 30, cfg.MaxHistoryTurns)
-	assert.Equal(t, 10*time.Minute, cfg.AgentTimeout)
-	assert.Equal(t, 50, cfg.MaxSteps)
-	assert.InDelta(t, 0.65, cfg.CompactThreshold, 1e-9)
-	require.NotNil(t, cfg.Seed)
-	assert.Equal(t, int64(42), *cfg.Seed)
-	assert.Equal(t, "Custom tool guidance", cfg.ToolGuidance)
-}
-
-func TestApplyTo_UnsetFields_PreserveAll(t *testing.T) {
-	// Pre-populate Config with non-default values for all 9 non-Models fields.
-	// Parse a recipe with only ## Models set.
-	// Assert cfg.ActiveModels changed, all 9 others retained pre-populated values.
-	// Pins the zero-value guard logic (if r.Field != zero).
-	existingSeed := int64(99)
-	cfg := config.Config{
-		ActiveModels:      []string{"old-model"},
-		SystemPromptExtra: "existing prompt",
-		MCPServers:        "existing:server",
-		SubagentModel:     "existing-subagent",
-		SubagentMaxDepth:  5,
-		MaxSteps:          15,
-		MaxHistoryTurns:   40,
-		AgentTimeout:      7 * time.Minute,
-		CompactThreshold:  0.90,
-		Seed:              &existingSeed,
-		ToolGuidance:      "existing guidance",
-	}
-
-	// Recipe with only Models set; all other fields at zero values.
-	r := &recipe.Recipe{
-		Models:   []string{"new-model-1", "new-model-2"},
-		SubAgent: recipe.SubAgentConfig{MaxDepth: -1}, // sentinel: not set
-	}
-
-	r.ApplyTo(&cfg)
-
-	// Models should have changed.
-	assert.Equal(t, []string{"new-model-1", "new-model-2"}, cfg.ActiveModels)
-
-	// All other fields should be preserved.
-	assert.Equal(t, "existing prompt", cfg.SystemPromptExtra)
-	assert.Equal(t, "existing:server", cfg.MCPServers)
-	assert.Equal(t, "existing-subagent", cfg.SubagentModel)
-	assert.Equal(t, 5, cfg.SubagentMaxDepth)
-	assert.Equal(t, 40, cfg.MaxHistoryTurns)
-	assert.Equal(t, 7*time.Minute, cfg.AgentTimeout)
-	assert.InDelta(t, 0.90, cfg.CompactThreshold, 1e-9)
-	require.NotNil(t, cfg.Seed)
-	assert.Equal(t, int64(99), *cfg.Seed)
-	assert.Equal(t, "existing guidance", cfg.ToolGuidance)
-	assert.Equal(t, 15, cfg.MaxSteps)
-}

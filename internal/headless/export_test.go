@@ -1,6 +1,6 @@
 package headless
 
-import "github.com/suarezc/errata/internal/recipe"
+import "github.com/suarezc/errata/pkg/recipe"
 
 // Test-only exports for internal functions.
 
