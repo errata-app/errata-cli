@@ -245,15 +245,16 @@ func Parse(path string) (*Recipe, error) {
 }
 
 // parseEmbedded parses the built-in default recipe from the embedded FS.
+// Panics on failure — a broken embedded recipe is a build/development error
+// that must be caught immediately, not silently degraded.
 func parseEmbedded() *Recipe {
 	data, err := fs.ReadFile(defaultFS, "default.recipe.md")
 	if err != nil {
-		// Should never happen — file is embedded at compile time.
-		return newRecipe()
+		panic("embedded default.recipe.md missing: " + err.Error())
 	}
 	r, err := parseBytes(data)
 	if err != nil {
-		return newRecipe()
+		panic("embedded default.recipe.md parse error: " + err.Error())
 	}
 	return r
 }
