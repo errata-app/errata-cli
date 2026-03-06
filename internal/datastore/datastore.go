@@ -510,7 +510,9 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 			snap.Name = "default"
 		}
 		snap.SystemPrompt = rec.SystemPrompt
-		snap.ToolGuidance = rec.ToolGuidance
+		if rec.Tools != nil {
+			snap.ToolGuidance = rec.Tools.Guidance
+		}
 		snap.ToolDescriptions = rec.ToolDescriptions
 		snap.SummarizationPrompt = rec.SummarizationPrompt
 

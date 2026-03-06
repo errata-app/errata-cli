@@ -457,20 +457,24 @@ func SystemPromptExtraFromContext(ctx context.Context) (string, bool) {
 	return v, ok
 }
 
-// toolGuidanceKey is the context key for per-run tool guidance override.
-type toolGuidanceKey struct{}
+// toolGuidanceMapKey is the context key for per-tool guidance overrides.
+type toolGuidanceMapKey struct{}
 
-// WithToolGuidance returns a context carrying the given tool guidance text.
-// effectiveGuidanceForCtx reads this to override the built-in guidance.
-func WithToolGuidance(ctx context.Context, s string) context.Context {
-	return context.WithValue(ctx, toolGuidanceKey{}, s)
+// WithToolGuidanceMap returns a context carrying the per-tool guidance map.
+// effectiveGuidanceForCtx reads this to override code-default guidance per tool.
+// A nil map means "use code defaults for all tools."
+func WithToolGuidanceMap(ctx context.Context, m map[string]string) context.Context {
+	if m == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, toolGuidanceMapKey{}, m)
 }
 
-// ToolGuidanceFromContext returns the tool guidance override stored in ctx.
-// The bool is false if no value was set via WithToolGuidance.
-func ToolGuidanceFromContext(ctx context.Context) (string, bool) {
-	v, ok := ctx.Value(toolGuidanceKey{}).(string)
-	return v, ok
+// ToolGuidanceMapFromContext returns the per-tool guidance map stored in ctx,
+// or nil if no map was set via WithToolGuidanceMap.
+func ToolGuidanceMapFromContext(ctx context.Context) map[string]string {
+	v, _ := ctx.Value(toolGuidanceMapKey{}).(map[string]string)
+	return v
 }
 
 // ActiveDefinitions returns the subset of Definitions not in disabled.

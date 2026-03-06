@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/config"
+	"github.com/suarezc/errata/pkg/recipe"
 )
 
 func TestLoad_Defaults(t *testing.T) {
@@ -27,7 +29,24 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Empty(t, cfg.MCPServers)
 	assert.Empty(t, cfg.SystemPromptExtra)
 	assert.Empty(t, cfg.SubagentModel)
-	assert.Empty(t, cfg.ToolGuidance)
+}
+
+func TestLoad_DefaultsFromRecipe(t *testing.T) {
+	// Verify that behavioral defaults are sourced from the embedded default
+	// recipe (pkg/recipe/default.recipe.md), not hardcoded in Load().
+	cfg := config.Load()
+	assert.Equal(t, 20, cfg.MaxHistoryTurns, "should come from default recipe ## Context")
+	assert.Equal(t, 5*time.Minute, cfg.AgentTimeout, "should come from default recipe ## Constraints")
+	assert.InDelta(t, 0.80, cfg.CompactThreshold, 1e-9, "should come from default recipe ## Context")
+}
+
+func TestDefaultRecipe_HasToolsAndGuidance(t *testing.T) {
+	r := recipe.Default()
+	require.NotNil(t, r.Tools, "default recipe must have ## Tools section")
+	assert.Len(t, r.Tools.Allowlist, 9, "default recipe should list all 9 built-in tools")
+	require.NotNil(t, r.Tools.Guidance, "default recipe should have per-tool guidance")
+	assert.Len(t, r.Tools.Guidance, 9, "each tool should have guidance text")
+	assert.NotEmpty(t, r.SummarizationPrompt, "default recipe should have summarization prompt")
 }
 
 func TestResolvedActiveModels_FromKeys(t *testing.T) {

@@ -25,7 +25,7 @@ type RecipeSnapshot struct {
 	Version             int                           `json:"version,omitempty"`
 	Name                string                        `json:"name"`
 	SystemPrompt        string                        `json:"system_prompt,omitempty"`
-	ToolGuidance        string                        `json:"tool_guidance,omitempty"`
+	ToolGuidance        map[string]string             `json:"tool_guidance,omitempty"`
 	Tools               []string                      `json:"tools,omitempty"`
 	BashPrefixes        []string                      `json:"bash_prefixes,omitempty"`
 	ToolDescriptions    map[string]string             `json:"tool_descriptions,omitempty"`

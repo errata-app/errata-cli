@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/suarezc/errata/pkg/recipe"
 )
 
 // Config holds all runtime settings.
@@ -105,10 +106,6 @@ type Config struct {
 	// Set via recipe ## Model Parameters seed: or /seed command.
 	Seed *int64
 
-	// ToolGuidance replaces the built-in tool-use guidance in every adapter's
-	// system prompt when set. Empty means use the default guidance.
-	// Set via recipe ## Tool Guidance.
-	ToolGuidance string
 }
 
 // Load reads .env (if present) then environment variables and returns a Config.
@@ -126,10 +123,11 @@ func Load() Config {
 		DataDir:               "data",
 	}
 
-	// SubagentMaxDepth default (1) comes from the default recipe's ## Sub-Agent section.
-	// When tools.SubagentEnabled is false, the default recipe omits that section,
-	// leaving SubagentMaxDepth at 0 (disabled). See internal/tools/tools.go.
-	cfg.MaxHistoryTurns = 20
+	// Apply the embedded default recipe so all behavioral defaults (timeout,
+	// max_history_turns, compact_threshold, etc.) come from a single source
+	// of truth: pkg/recipe/default.recipe.md. The hardcoded values above
+	// serve as last-resort fallbacks only if the default recipe is missing a field.
+	ApplyRecipe(recipe.Default(), &cfg)
 
 	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")

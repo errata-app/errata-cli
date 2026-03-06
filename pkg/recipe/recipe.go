@@ -75,9 +75,6 @@ type Recipe struct {
 	// Model profiles for capability overrides
 	ModelProfiles map[string]ModelProfileConfig // model_id → profile
 
-	// ToolGuidance replaces the built-in tool-use guidance when set.
-	// Empty = not set (use default).
-	ToolGuidance string
 }
 
 // ToolsConfig describes which tools are available in a recipe.
@@ -90,6 +87,9 @@ type ToolsConfig struct {
 	// trimmed text starts with one of the listed prefix patterns.
 	// nil (with bash in Allowlist) means all bash commands are allowed.
 	BashPrefixes []string
+	// Guidance maps tool names to per-tool guidance text from "- name: guidance" format.
+	// nil means no per-tool guidance overrides (use code defaults).
+	Guidance map[string]string
 }
 
 // MCPServerEntry is one named MCP server subprocess.
@@ -245,15 +245,16 @@ func Parse(path string) (*Recipe, error) {
 }
 
 // parseEmbedded parses the built-in default recipe from the embedded FS.
+// Panics on failure — a broken embedded recipe is a build/development error
+// that must be caught immediately, not silently degraded.
 func parseEmbedded() *Recipe {
 	data, err := fs.ReadFile(defaultFS, "default.recipe.md")
 	if err != nil {
-		// Should never happen — file is embedded at compile time.
-		return newRecipe()
+		panic("embedded default.recipe.md missing: " + err.Error())
 	}
 	r, err := parseBytes(data)
 	if err != nil {
-		return newRecipe()
+		panic("embedded default.recipe.md parse error: " + err.Error())
 	}
 	return r
 }
@@ -392,10 +393,6 @@ func parseV1(data []byte) (*Recipe, error) {
 		// ── Model Profiles ──
 		case "model profiles":
 			r.ModelProfiles = parseModelProfiles(body)
-
-		// ── Tool Guidance ──
-		case "tool guidance":
-			r.ToolGuidance = parseProse(body)
 
 		default:
 			fmt.Fprintf(os.Stderr, "recipe: unknown section %q, skipping\n", s.header)
@@ -658,22 +655,51 @@ func parseModelProfiles(body string) map[string]ModelProfileConfig {
 // Called only when ## Tools is present in the recipe. An empty section yields
 // a non-nil ToolsConfig with a non-nil empty Allowlist (meaning zero tools),
 // distinguishable from a nil ToolsConfig (section absent → all tools).
+//
+// Each bullet may use "- name: guidance" format. The tool name is everything
+// before the first colon; guidance text is everything after. No colon means
+// no guidance override. The bash(prefix1, prefix2) syntax is preserved and
+// supports an optional trailing ": guidance" after the closing parenthesis.
 func parseTools(body string) *ToolsConfig {
 	tc := &ToolsConfig{Allowlist: []string{}}
 	for _, item := range parseList(body) {
-		if strings.HasPrefix(item, "bash(") && strings.HasSuffix(item, ")") {
-			// bash(prefix1, prefix2, ...)
-			inner := item[5 : len(item)-1]
+		var name, guidance string
+
+		if strings.HasPrefix(item, "bash(") {
+			// bash(prefix1, prefix2, ...): optional guidance
+			closeIdx := strings.Index(item, ")")
+			if closeIdx < 0 {
+				// Malformed, treat entire item as tool name
+				tc.Allowlist = append(tc.Allowlist, item)
+				continue
+			}
+			inner := item[5:closeIdx]
 			var prefixes []string
 			for p := range strings.SplitSeq(inner, ",") {
 				if p = strings.TrimSpace(p); p != "" {
 					prefixes = append(prefixes, p)
 				}
 			}
-			tc.Allowlist = append(tc.Allowlist, "bash")
 			tc.BashPrefixes = prefixes
+			name = "bash"
+			// Check for guidance after ")"
+			rest := item[closeIdx+1:]
+			if after, ok := strings.CutPrefix(rest, ":"); ok {
+				guidance = strings.TrimSpace(after)
+			}
+		} else if toolName, guidanceText, ok := strings.Cut(item, ":"); ok {
+			name = strings.TrimSpace(toolName)
+			guidance = strings.TrimSpace(guidanceText)
 		} else {
-			tc.Allowlist = append(tc.Allowlist, item)
+			name = item
+		}
+
+		tc.Allowlist = append(tc.Allowlist, name)
+		if guidance != "" {
+			if tc.Guidance == nil {
+				tc.Guidance = make(map[string]string)
+			}
+			tc.Guidance[name] = guidance
 		}
 	}
 	return tc
@@ -929,19 +955,20 @@ func (r *Recipe) MarshalMarkdown() string {
 		sb.WriteByte('\n')
 	}
 
-	// Tool Guidance
-	if r.ToolGuidance != "" {
-		sb.WriteString("\n## Tool Guidance\n")
-		sb.WriteString(r.ToolGuidance)
-		sb.WriteByte('\n')
-	}
-
 	// Tools
 	if r.Tools != nil {
 		sb.WriteString("\n## Tools\n")
 		for _, t := range r.Tools.Allowlist {
+			guidance := r.Tools.Guidance[t]
 			if t == "bash" && len(r.Tools.BashPrefixes) > 0 {
-				fmt.Fprintf(&sb, "- bash(%s)\n", strings.Join(r.Tools.BashPrefixes, ", "))
+				bashName := fmt.Sprintf("bash(%s)", strings.Join(r.Tools.BashPrefixes, ", "))
+				if guidance != "" {
+					fmt.Fprintf(&sb, "- %s: %s\n", bashName, guidance)
+				} else {
+					fmt.Fprintf(&sb, "- %s\n", bashName)
+				}
+			} else if guidance != "" {
+				fmt.Fprintf(&sb, "- %s: %s\n", t, guidance)
 			} else {
 				fmt.Fprintf(&sb, "- %s\n", t)
 			}

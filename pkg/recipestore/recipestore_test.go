@@ -114,8 +114,8 @@ func TestPersistence(t *testing.T) {
 }
 
 func TestHash_DifferentToolGuidance(t *testing.T) {
-	cfg1 := &recipestore.RecipeSnapshot{ToolGuidance: "guidance-a"}
-	cfg2 := &recipestore.RecipeSnapshot{ToolGuidance: "guidance-b"}
+	cfg1 := &recipestore.RecipeSnapshot{ToolGuidance: map[string]string{"bash": "guidance-a"}}
+	cfg2 := &recipestore.RecipeSnapshot{ToolGuidance: map[string]string{"bash": "guidance-b"}}
 	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2))
 }
 
@@ -149,7 +149,7 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 		Version:             1,
 		Name:                "full-config",
 		SystemPrompt:        "system prompt text",
-		ToolGuidance:        "custom tool guidance",
+		ToolGuidance:        map[string]string{"bash": "custom tool guidance"},
 		Tools:               []string{"read_file", "write_file", "bash"},
 		BashPrefixes:        []string{"go test", "go vet"},
 		ToolDescriptions:    map[string]string{"read_file": "reads a file"},
@@ -194,7 +194,7 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 	assert.Equal(t, 1, got.Version)
 	assert.Equal(t, "full-config", got.Name)
 	assert.Equal(t, "system prompt text", got.SystemPrompt)
-	assert.Equal(t, "custom tool guidance", got.ToolGuidance)
+	assert.Equal(t, map[string]string{"bash": "custom tool guidance"}, got.ToolGuidance)
 	assert.Equal(t, []string{"read_file", "write_file", "bash"}, got.Tools)
 	assert.Equal(t, []string{"go test", "go vet"}, got.BashPrefixes)
 	assert.Equal(t, map[string]string{"read_file": "reads a file"}, got.ToolDescriptions)
