@@ -73,9 +73,16 @@ and `golangci-lint run ./...` before committing. Fix any issues before proceedin
 errata/
 ├── cmd/errata/
 │   └── main.go              # cobra root (errata, errata stats, errata run, errata sessions)
+├── pkg/                     # public packages — importable by external repos
+│   ├── recipe/
+│   │   ├── recipe.go        # Recipe struct, Parse(), MarshalMarkdown(), Discover() — recipe.md parser
+│   │   └── default.recipe.md # embedded default recipe
+│   └── recipestore/
+│       └── recipestore.go   # Store, RecipeSnapshot, Hash, Put, Get — content-addressed recipe snapshots
 ├── internal/
 │   ├── config/
-│   │   └── config.go        # Config struct, Load(), ResolvedActiveModels()
+│   │   ├── config.go        # Config struct, Load(), ResolvedActiveModels()
+│   │   └── apply_recipe.go  # ApplyRecipe() — overlays recipe settings onto Config
 │   ├── models/
 │   │   └── types.go         # ModelAdapter interface, AgentEvent, ModelResponse, ConversationTurn
 │   ├── adapters/
@@ -105,12 +112,8 @@ errata/
 │   │   └── uid.go           # New(prefix) — type-prefixed UUID v7 ID generation
 │   ├── prompt/
 │   │   └── assembler.go     # DefaultSummarizationPrompt, WithSummarizationPrompt(), ResolveSummarizationPrompt()
-│   ├── recipe/
-│   │   └── recipe.go        # Recipe struct, Parse(), MarshalMarkdown() — recipe.md parser
 │   ├── diff/
 │   │   └── diff.go          # Compute() → FileDiff (LCS)
-│   ├── recipestore/
-│   │   └── recipestore.go   # Store, RecipeSnapshot, Hash, Put, Get — content-addressed recipe snapshots
 │   ├── preferences/
 │   │   └── preferences.go   # Record(), LoadAll(), Summarize(), SummarizeDetailed()
 │   ├── history/
@@ -348,13 +351,17 @@ Log schema per line:
 ## Package Import Graph
 
 ```
+── pkg/ (public, importable by external repos) ──
+pkg/recipe        ← stdlib only
+pkg/recipestore   ← stdlib only (crypto/sha256, encoding/json, os)
+
+── internal/ ──
 tools          ← stdlib only
 pricing        ← stdlib only
 prompt         ← stdlib only (context)
-recipestore    ← stdlib only (crypto/sha256, encoding/json, os)
 mcp            ← tools (for ToolDef, MCPDispatcher)
 models         ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
-config         ← stdlib only
+config         ← pkg/recipe (for ApplyRecipe)
 commands       ← stdlib only
 prompthistory  ← stdlib only
 capabilities   ← models
@@ -366,18 +373,17 @@ history        ← models, encoding/json, os
 uid            ← github.com/google/uuid
 logging        ← models (ModelAdapter, ModelResponse), uid
 preferences    ← models (for ModelResponse latency/ID), encoding/json, os
-recipe         ← config
 tooloutput     ← stdlib only
 criteria       ← models
 sandbox        ← stdlib only (context)
 hooks          ← stdlib only
 reminders      ← stdlib only
-headless       ← models, tools, prompt, recipe, runner, adapters, config, criteria, output, sandbox, subagent, checkpoint, uid
-output         ← models, recipe, criteria, uid
+headless       ← models, tools, prompt, pkg/recipe, runner, adapters, config, criteria, output, sandbox, subagent, checkpoint, uid
+output         ← models, pkg/recipe, criteria, uid
 session        ← uid, encoding/json, os, path/filepath
 subagent       ← models, config, tools
-ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, recipestore, commands, prompthistory, checkpoint, recipe, output, sandbox, subagent, session, bubbletea, lipgloss
-cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, recipe, session, uid, recipestore
+ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, pkg/recipestore, commands, prompthistory, checkpoint, pkg/recipe, output, sandbox, subagent, session, bubbletea, lipgloss
+cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, pkg/recipe, session, uid, pkg/recipestore
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
