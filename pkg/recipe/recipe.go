@@ -75,6 +75,11 @@ type Recipe struct {
 	// Model profiles for capability overrides
 	ModelProfiles map[string]ModelProfileConfig // model_id → profile
 
+	// SectionsPresent tracks which ## sections were declared in the parsed recipe.
+	// nil for programmatic recipes; populated by parseV1(). Used by ApplyRecipe
+	// to decide between atomic (section-replaces-defaults) and legacy (field-by-field)
+	// merge behavior.
+	SectionsPresent map[string]bool
 }
 
 // ToolsConfig describes which tools are available in a recipe.
@@ -223,6 +228,16 @@ func (r *Recipe) BuildRunner() (Runner, error) {
 // MaxVersion is the highest recipe version supported by this binary.
 const MaxVersion = 1
 
+// HasSection reports whether the named section (lowercase) was declared in the
+// parsed recipe file. Returns false when SectionsPresent is nil, which is the
+// case for programmatically constructed recipes.
+func (r *Recipe) HasSection(name string) bool {
+	if r.SectionsPresent == nil {
+		return false
+	}
+	return r.SectionsPresent[name]
+}
+
 // ─── Constructor ──────────────────────────────────────────────────────────────
 
 // newRecipe returns a Recipe with sentinel values for fields that distinguish
@@ -339,9 +354,12 @@ func parseV1(data []byte) (*Recipe, error) {
 		r.Name = title
 	}
 
+	r.SectionsPresent = make(map[string]bool, len(sections))
 	for _, s := range sections {
 		body := strings.Join(s.lines, "\n")
-		switch strings.ToLower(s.header) {
+		normalized := strings.ToLower(s.header)
+		r.SectionsPresent[normalized] = true
+		switch normalized {
 		case "models":
 			r.Models = parseList(body)
 		case "system prompt":

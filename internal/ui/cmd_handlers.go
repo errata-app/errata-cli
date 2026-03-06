@@ -603,6 +603,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
 			MaxHistoryTurns:  cfg.MaxHistoryTurns,
+			MaxSteps:         cfg.MaxSteps,
 			CheckpointPath:   resumeCPPath,
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, resumeSystemPrompt)

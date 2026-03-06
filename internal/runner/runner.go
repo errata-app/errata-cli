@@ -19,7 +19,6 @@ import (
 // Last-resort fallbacks. In normal operation these are never reached because
 // config.Load() applies the default recipe (pkg/recipe/default.recipe.md)
 // which populates all fields before they reach RunOptions.
-const agentTimeout = 5 * time.Minute
 const defaultMaxHistoryTurns = 20
 const autoCompactThreshold = 0.80
 
@@ -29,7 +28,7 @@ type runOptsKey struct{}
 
 // RunOptions controls per-run behavior. Zero values fall back to package defaults.
 type RunOptions struct {
-	Timeout          time.Duration // 0 → agentTimeout (5 min)
+	Timeout          time.Duration // 0 → no timeout
 	CompactThreshold float64       // 0 → autoCompactThreshold (0.80)
 	MaxHistoryTurns  int           // 0 → defaultMaxHistoryTurns (20)
 	MaxSteps         int           // 0 → unlimited agentic loop turns
@@ -46,9 +45,6 @@ func WithRunOptions(ctx context.Context, opts RunOptions) context.Context {
 // for any zero values.
 func runOptsFromContext(ctx context.Context) RunOptions {
 	v, _ := ctx.Value(runOptsKey{}).(RunOptions)
-	if v.Timeout == 0 {
-		v.Timeout = agentTimeout
-	}
 	if v.CompactThreshold == 0 {
 		v.CompactThreshold = autoCompactThreshold
 	}
@@ -90,7 +86,13 @@ func RunAll(
 
 	for i, a := range adapters {
 		wg.Go(func() {
-			tctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+			var tctx context.Context
+			var cancel context.CancelFunc
+			if opts.Timeout > 0 {
+				tctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+			} else {
+				tctx, cancel = context.WithCancel(ctx)
+			}
 			defer cancel()
 			if opts.MaxSteps > 0 {
 				tctx = tools.WithMaxSteps(tctx, opts.MaxSteps)

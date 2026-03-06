@@ -537,6 +537,44 @@ func TestDefault_IsNonNil(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, r.Constraints.Timeout)
 }
 
+// ─── SectionsPresent tests ────────────────────────────────────────────────────
+
+func TestParse_SectionsPresent(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, v1(`
+## Constraints
+max_steps: 50
+`)))
+	require.NoError(t, err)
+	assert.True(t, r.HasSection("constraints"), "declared section should be tracked")
+	assert.False(t, r.HasSection("context"), "undeclared section should not be tracked")
+	assert.False(t, r.HasSection("model parameters"), "undeclared section should not be tracked")
+}
+
+func TestParse_SectionsPresent_Multiple(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, v1(`
+## Models
+- m1
+
+## Constraints
+max_steps: 50
+
+## Context
+max_history_turns: 10
+`)))
+	require.NoError(t, err)
+	assert.True(t, r.HasSection("models"))
+	assert.True(t, r.HasSection("constraints"))
+	assert.True(t, r.HasSection("context"))
+	assert.False(t, r.HasSection("model parameters"))
+	assert.False(t, r.HasSection("sub-agent"))
+}
+
+func TestHasSection_NilMap(t *testing.T) {
+	r := &recipe.Recipe{}
+	assert.False(t, r.HasSection("constraints"), "programmatic recipe with nil map should return false")
+	assert.False(t, r.HasSection("context"))
+}
+
 // ─── Gap 2: Tool Descriptions ────────────────────────────────────────────────
 
 func TestParse_ToolDescriptions(t *testing.T) {
