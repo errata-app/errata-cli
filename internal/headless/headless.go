@@ -26,7 +26,7 @@ import (
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/prompt"
-	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/pkg/recipe"
 	"github.com/suarezc/errata/internal/runner"
 	"github.com/suarezc/errata/internal/sandbox"
 	"github.com/suarezc/errata/internal/subagent"

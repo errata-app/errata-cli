@@ -13,7 +13,7 @@ import (
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
 	"github.com/suarezc/errata/internal/prompthistory"
-	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/pkg/recipe"
 	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/tools"
 )

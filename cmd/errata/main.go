@@ -21,8 +21,8 @@ import (
 	"github.com/suarezc/errata/internal/paths"
 	"github.com/suarezc/errata/internal/preferences"
 	"github.com/suarezc/errata/internal/pricing"
-	"github.com/suarezc/errata/internal/recipe"
-	"github.com/suarezc/errata/internal/recipestore"
+	"github.com/suarezc/errata/pkg/recipe"
+	"github.com/suarezc/errata/pkg/recipestore"
 	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/tools"
 	"github.com/suarezc/errata/internal/ui"
@@ -159,7 +159,7 @@ func setupAdapters(cfg config.Config, pricingCachePath, debugLog, sessionID stri
 func runREPL(cmd *cobra.Command, args []string) error {
 	rec := loadRecipe()
 	cfg := config.Load()
-	rec.ApplyTo(&cfg)
+	config.ApplyRecipe(rec, &cfg)
 	layout := paths.New(cfg.DataDir)
 	applyProjectRoot(rec)
 	applyRecipeToolSettings(rec)
@@ -210,7 +210,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 				rec = sessionRec
 				// Re-apply on top of config.
 				cfg = config.Load()
-				rec.ApplyTo(&cfg)
+				config.ApplyRecipe(rec, &cfg)
 				layout = paths.New(cfg.DataDir)
 				applyRecipeToolSettings(rec)
 			}
@@ -274,7 +274,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	}
 
 	cfg := config.Load()
-	rec.ApplyTo(&cfg)
+	config.ApplyRecipe(rec, &cfg)
 	layout := paths.New(cfg.DataDir)
 	applyProjectRoot(rec)
 	applyRecipeToolSettings(rec)
@@ -331,7 +331,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 	configFilter, _ := cmd.Flags().GetString("config")
 	rec := loadRecipe()
 	cfg := config.Load()
-	rec.ApplyTo(&cfg)
+	config.ApplyRecipe(rec, &cfg)
 	layout := paths.New(cfg.DataDir)
 
 	filter := resolveStatsFilter(layout.ConfigStore, recipeFilter, configFilter)

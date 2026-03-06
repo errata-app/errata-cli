@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/datastore"
 	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/pkg/recipe"
 	"github.com/suarezc/errata/internal/session"
 	"github.com/suarezc/errata/internal/tools"
 )

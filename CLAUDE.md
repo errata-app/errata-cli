@@ -46,8 +46,10 @@ and `golangci-lint run ./...` before committing. Fix any issues before proceedin
 
 ## Tool Usage Notes
 
-- The Edit tool may fail on tab-indented Go files. If an edit fails to match, fall back to `sed`
-  via Bash rather than retrying the same edit.
+- The Edit tool may fail on tab-indented Go files. If an edit fails to match, fall back to
+  writing the file directly rather than retrying the same edit.
+- Avoid `sed` for file edits — it has consistent issues on macOS (backreferences, tab characters,
+  curly braces). Use Go or direct file writes instead.
 
 ---
 

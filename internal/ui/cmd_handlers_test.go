@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/suarezc/errata/internal/models"
 	"github.com/suarezc/errata/internal/output"
-	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/pkg/recipe"
 )
 
 // ── /clear and /wipe command tests ───────────────────────────────────────────

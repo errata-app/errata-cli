@@ -13,7 +13,7 @@ import (
 	"github.com/suarezc/errata/internal/config"
 	"github.com/suarezc/errata/internal/datastore"
 	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/recipe"
+	"github.com/suarezc/errata/pkg/recipe"
 	"github.com/suarezc/errata/internal/session"
 )
 
