@@ -181,16 +181,17 @@ func DispatchTool(
 // EmitSnapshot sends a "snapshot" event with the current turn state for incremental
 // checkpoint persistence. Called at each turn boundary inside the agentic loop.
 func EmitSnapshot(onEvent func(models.AgentEvent), qualifiedID string,
-	textParts []string, start time.Time, totalInput, totalOutput int64,
+	textParts []string, start time.Time, totalInput, totalOutput, totalReasoning int64,
 	proposed []tools.FileWrite, toolCalls map[string]int) {
 	snap := models.PartialSnapshot{
-		Text:         join(textParts),
-		InputTokens:  totalInput,
-		OutputTokens: totalOutput,
-		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, totalOutput),
-		LatencyMS:    time.Since(start).Milliseconds(),
-		Writes:       proposed,
-		ToolCalls:    toolCalls,
+		Text:            join(textParts),
+		InputTokens:     totalInput,
+		OutputTokens:    totalOutput,
+		ReasoningTokens: totalReasoning,
+		CostUSD:         pricing.CostUSD(qualifiedID, totalInput, totalOutput),
+		LatencyMS:       time.Since(start).Milliseconds(),
+		Writes:          proposed,
+		ToolCalls:       toolCalls,
 	}
 	data, err := json.Marshal(snap)
 	if err != nil {
@@ -242,61 +243,64 @@ func applyOutputProcessing(ctx context.Context, toolName, output string) string 
 // BuildErrorResponse constructs a ModelResponse for an API error encountered mid-loop.
 // qualifiedID is the provider-prefixed model ID passed to CostUSD
 // (e.g. "anthropic/claude-sonnet-4-6"); pass the bare modelID for OpenRouter/LiteLLM.
-func BuildErrorResponse(modelID, qualifiedID string, start time.Time, totalInput, totalOutput int64, err error) models.ModelResponse {
+func BuildErrorResponse(modelID, qualifiedID string, start time.Time, totalInput, totalOutput, totalReasoning int64, err error) models.ModelResponse {
 	return models.ModelResponse{
-		ModelID:      modelID,
-		LatencyMS:    time.Since(start).Milliseconds(),
-		InputTokens:  totalInput,
-		OutputTokens: totalOutput,
-		CostUSD:      pricing.CostUSD(qualifiedID, totalInput, totalOutput),
-		Error:        err.Error(),
-		StopReason:   models.StopReasonError,
+		ModelID:         modelID,
+		LatencyMS:       time.Since(start).Milliseconds(),
+		InputTokens:     totalInput,
+		OutputTokens:    totalOutput,
+		ReasoningTokens: totalReasoning,
+		CostUSD:         pricing.CostUSD(qualifiedID, totalInput, totalOutput),
+		Error:           err.Error(),
+		StopReason:      models.StopReasonError,
 	}
 }
 
 // BuildInterruptedResponse constructs a ModelResponse for a run that was cancelled mid-flight.
 // It preserves the partial text, proposed writes, and token counts accumulated before cancellation.
 func BuildInterruptedResponse(modelID, qualifiedID string, textParts []string,
-	start time.Time, totalInput, totalOutput int64,
+	start time.Time, totalInput, totalOutput, totalReasoning int64,
 	proposed []tools.FileWrite, toolCalls map[string]int, err error) models.ModelResponse {
 	return models.ModelResponse{
-		ModelID:        modelID,
-		Text:           join(textParts),
-		LatencyMS:      time.Since(start).Milliseconds(),
-		InputTokens:    totalInput,
-		OutputTokens:   totalOutput,
-		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, totalOutput),
-		ProposedWrites: proposed,
-		ToolCalls:      toolCalls,
-		Error:          err.Error(),
-		Interrupted:    true,
-		StopReason:     models.StopReasonCancelled,
+		ModelID:         modelID,
+		Text:            join(textParts),
+		LatencyMS:       time.Since(start).Milliseconds(),
+		InputTokens:     totalInput,
+		OutputTokens:    totalOutput,
+		ReasoningTokens: totalReasoning,
+		CostUSD:         pricing.CostUSD(qualifiedID, totalInput, totalOutput),
+		ProposedWrites:  proposed,
+		ToolCalls:       toolCalls,
+		Error:           err.Error(),
+		Interrupted:     true,
+		StopReason:      models.StopReasonCancelled,
 	}
 }
 
 // BuildSuccessResponse constructs a ModelResponse after a completed agentic loop.
 // qualifiedID is the provider-prefixed model ID passed to CostUSD.
 func BuildSuccessResponse(modelID, qualifiedID string, textParts []string, start time.Time,
-	totalInput, totalOutput int64,
+	totalInput, totalOutput, totalReasoning int64,
 	proposed []tools.FileWrite, toolCalls map[string]int) models.ModelResponse {
 	return models.ModelResponse{
-		ModelID:        modelID,
-		Text:           join(textParts),
-		LatencyMS:      time.Since(start).Milliseconds(),
-		InputTokens:    totalInput,
-		OutputTokens:   totalOutput,
-		CostUSD:        pricing.CostUSD(qualifiedID, totalInput, totalOutput),
-		ProposedWrites: proposed,
-		ToolCalls:      toolCalls,
-		StopReason:     models.StopReasonComplete,
+		ModelID:         modelID,
+		Text:            join(textParts),
+		LatencyMS:       time.Since(start).Milliseconds(),
+		InputTokens:     totalInput,
+		OutputTokens:    totalOutput,
+		ReasoningTokens: totalReasoning,
+		CostUSD:         pricing.CostUSD(qualifiedID, totalInput, totalOutput),
+		ProposedWrites:  proposed,
+		ToolCalls:       toolCalls,
+		StopReason:      models.StopReasonComplete,
 	}
 }
 
 // BuildMaxStepsResponse constructs a ModelResponse when the agentic loop hit the max_steps limit.
 func BuildMaxStepsResponse(modelID, qualifiedID string, textParts []string, start time.Time,
-	totalInput, totalOutput int64,
+	totalInput, totalOutput, totalReasoning int64,
 	proposed []tools.FileWrite, toolCalls map[string]int) models.ModelResponse {
-	resp := BuildSuccessResponse(modelID, qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+	resp := BuildSuccessResponse(modelID, qualifiedID, textParts, start, totalInput, totalOutput, totalReasoning, proposed, toolCalls)
 	resp.StopReason = models.StopReasonMaxSteps
 	return resp
 }

@@ -438,6 +438,40 @@ func TestSnapshotFromPartial(t *testing.T) {
 	}
 }
 
+// ─── ReasoningTokens round-trip ──────────────────────────────────────────────
+
+func TestFromModelResponse_ReasoningTokens_RoundTrip(t *testing.T) {
+	orig := models.ModelResponse{
+		ModelID:         "o3",
+		Text:            "done",
+		InputTokens:     529000,
+		OutputTokens:    15000,
+		ReasoningTokens: 14500,
+		Interrupted:     true,
+	}
+	snap := FromModelResponse(orig)
+	if snap.ReasoningTokens != 14500 {
+		t.Errorf("snapshot ReasoningTokens = %d, want 14500", snap.ReasoningTokens)
+	}
+	restored := snap.ToModelResponse()
+	if restored.ReasoningTokens != 14500 {
+		t.Errorf("restored ReasoningTokens = %d, want 14500", restored.ReasoningTokens)
+	}
+}
+
+func TestSnapshotFromPartial_ReasoningTokens(t *testing.T) {
+	ps := models.PartialSnapshot{
+		Text:            "partial",
+		InputTokens:     100,
+		OutputTokens:    50,
+		ReasoningTokens: 40,
+	}
+	snap := SnapshotFromPartial("o3", ps)
+	if snap.ReasoningTokens != 40 {
+		t.Errorf("ReasoningTokens = %d, want 40", snap.ReasoningTokens)
+	}
+}
+
 // ─── ToolCalls round-trip ────────────────────────────────────────────────────
 
 func TestFromModelResponse_ToolCalls_RoundTrip(t *testing.T) {

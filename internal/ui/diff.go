@@ -57,6 +57,9 @@ func RenderDiffs(responses []models.ModelResponse, width ...int) string {
 		meta := fmt.Sprintf("%dms", resp.LatencyMS)
 		if tot := resp.InputTokens + resp.OutputTokens; tot > 0 {
 			meta += "  ·  " + fmtTokens(tot) + " tok"
+			if resp.ReasoningTokens > 0 {
+				meta += " (" + fmtTokens(resp.ReasoningTokens) + " reasoning)"
+			}
 			if resp.CostUSD > 0 {
 				meta += fmt.Sprintf("  ·  $%.4f", resp.CostUSD)
 			}

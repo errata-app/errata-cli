@@ -65,7 +65,7 @@ func (a *BedrockAdapter) RunAgent(
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(a.region))
 	if err != nil {
-		return BuildErrorResponse(a.modelID, qualifiedID, start, 0, 0, err), err
+		return BuildErrorResponse(a.modelID, qualifiedID, start, 0, 0, 0, err), err
 	}
 	client := bedrockruntime.NewFromConfig(awsCfg)
 

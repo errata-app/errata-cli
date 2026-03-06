@@ -45,10 +45,11 @@ type EventRecord struct {
 
 // ResponseRecord captures the final outcome of a RunAgent call.
 type ResponseRecord struct {
-	Text          string         `json:"text"`
-	InputTokens   int64          `json:"input_tokens"`
-	OutputTokens  int64          `json:"output_tokens"`
-	CostUSD       float64        `json:"cost_usd"`
+	Text            string         `json:"text"`
+	InputTokens     int64          `json:"input_tokens"`
+	OutputTokens    int64          `json:"output_tokens"`
+	ReasoningTokens int64          `json:"reasoning_tokens,omitempty"`
+	CostUSD         float64        `json:"cost_usd"`
 	LatencyMS     int64          `json:"latency_ms"`
 	ProposedFiles []string       `json:"proposed_files"`
 	Writes        []WriteRecord  `json:"writes,omitempty"`
@@ -179,15 +180,16 @@ func (a *loggingAdapter) RunAgent(
 		Prompt:    prompt,
 		Events:    captured,
 		Response: ResponseRecord{
-			Text:          resp.Text,
-			InputTokens:   resp.InputTokens,
-			OutputTokens:  resp.OutputTokens,
-			CostUSD:       resp.CostUSD,
-			LatencyMS:     resp.LatencyMS,
-			ProposedFiles: proposedFiles,
-			Writes:        writes,
-			ToolCalls:     resp.ToolCalls,
-			Error:         resp.Error,
+			Text:            resp.Text,
+			InputTokens:     resp.InputTokens,
+			OutputTokens:    resp.OutputTokens,
+			ReasoningTokens: resp.ReasoningTokens,
+			CostUSD:         resp.CostUSD,
+			LatencyMS:       resp.LatencyMS,
+			ProposedFiles:   proposedFiles,
+			Writes:          writes,
+			ToolCalls:       resp.ToolCalls,
+			Error:           resp.Error,
 		},
 	})
 

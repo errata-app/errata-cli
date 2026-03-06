@@ -470,6 +470,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.latencyMS = msg.response.LatencyMS
 			p.inputTokens = msg.response.InputTokens
 			p.outputTokens = msg.response.OutputTokens
+			p.reasoningTokens = msg.response.ReasoningTokens
 			p.costUSD = msg.response.CostUSD
 			if msg.response.Interrupted {
 				p.errMsg = "interrupted"
@@ -516,6 +517,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.latencyMS = resp.LatencyMS
 			p.inputTokens = resp.InputTokens
 			p.outputTokens = resp.OutputTokens
+			p.reasoningTokens = resp.ReasoningTokens
 			p.costUSD = resp.CostUSD
 			a.store.AccumulateCost(resp.ModelID, resp.CostUSD)
 			if resp.Interrupted {

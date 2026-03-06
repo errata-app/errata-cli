@@ -30,6 +30,7 @@ type ResponseSnapshot struct {
 	LatencyMS           int64           `json:"latency_ms"`
 	InputTokens         int64           `json:"input_tokens"`
 	OutputTokens        int64           `json:"output_tokens"`
+	ReasoningTokens     int64           `json:"reasoning_tokens,omitempty"`
 	CostUSD             float64         `json:"cost_usd"`
 	ProposedWrites      []WriteSnapshot `json:"proposed_writes,omitempty"`
 	ToolCalls           map[string]int  `json:"tool_calls,omitempty"`
@@ -77,6 +78,7 @@ func FromModelResponse(r models.ModelResponse) ResponseSnapshot {
 		LatencyMS:           r.LatencyMS,
 		InputTokens:         r.InputTokens,
 		OutputTokens:        r.OutputTokens,
+		ReasoningTokens:     r.ReasoningTokens,
 		CostUSD:             r.CostUSD,
 		ProposedWrites:      toWriteSnapshots(r.ProposedWrites),
 		ToolCalls:           r.ToolCalls,
@@ -94,6 +96,7 @@ func (s ResponseSnapshot) ToModelResponse() models.ModelResponse {
 		LatencyMS:           s.LatencyMS,
 		InputTokens:         s.InputTokens,
 		OutputTokens:        s.OutputTokens,
+		ReasoningTokens:     s.ReasoningTokens,
 		CostUSD:             s.CostUSD,
 		ProposedWrites:      fromWriteSnapshots(s.ProposedWrites),
 		ToolCalls:           s.ToolCalls,
@@ -240,14 +243,15 @@ func (s *IncrementalSaver) flush() {
 // AgentEvent) into a ResponseSnapshot suitable for incremental checkpointing.
 func SnapshotFromPartial(modelID string, ps models.PartialSnapshot) ResponseSnapshot {
 	return ResponseSnapshot{
-		ModelID:        modelID,
-		Text:           ps.Text,
-		InputTokens:    ps.InputTokens,
-		OutputTokens:   ps.OutputTokens,
-		CostUSD:        ps.CostUSD,
-		LatencyMS:      ps.LatencyMS,
-		ProposedWrites: toWriteSnapshots(ps.Writes),
-		ToolCalls:      ps.ToolCalls,
-		Interrupted:    true, // still in progress
+		ModelID:         modelID,
+		Text:            ps.Text,
+		InputTokens:     ps.InputTokens,
+		OutputTokens:    ps.OutputTokens,
+		ReasoningTokens: ps.ReasoningTokens,
+		CostUSD:         ps.CostUSD,
+		LatencyMS:       ps.LatencyMS,
+		ProposedWrites:  toWriteSnapshots(ps.Writes),
+		ToolCalls:       ps.ToolCalls,
+		Interrupted:     true, // still in progress
 	}
 }

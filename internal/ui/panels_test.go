@@ -57,6 +57,36 @@ func TestFormatDoneSummary_WithAllFields(t *testing.T) {
 	}
 }
 
+func TestFormatDoneSummary_WithReasoningTokens(t *testing.T) {
+	p := &panelState{
+		toolUseCount:    5,
+		inputTokens:     529000,
+		outputTokens:    15000,
+		reasoningTokens: 14500,
+		latencyMS:       5000,
+		costUSD:         1.18,
+	}
+	got := formatDoneSummary(p)
+	if !strings.Contains(got, "14.5k reasoning") {
+		t.Errorf("expected reasoning token info, got: %s", got)
+	}
+	if !strings.Contains(got, "544.0k tokens") {
+		t.Errorf("expected total token count, got: %s", got)
+	}
+}
+
+func TestFormatDoneSummary_NoReasoningTokensWhenZero(t *testing.T) {
+	p := &panelState{
+		inputTokens:  1000,
+		outputTokens: 500,
+		latencyMS:    500,
+	}
+	got := formatDoneSummary(p)
+	if strings.Contains(got, "reasoning") {
+		t.Errorf("should not show reasoning when zero, got: %s", got)
+	}
+}
+
 func TestFormatDoneSummary_EmptyPanel(t *testing.T) {
 	p := &panelState{}
 	got := formatDoneSummary(p)

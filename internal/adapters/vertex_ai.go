@@ -78,7 +78,7 @@ func (a *VertexAIAdapter) RunAgent(
 		Backend:  genai.BackendVertexAI,
 	})
 	if err != nil {
-		return BuildErrorResponse(a.modelID, qualifiedID, start, 0, 0, err), err
+		return BuildErrorResponse(a.modelID, qualifiedID, start, 0, 0, 0, err), err
 	}
 
 	return runGeminiAgentLoop(ctx, geminiRunConfig{

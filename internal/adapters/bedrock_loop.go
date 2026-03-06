@@ -87,7 +87,7 @@ func runBedrockAgentLoop(
 	for {
 		step++
 		if maxSteps > 0 && step > maxSteps {
-			r := BuildMaxStepsResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+			r := BuildMaxStepsResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, 0, proposed, toolCalls)
 			r.Steps = step - 1
 			return r, nil
 		}
@@ -109,14 +109,14 @@ func runBedrockAgentLoop(
 		resp, err := cfg.client.Converse(ctx, input)
 		if err != nil {
 			if ctx.Err() != nil {
-				r := BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls, err)
+				r := BuildInterruptedResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, 0, proposed, toolCalls, err)
 				if ctx.Err() == context.DeadlineExceeded {
 					r.StopReason = models.StopReasonTimeout
 				}
 				r.Steps = step
 				return r, err
 			}
-			r := BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, err)
+			r := BuildErrorResponse(cfg.modelID, cfg.qualifiedID, start, totalInput, totalOutput, 0, err)
 			r.Steps = step
 			return r, err
 		}
@@ -191,10 +191,10 @@ func runBedrockAgentLoop(
 			Role:    bedrocktypes.ConversationRoleUser,
 			Content: toolResults,
 		})
-		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+		EmitSnapshot(onEvent, cfg.qualifiedID, textParts, start, totalInput, totalOutput, 0, proposed, toolCalls)
 	}
 
-	r := BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, proposed, toolCalls)
+	r := BuildSuccessResponse(cfg.modelID, cfg.qualifiedID, textParts, start, totalInput, totalOutput, 0, proposed, toolCalls)
 	r.Steps = step
 	return r, nil
 }
