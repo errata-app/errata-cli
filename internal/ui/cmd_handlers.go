@@ -292,12 +292,15 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
 	var sumPrompt string
-	var recSystemPrompt, recToolGuidance string
+	var recSystemPrompt string
+	var recToolGuidanceMap map[string]string
 	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
 		activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.ToolDescriptions)
 		sumPrompt = activeRec.SummarizationPrompt
 		recSystemPrompt = activeRec.SystemPrompt
-		recToolGuidance = activeRec.ToolGuidance
+		if activeRec.Tools != nil {
+			recToolGuidanceMap = activeRec.Tools.Guidance
+		}
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
@@ -358,7 +361,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			CheckpointPath:   cpPath,
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, recSystemPrompt)
-		runCtx = tools.WithToolGuidance(runCtx, recToolGuidance)
+		runCtx = tools.WithToolGuidanceMap(runCtx, recToolGuidanceMap)
 		if tools.SubagentEnabled {
 			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
 				ads, cfg, mcpDispatchers,
@@ -536,12 +539,15 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
 	var resumeSumPrompt string
-	var resumeSystemPrompt, resumeToolGuidance string
+	var resumeSystemPrompt string
+	var resumeToolGuidanceMap map[string]string
 	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
 		activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.ToolDescriptions)
 		resumeSumPrompt = resumeRec.SummarizationPrompt
 		resumeSystemPrompt = resumeRec.SystemPrompt
-		resumeToolGuidance = resumeRec.ToolGuidance
+		if resumeRec.Tools != nil {
+			resumeToolGuidanceMap = resumeRec.Tools.Guidance
+		}
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
@@ -600,7 +606,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			CheckpointPath:   resumeCPPath,
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, resumeSystemPrompt)
-		runCtx = tools.WithToolGuidance(runCtx, resumeToolGuidance)
+		runCtx = tools.WithToolGuidanceMap(runCtx, resumeToolGuidanceMap)
 		if tools.SubagentEnabled {
 			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
 				ads, cfg, mcpDispatchers,

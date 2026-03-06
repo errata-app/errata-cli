@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-// DefaultToolGuidance returns the built-in tool-use guidance text.
-// Useful for documentation and as a starting point for customization.
-func DefaultToolGuidance() string { return toolUseGuidance }
-
 // guidanceLine is a single guidance instruction tagged with the tool names it
 // applies to. An empty tools slice means the line is always included.
 type guidanceLine struct {
@@ -31,9 +27,14 @@ var defaultGuidanceLines = []guidanceLine{
 	{[]string{WriteToolName, EditToolName}, "- write_file and edit_file proposals are NOT written to disk immediately — they are queued and applied only if the user selects your response."},
 }
 
+// defaultGuidanceByTool maps each tool name to the code-default guidance text
+// for that tool (first tagged line that mentions it). Used as the fallback when
+// the per-tool guidance map is present but lacks an entry for a tool.
+var defaultGuidanceByTool map[string]string
+
 // toolUseGuidance is the full unfiltered guidance text, computed from
-// defaultGuidanceLines at init time. Preserved for DefaultToolGuidance() and
-// backward compatibility with callers that don't have a context.
+// defaultGuidanceLines at init time. Preserved for backward compatibility
+// with callers that don't have a context.
 var toolUseGuidance string
 
 func init() {
@@ -42,7 +43,20 @@ func init() {
 		lines[i] = g.text
 	}
 	toolUseGuidance = "\nTool use guidance:\n" + strings.Join(lines, "\n") + "\n"
+
+	// Build the per-tool default guidance map.
+	defaultGuidanceByTool = make(map[string]string)
+	for _, g := range defaultGuidanceLines {
+		for _, t := range g.tools {
+			if _, exists := defaultGuidanceByTool[t]; !exists {
+				defaultGuidanceByTool[t] = g.text
+			}
+		}
+	}
 }
+
+// spawnAgentGuidance is appended to toolUseGuidance only when SubagentEnabled is true.
+const spawnAgentGuidance = `- Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.`
 
 // buildGuidance returns the guidance text filtered to only include lines whose
 // tagged tools overlap with activeNames. An empty map means "zero tools active"
@@ -70,37 +84,66 @@ func buildGuidance(activeNames map[string]bool) string {
 	return "\nTool use guidance:\n" + strings.Join(lines, "\n") + "\n"
 }
 
-// spawnAgentGuidance is appended to toolUseGuidance only when SubagentEnabled is true.
-const spawnAgentGuidance = `- Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.`
-
-// effectiveGuidance returns toolUseGuidance with spawn_agent line
-// included only when enabled. Used when no context is available (e.g. tests).
-func effectiveGuidance() string {
-	base := toolUseGuidance
-	if SubagentEnabled {
-		return base + spawnAgentGuidance + "\n"
+// buildGuidanceWithOverrides returns guidance text filtered by active tools,
+// with per-tool overrides applied. For each default guidance line, if the
+// override map has an entry for the first tagged tool, the override text is
+// used (prefixed with "- "); otherwise the code default is used.
+func buildGuidanceWithOverrides(activeNames map[string]bool, overrides map[string]string) string {
+	if len(activeNames) == 0 {
+		return ""
 	}
-	return base
+	var lines []string
+	seen := make(map[int]bool) // track which defaultGuidanceLines we've emitted
+	for i, g := range defaultGuidanceLines {
+		if len(g.tools) == 0 {
+			lines = append(lines, g.text)
+			seen[i] = true
+			continue
+		}
+		// Check if any tagged tool is active.
+		active := false
+		for _, t := range g.tools {
+			if activeNames[t] {
+				active = true
+				break
+			}
+		}
+		if !active {
+			continue
+		}
+		seen[i] = true
+		// Check if the first tagged tool has an override.
+		if override, ok := overrides[g.tools[0]]; ok {
+			lines = append(lines, "- "+override)
+		} else {
+			lines = append(lines, g.text)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\nTool use guidance:\n" + strings.Join(lines, "\n") + "\n"
 }
 
 // effectiveGuidanceForCtx returns guidance filtered to active tools from ctx.
-// Custom guidance from context is never filtered — the user wrote it
-// intentionally and it may reference tools by any name.
+// When a per-tool guidance map is present in context, per-tool overrides are
+// applied; tools without an override use code defaults. Filtering by active
+// tools always applies.
 func effectiveGuidanceForCtx(ctx context.Context) string {
-	if override, ok := ToolGuidanceFromContext(ctx); ok && override != "" {
-		base := override
-		if SubagentEnabled {
-			return base + spawnAgentGuidance + "\n"
-		}
-		return base
-	}
-
 	active := ActiveToolsFromContext(ctx)
 	nameSet := make(map[string]bool, len(active))
 	for _, d := range active {
 		nameSet[d.Name] = true
 	}
-	base := buildGuidance(nameSet)
+
+	perTool := ToolGuidanceMapFromContext(ctx)
+	var base string
+	if perTool != nil {
+		base = buildGuidanceWithOverrides(nameSet, perTool)
+	} else {
+		base = buildGuidance(nameSet)
+	}
+
 	if SubagentEnabled {
 		if nameSet[SpawnAgentToolName] {
 			return base + spawnAgentGuidance + "\n"
@@ -111,9 +154,13 @@ func effectiveGuidanceForCtx(ctx context.Context) string {
 
 // SystemPromptGuidance returns the fixed tool-use guidance text.
 // This is the same guidance as in SystemPromptSuffix but without the
-// user-authored extra.
+// user-authored extra. Returns full unfiltered guidance (no context).
 func SystemPromptGuidance() string {
-	return effectiveGuidance()
+	base := toolUseGuidance
+	if SubagentEnabled {
+		return base + spawnAgentGuidance + "\n"
+	}
+	return base
 }
 
 // SystemPromptSuffix returns guidance text appended to each adapter's system prompt

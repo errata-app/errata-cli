@@ -127,21 +127,6 @@ func TestApplyRecipe_SeedNil_DoesNotOverwrite(t *testing.T) {
 	assert.Equal(t, int64(99), *cfg.Seed, "absent seed must not clear existing config")
 }
 
-func TestApplyRecipe_ToolGuidance(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Tool Guidance\nCustom guidance text.\n")))
-	cfg := defaultCfg()
-	config.ApplyRecipe(r, &cfg)
-	assert.Equal(t, "Custom guidance text.", cfg.ToolGuidance)
-}
-
-func TestApplyRecipe_ToolGuidance_Empty_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
-	cfg := defaultCfg()
-	cfg.ToolGuidance = "existing guidance"
-	config.ApplyRecipe(r, &cfg)
-	assert.Equal(t, "existing guidance", cfg.ToolGuidance, "absent ## Tool Guidance must not clear existing config")
-}
-
 func TestApplyRecipe_MaxSteps(t *testing.T) {
 	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\nmax_steps: 25\n")))
 	cfg := defaultCfg()
@@ -184,7 +169,6 @@ func TestApplyRecipe_AllFields_Simultaneous(t *testing.T) {
 		ModelParams: recipe.ModelParamsConfig{
 			Seed: &seed,
 		},
-		ToolGuidance: "Custom tool guidance",
 	}
 
 	cfg := defaultCfg()
@@ -202,7 +186,6 @@ func TestApplyRecipe_AllFields_Simultaneous(t *testing.T) {
 	assert.InDelta(t, 0.65, cfg.CompactThreshold, 1e-9)
 	require.NotNil(t, cfg.Seed)
 	assert.Equal(t, int64(42), *cfg.Seed)
-	assert.Equal(t, "Custom tool guidance", cfg.ToolGuidance)
 }
 
 func TestApplyRecipe_UnsetFields_PreserveAll(t *testing.T) {
@@ -221,7 +204,6 @@ func TestApplyRecipe_UnsetFields_PreserveAll(t *testing.T) {
 		AgentTimeout:      7 * time.Minute,
 		CompactThreshold:  0.90,
 		Seed:              &existingSeed,
-		ToolGuidance:      "existing guidance",
 	}
 
 	// Recipe with only Models set; all other fields at zero values.
@@ -245,6 +227,5 @@ func TestApplyRecipe_UnsetFields_PreserveAll(t *testing.T) {
 	assert.InDelta(t, 0.90, cfg.CompactThreshold, 1e-9)
 	require.NotNil(t, cfg.Seed)
 	assert.Equal(t, int64(99), *cfg.Seed)
-	assert.Equal(t, "existing guidance", cfg.ToolGuidance)
 	assert.Equal(t, 15, cfg.MaxSteps)
 }

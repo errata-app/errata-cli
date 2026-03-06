@@ -666,8 +666,11 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 		Version:      1,
 		Name:         "test-recipe",
 		SystemPrompt: "be helpful",
-		ToolGuidance: "use tools wisely",
-		Tools:        &recipe.ToolsConfig{Allowlist: []string{"bash"}, BashPrefixes: []string{"go test"}},
+		Tools: &recipe.ToolsConfig{
+			Allowlist:    []string{"bash"},
+			BashPrefixes: []string{"go test"},
+			Guidance:     map[string]string{"bash": "use tools wisely"},
+		},
 		ToolDescriptions: map[string]string{"bash": "run commands"},
 		ModelParams:      recipe.ModelParamsConfig{Temperature: &temp},
 		Constraints:      recipe.ConstraintsConfig{MaxSteps: 5, Timeout: 3 * time.Minute},
@@ -684,7 +687,7 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 	assert.Equal(t, 1, snap.Version)
 	assert.Equal(t, "test-recipe", snap.Name)
 	assert.Equal(t, "be helpful", snap.SystemPrompt)
-	assert.Equal(t, "use tools wisely", snap.ToolGuidance)
+	assert.Equal(t, map[string]string{"bash": "use tools wisely"}, snap.ToolGuidance)
 	assert.Equal(t, []string{"go test"}, snap.BashPrefixes)
 	assert.Equal(t, map[string]string{"bash": "run commands"}, snap.ToolDescriptions)
 	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
@@ -729,26 +732,32 @@ func TestBuildRecipeSnapshot_UsesActiveRecipe(t *testing.T) {
 		Version:      1,
 		Name:         "base",
 		SystemPrompt: "base prompt",
-		ToolGuidance: "base guidance",
+		Tools: &recipe.ToolsConfig{
+			Allowlist: []string{"bash"},
+			Guidance:  map[string]string{"bash": "base guidance"},
+		},
 	}
 
 	sessionRec := &recipe.Recipe{
 		Version:      1,
 		Name:         "session",
 		SystemPrompt: "session prompt",
-		ToolGuidance: "session guidance",
+		Tools: &recipe.ToolsConfig{
+			Allowlist: []string{"bash"},
+			Guidance:  map[string]string{"bash": "session guidance"},
+		},
 	}
 	s.SetSessionRecipe(sessionRec)
 
 	snap := s.BuildRecipeSnapshot()
 	assert.Equal(t, "session prompt", snap.SystemPrompt)
-	assert.Equal(t, "session guidance", snap.ToolGuidance)
+	assert.Equal(t, map[string]string{"bash": "session guidance"}, snap.ToolGuidance)
 	assert.Equal(t, "session", snap.Name)
 }
 
 func TestBuildRecipeSnapshot_SessionOverride_NoFieldMerge(t *testing.T) {
-	// Base has SystemPrompt + ToolGuidance; session has only SystemPrompt.
-	// Assert snapshot.ToolGuidance is empty (no fallthrough from base).
+	// Base has SystemPrompt + tool guidance; session has only SystemPrompt + nil Tools.
+	// Assert snapshot.ToolGuidance is nil (no fallthrough from base).
 	// Prevents accidental merge semantics during refactor.
 	s := tempStore(t)
 
@@ -756,14 +765,17 @@ func TestBuildRecipeSnapshot_SessionOverride_NoFieldMerge(t *testing.T) {
 		Version:      1,
 		Name:         "base",
 		SystemPrompt: "base prompt",
-		ToolGuidance: "base guidance",
+		Tools: &recipe.ToolsConfig{
+			Allowlist: []string{"bash"},
+			Guidance:  map[string]string{"bash": "base guidance"},
+		},
 	}
 
 	sessionRec := &recipe.Recipe{
 		Version:      1,
 		Name:         "session-only-prompt",
 		SystemPrompt: "session prompt",
-		// ToolGuidance intentionally left empty
+		// Tools intentionally left nil
 	}
 	s.SetSessionRecipe(sessionRec)
 

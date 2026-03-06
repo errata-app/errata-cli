@@ -16,6 +16,9 @@ import (
 	"github.com/suarezc/errata/internal/tools"
 )
 
+// Last-resort fallbacks. In normal operation these are never reached because
+// config.Load() applies the default recipe (pkg/recipe/default.recipe.md)
+// which populates all fields before they reach RunOptions.
 const agentTimeout = 5 * time.Minute
 const defaultMaxHistoryTurns = 20
 const autoCompactThreshold = 0.80

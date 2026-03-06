@@ -45,7 +45,4 @@ func ApplyRecipe(r *recipe.Recipe, cfg *Config) {
 	if r.ModelParams.Seed != nil {
 		cfg.Seed = r.ModelParams.Seed
 	}
-	if r.ToolGuidance != "" {
-		cfg.ToolGuidance = r.ToolGuidance
-	}
 }

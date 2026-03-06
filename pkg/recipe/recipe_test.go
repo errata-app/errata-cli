@@ -822,10 +822,6 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Contains(t, r.ToolDescriptions, "search_code")
 	assert.Contains(t, r.ToolDescriptions["bash"], "exit codes")
 
-	// Tool Guidance
-	assert.Contains(t, r.ToolGuidance, "Tool use guidance")
-	assert.Contains(t, r.ToolGuidance, "list_directory")
-
 	// Sub-Agent Modes removed from example recipe (feature gated).
 	assert.Empty(t, r.SubAgentModes)
 
@@ -1131,45 +1127,84 @@ filesystem: project_only
 	assert.False(t, r.Sandbox.AllowLocalFetch)
 }
 
-// ─── Tool Guidance ───────────────────────────────────────────────────────────
+// ─── Per-Tool Guidance ───────────────────────────────────────────────────────
 
-func TestParse_ToolGuidance(t *testing.T) {
+func TestParse_ToolsGuidance(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Tool Guidance
-Custom tool guidance:
-- Always use search_code before editing.
-- Never use bash for file manipulation.
+## Tools
+- read_file: Always check file size first.
+- bash: Run tests before committing.
+- search_code
 `)))
 	require.NoError(t, err)
-	assert.Contains(t, r.ToolGuidance, "Custom tool guidance")
-	assert.Contains(t, r.ToolGuidance, "Never use bash")
+	require.NotNil(t, r.Tools)
+	assert.Equal(t, []string{"read_file", "bash", "search_code"}, r.Tools.Allowlist)
+	require.NotNil(t, r.Tools.Guidance)
+	assert.Equal(t, "Always check file size first.", r.Tools.Guidance["read_file"])
+	assert.Equal(t, "Run tests before committing.", r.Tools.Guidance["bash"])
+	_, hasSearchCode := r.Tools.Guidance["search_code"]
+	assert.False(t, hasSearchCode, "tool without guidance text should not appear in map")
 }
 
-func TestParse_ToolGuidance_Absent(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
+func TestParse_ToolsGuidance_BashWithPrefixesAndGuidance(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, v1(`
+## Tools
+- bash(go test *, go build *): Only run go commands.
+- read_file
+`)))
 	require.NoError(t, err)
-	assert.Empty(t, r.ToolGuidance)
+	require.NotNil(t, r.Tools)
+	assert.Contains(t, r.Tools.Allowlist, "bash")
+	assert.Equal(t, []string{"go test *", "go build *"}, r.Tools.BashPrefixes)
+	require.NotNil(t, r.Tools.Guidance)
+	assert.Equal(t, "Only run go commands.", r.Tools.Guidance["bash"])
 }
 
+func TestParse_ToolsGuidance_NoGuidance(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, v1(`
+## Tools
+- read_file
+- bash
+`)))
+	require.NoError(t, err)
+	require.NotNil(t, r.Tools)
+	assert.Nil(t, r.Tools.Guidance, "no per-tool guidance should leave Guidance nil")
+}
 
-func TestMarshalMarkdown_ToolGuidance_RoundTrip(t *testing.T) {
+func TestMarshalMarkdown_ToolsGuidance_RoundTrip(t *testing.T) {
 	orig := &recipe.Recipe{
-		Version:      1,
-		Name:         "Test",
-		ToolGuidance: "My custom guidance:\n- Rule one\n- Rule two",
+		Version: 1,
+		Name:    "Test",
+		Tools: &recipe.ToolsConfig{
+			Allowlist: []string{"read_file", "bash"},
+			Guidance: map[string]string{
+				"read_file": "Check size first.",
+				"bash":      "Run tests only.",
+			},
+		},
 	}
 	md := orig.MarshalMarkdown()
-	assert.Contains(t, md, "## Tool Guidance")
+	assert.Contains(t, md, "- read_file: Check size first.")
+	assert.Contains(t, md, "- bash: Run tests only.")
 
 	path := writeRecipe(t, md)
 	parsed, err := recipe.Parse(path)
 	require.NoError(t, err)
-	assert.Equal(t, orig.ToolGuidance, parsed.ToolGuidance)
+	require.NotNil(t, parsed.Tools)
+	assert.Equal(t, orig.Tools.Guidance, parsed.Tools.Guidance)
 }
 
-func TestMarshalMarkdown_ToolGuidance_Empty(t *testing.T) {
-	r := &recipe.Recipe{Name: "Test"}
+func TestMarshalMarkdown_ToolsGuidance_MixedWithAndWithout(t *testing.T) {
+	r := &recipe.Recipe{
+		Version: 1,
+		Name:    "Test",
+		Tools: &recipe.ToolsConfig{
+			Allowlist: []string{"read_file", "bash"},
+			Guidance:  map[string]string{"read_file": "Custom guidance."},
+		},
+	}
 	md := r.MarshalMarkdown()
-	assert.NotContains(t, md, "## Tool Guidance")
+	assert.Contains(t, md, "- read_file: Custom guidance.")
+	assert.Contains(t, md, "- bash\n")
 }
 
