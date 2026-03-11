@@ -1246,3 +1246,18 @@ func TestMarshalMarkdown_ToolsGuidance_MixedWithAndWithout(t *testing.T) {
 	assert.Contains(t, md, "- bash\n")
 }
 
+func TestParseContent_RoundTrip(t *testing.T) {
+	input := []byte("# My Recipe\nversion: 1\n\n## Models\n- claude-sonnet-4-6\n- gpt-4o\n")
+	r, err := recipe.ParseContent(input)
+	require.NoError(t, err)
+	assert.Equal(t, "My Recipe", r.Name)
+	assert.Equal(t, 1, r.Version)
+
+	md := r.MarshalMarkdown()
+	r2, err := recipe.ParseContent([]byte(md))
+	require.NoError(t, err)
+	assert.Equal(t, r.Name, r2.Name)
+	assert.Equal(t, r.Version, r2.Version)
+	assert.Equal(t, r.Models, r2.Models)
+}
+

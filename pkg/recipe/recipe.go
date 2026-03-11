@@ -259,6 +259,13 @@ func Parse(path string) (*Recipe, error) {
 	return parseBytes(data)
 }
 
+// ParseContent parses raw recipe markdown bytes into a Recipe.
+// This is the programmatic equivalent of Parse but accepts content directly
+// instead of reading from a file path.
+func ParseContent(data []byte) (*Recipe, error) {
+	return parseBytes(data)
+}
+
 // parseEmbedded parses the built-in default recipe from the embedded FS.
 // Panics on failure — a broken embedded recipe is a build/development error
 // that must be caught immediately, not silently degraded.
