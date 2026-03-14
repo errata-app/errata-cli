@@ -8,8 +8,8 @@ import (
 
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/shared"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // openaiRunConfig parameterises the shared OpenAI-compatible agentic loop.

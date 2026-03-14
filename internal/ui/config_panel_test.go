@@ -8,10 +8,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/adapters"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/pkg/recipe"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/adapters"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/pkg/recipe"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // ── buildConfigSections ─────────────────────────────────────────────────────

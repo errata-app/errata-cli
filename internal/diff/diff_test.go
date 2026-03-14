@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/diff"
+	"github.com/errata-app/errata-cli/internal/diff"
 )
 
 func TestCompute_NewFile(t *testing.T) {

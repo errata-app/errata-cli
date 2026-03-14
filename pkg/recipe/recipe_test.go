@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/pkg/recipe"
+	"github.com/errata-app/errata-cli/pkg/recipe"
 )
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

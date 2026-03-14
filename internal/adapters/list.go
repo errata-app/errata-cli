@@ -15,7 +15,7 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/suarezc/errata/internal/config"
+	"github.com/errata-app/errata-cli/internal/config"
 )
 
 // ProviderModels holds the result of querying one provider for its model catalogue.

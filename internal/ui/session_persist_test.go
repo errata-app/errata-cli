@@ -6,11 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/datastore"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/pkg/recipe"
-	"github.com/suarezc/errata/internal/session"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/datastore"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/pkg/recipe"
+	"github.com/errata-app/errata-cli/internal/session"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // ── Group A: truncateStr ────────────────────────────────────────────────────

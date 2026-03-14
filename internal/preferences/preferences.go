@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // Entry is one recorded preference decision.

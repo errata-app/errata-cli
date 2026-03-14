@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/suarezc/errata/internal/prompt"
+	"github.com/errata-app/errata-cli/internal/prompt"
 )
 
 func TestResolveSummarizationPrompt_Custom(t *testing.T) {

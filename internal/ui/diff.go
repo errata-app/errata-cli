@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/suarezc/errata/internal/diff"
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/diff"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 var (

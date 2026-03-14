@@ -9,13 +9,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/history"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/output"
-	"github.com/suarezc/errata/internal/prompthistory"
-	"github.com/suarezc/errata/pkg/recipe"
-	"github.com/suarezc/errata/internal/session"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/history"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/output"
+	"github.com/errata-app/errata-cli/internal/prompthistory"
+	"github.com/errata-app/errata-cli/pkg/recipe"
+	"github.com/errata-app/errata-cli/internal/session"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 func tempStore(t *testing.T) *Store {

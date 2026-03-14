@@ -10,7 +10,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // providerDefaults holds provider-level capability defaults.

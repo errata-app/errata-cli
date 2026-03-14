@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/pricing"
-	"github.com/suarezc/errata/internal/tooloutput"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/pricing"
+	"github.com/errata-app/errata-cli/internal/tooloutput"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // writeAck is returned to the model when a write_file call is intercepted.

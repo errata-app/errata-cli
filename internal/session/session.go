@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/suarezc/errata/internal/uid"
+	"github.com/errata-app/errata-cli/internal/uid"
 )
 
 // GenerateID returns a type-prefixed UUID v7 session ID (e.g. "ses_019505e2-...").

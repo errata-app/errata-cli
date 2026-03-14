@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/suarezc/errata/internal/config"
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/config"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // NewAdapter returns a ModelAdapter for the given model ID using cfg for API keys.

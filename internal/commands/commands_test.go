@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/suarezc/errata/internal/commands"
+	"github.com/errata-app/errata-cli/internal/commands"
 )
 
 func TestAll_NamesStartWithSlash(t *testing.T) {

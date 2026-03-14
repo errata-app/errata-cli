@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/suarezc/errata/internal/criteria"
-	"github.com/suarezc/errata/internal/output"
-	"github.com/suarezc/errata/internal/uid"
+	"github.com/errata-app/errata-cli/internal/criteria"
+	"github.com/errata-app/errata-cli/internal/output"
+	"github.com/errata-app/errata-cli/internal/uid"
 )
 
 // RunReport is the top-level JSON report produced by `errata run`.

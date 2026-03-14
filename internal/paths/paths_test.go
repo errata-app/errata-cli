@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/suarezc/errata/internal/paths"
+	"github.com/errata-app/errata-cli/internal/paths"
 )
 
 func TestDefault_RootIsData(t *testing.T) {

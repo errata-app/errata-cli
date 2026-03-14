@@ -7,9 +7,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/suarezc/errata/internal/config"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/config"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // NewDispatcher returns a SubagentDispatcher that builds and runs sub-agents.
