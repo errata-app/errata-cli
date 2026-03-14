@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/suarezc/errata/internal/capabilities"
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/capabilities"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // GeminiAdapter implements ModelAdapter for Gemini models.

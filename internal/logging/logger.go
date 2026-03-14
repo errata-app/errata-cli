@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/uid"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/uid"
 )
 
 // ─── Log entry types ─────────────────────────────────────────────────────────

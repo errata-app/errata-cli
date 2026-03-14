@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/config"
-	"github.com/suarezc/errata/pkg/recipe"
+	"github.com/errata-app/errata-cli/internal/config"
+	"github.com/errata-app/errata-cli/pkg/recipe"
 )
 
 func TestLoad_Defaults(t *testing.T) {

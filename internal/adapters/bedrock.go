@@ -8,8 +8,8 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
-	"github.com/suarezc/errata/internal/capabilities"
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/capabilities"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // BedrockAdapter implements ModelAdapter for Amazon Bedrock using the Converse API.

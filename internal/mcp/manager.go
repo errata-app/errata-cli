@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // ServerConfig holds the configuration for a single MCP server.

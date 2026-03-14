@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/pkg/recipe"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/pkg/recipe"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 func TestSanitizeName(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/history"
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/history"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

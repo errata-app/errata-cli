@@ -11,8 +11,8 @@ import (
 // safe for external repos to vendor or go-get.
 func TestPkgPackages_NoInternalImports(t *testing.T) {
 	pkgs := []string{
-		"github.com/suarezc/errata/pkg/recipe",
-		"github.com/suarezc/errata/pkg/recipestore",
+		"github.com/errata-app/errata-cli/pkg/recipe",
+		"github.com/errata-app/errata-cli/pkg/recipestore",
 	}
 
 	for _, pkg := range pkgs {

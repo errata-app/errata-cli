@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/pkg/recipestore"
+	"github.com/errata-app/errata-cli/pkg/recipestore"
 )
 
 func TestHash_Deterministic(t *testing.T) {

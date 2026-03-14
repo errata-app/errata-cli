@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/adapters"
-	"github.com/suarezc/errata/internal/config"
+	"github.com/errata-app/errata-cli/internal/adapters"
+	"github.com/errata-app/errata-cli/internal/config"
 )
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

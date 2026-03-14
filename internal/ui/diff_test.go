@@ -6,9 +6,9 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/tools"
-	"github.com/suarezc/errata/internal/ui"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/tools"
+	"github.com/errata-app/errata-cli/internal/ui"
 )
 
 // --- RenderDiffs ---

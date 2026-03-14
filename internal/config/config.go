@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/suarezc/errata/pkg/recipe"
+	"github.com/errata-app/errata-cli/pkg/recipe"
 )
 
 // Config holds all runtime settings.

@@ -4,7 +4,7 @@ package models
 import (
 	"context"
 
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // ConversationTurn is one prior exchange in the conversation history.

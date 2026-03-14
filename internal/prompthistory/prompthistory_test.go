@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/suarezc/errata/internal/prompthistory"
+	"github.com/errata-app/errata-cli/internal/prompthistory"
 )
 
 func TestLoad_MissingFile(t *testing.T) {

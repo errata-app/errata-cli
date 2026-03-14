@@ -1,4 +1,4 @@
-module github.com/suarezc/errata
+module github.com/errata-app/errata-cli
 
 go 1.25.0
 

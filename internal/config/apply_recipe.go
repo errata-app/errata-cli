@@ -3,7 +3,7 @@ package config
 import (
 	"strings"
 
-	"github.com/suarezc/errata/pkg/recipe"
+	"github.com/errata-app/errata-cli/pkg/recipe"
 )
 
 // ApplyRecipe overlays recipe settings onto cfg.

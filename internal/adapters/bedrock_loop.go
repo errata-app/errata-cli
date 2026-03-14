@@ -12,8 +12,8 @@ import (
 	bedrockdocument "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // bedrockConverser abstracts the Bedrock Converse API for testing.

@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/uid"
+	"github.com/errata-app/errata-cli/internal/uid"
 )
 
 // uuidV7Re matches a UUID v7: version nibble is 7, variant bits are 8-b.

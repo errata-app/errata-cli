@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/suarezc/errata/internal/reminders"
+	"github.com/errata-app/errata-cli/internal/reminders"
 )
 
 // ─── ParseTrigger ───────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/suarezc/errata/internal/tooloutput"
+	"github.com/errata-app/errata-cli/internal/tooloutput"
 )
 
 func lines(n int) string {

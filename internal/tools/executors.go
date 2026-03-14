@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/suarezc/errata/internal/sandbox"
+	"github.com/errata-app/errata-cli/internal/sandbox"
 )
 
 // bashTimeoutOverride, when > 0, overrides the default bash timeout.

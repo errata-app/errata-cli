@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/suarezc/errata/internal/capabilities"
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/capabilities"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // AnthropicAdapter implements ModelAdapter for Anthropic Claude models.

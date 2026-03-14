@@ -12,17 +12,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/suarezc/errata/internal/checkpoint"
-	"github.com/suarezc/errata/internal/history"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/output"
-	"github.com/suarezc/errata/internal/preferences"
-	"github.com/suarezc/errata/internal/prompthistory"
-	"github.com/suarezc/errata/pkg/recipe"
-	"github.com/suarezc/errata/pkg/recipestore"
-	"github.com/suarezc/errata/internal/runner"
-	"github.com/suarezc/errata/internal/session"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/checkpoint"
+	"github.com/errata-app/errata-cli/internal/history"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/output"
+	"github.com/errata-app/errata-cli/internal/preferences"
+	"github.com/errata-app/errata-cli/internal/prompthistory"
+	"github.com/errata-app/errata-cli/pkg/recipe"
+	"github.com/errata-app/errata-cli/pkg/recipestore"
+	"github.com/errata-app/errata-cli/internal/runner"
+	"github.com/errata-app/errata-cli/internal/session"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // RewindEntry captures enough state to undo one run.

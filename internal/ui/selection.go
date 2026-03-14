@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/suarezc/errata/internal/datastore"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/datastore"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // handleRatingKey handles y/n/s input in modeRating (single-model response).

@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/suarezc/errata/internal/checkpoint"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/pricing"
-	"github.com/suarezc/errata/internal/prompt"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/checkpoint"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/pricing"
+	"github.com/errata-app/errata-cli/internal/prompt"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // Last-resort fallbacks. In normal operation these are never reached because

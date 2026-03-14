@@ -8,8 +8,8 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // anthropicRunConfig parameterises the Anthropic agentic loop.

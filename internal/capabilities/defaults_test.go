@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/suarezc/errata/internal/capabilities"
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/capabilities"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 func TestDefaultCapabilities_KnownModel(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"github.com/suarezc/errata/internal/capabilities"
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/capabilities"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // OpenAIAdapter implements ModelAdapter for OpenAI models.

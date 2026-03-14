@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 func TestFormatElapsed(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/suarezc/errata/internal/models"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 // Load reads the history file at path and returns the stored conversation turns.

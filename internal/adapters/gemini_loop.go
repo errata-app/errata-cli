@@ -9,8 +9,8 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/tools"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // geminiRunConfig parameterises the shared Gemini agentic loop.

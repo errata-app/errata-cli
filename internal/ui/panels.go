@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"github.com/suarezc/errata/internal/models"
-	"github.com/suarezc/errata/internal/pricing"
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/pricing"
 )
 
 const maxPanelEvents = 20

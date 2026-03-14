@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/suarezc/errata/internal/commands"
+	"github.com/errata-app/errata-cli/internal/commands"
 )
 
 // maxHintLines is the maximum number of completion hint lines shown below the
