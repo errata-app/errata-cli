@@ -2,7 +2,12 @@
 // All persistent file locations are derived from a single root directory.
 package paths
 
-import "path/filepath"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 // Layout holds all data file paths derived from a single root directory.
 type Layout struct {
@@ -33,4 +38,31 @@ func New(root string) Layout {
 // Default returns a Layout rooted at "data".
 func Default() Layout {
 	return New("data")
+}
+
+// RecipesDir returns the path to the shared recipes directory (~/.errata/recipes/).
+func RecipesDir() string {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return ".errata/recipes"
+	}
+	return filepath.Join(home, ".errata", "recipes")
+}
+
+// NextAvailable returns dir/name if it doesn't exist, otherwise tries
+// name with incrementing numeric suffixes: slug1.md, slug2.md, etc.
+func NextAvailable(dir, name string) string {
+	candidate := filepath.Join(dir, name)
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		return candidate
+	}
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 1; i <= 100; i++ {
+		candidate = filepath.Join(dir, fmt.Sprintf("%s%d%s", stem, i, ext))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+	return filepath.Join(dir, name) // fallback
 }

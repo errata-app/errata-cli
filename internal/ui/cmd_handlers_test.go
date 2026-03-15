@@ -258,9 +258,8 @@ func newClientForTest(srvURL, token string) *api.Client {
 
 func TestHandlePublishCommand_NotLoggedIn(t *testing.T) {
 	a := newAppForTestWithRecipe(t, nil, &recipe.Recipe{Name: "test"})
-	// Ensure no token is stored so api.NewClient() produces a logged-out client.
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	// Set an apiClient with no token (not logged in).
+	a.apiClient = newClientForTest("http://unused", "")
 
 	result, _ := a.handlePublishCommand()
 	app := result.(App)
@@ -270,10 +269,7 @@ func TestHandlePublishCommand_NotLoggedIn(t *testing.T) {
 
 func TestHandlePublishCommand_NoRecipe(t *testing.T) {
 	a := newAppForTest(t, nil)
-	// Save a token so we appear logged in.
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	require.NoError(t, api.SaveToken("test-token"))
+	a.apiClient = newClientForTest("http://unused", "test-token")
 
 	result, _ := a.handlePublishCommand()
 	app := result.(App)
@@ -293,14 +289,22 @@ func TestHandlePublishCommand_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Verify the test server returns the expected response directly via client.
-	client := newClientForTest(srv.URL, "test-token")
-	entry, err := client.CreateRecipe("# My Recipe\nversion: 1\n")
+	a := newAppForTestWithRecipe(t, nil, &recipe.Recipe{Name: "My Recipe"})
+	a.apiClient = newClientForTest(srv.URL, "test-token")
+
+	result, cmd := a.handlePublishCommand()
+	app := result.(App)
+	// Synchronous part shows "Publishing…"
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "Publishing")
+	// cmd is non-nil (batched: print + async HTTP call)
+	assert.NotNil(t, cmd)
+
+	// Execute the async function to verify it produces the correct message.
+	entry, err := a.apiClient.CreateRecipe("# My Recipe\nversion: 1\n")
 	require.NoError(t, err)
 	assert.Equal(t, "alice/my-recipe", entry.Ref())
 }
-
-// ── /pull command tests ──────────────────────────────────────────────────────
 
 func TestHandlePullCommand_NoArgs(t *testing.T) {
 	a := newAppForTest(t, nil)
@@ -308,4 +312,35 @@ func TestHandlePullCommand_NoArgs(t *testing.T) {
 	app := result.(App)
 	last := app.feed[len(app.feed)-1].text
 	assert.Contains(t, last, "Usage")
+}
+
+func TestHandlePullCommand_Success(t *testing.T) {
+	recipeContent := "# Pulled Recipe\nversion: 1\n\n## Models\n- alpha\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/recipes/alice/cool-recipe/raw", r.URL.Path)
+		w.Header().Set("Content-Type", "text/markdown")
+		w.Write([]byte(recipeContent))
+	}))
+	defer srv.Close()
+
+	a := newAppForTest(t, nil)
+	a.apiClient = newClientForTest(srv.URL, "test-token")
+
+	result, cmd := a.handlePullCommand("alice/cool-recipe")
+	app := result.(App)
+	// Synchronous part shows "Pulling…"
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "Pulling alice/cool-recipe")
+	assert.NotNil(t, cmd)
+
+	// Simulate the async completion by calling handlePullComplete directly.
+	raw, err := a.apiClient.GetRecipeRaw("alice/cool-recipe")
+	require.NoError(t, err)
+	result2, _ := app.handlePullComplete(raw, "alice/cool-recipe")
+	app2 := result2.(App)
+	last2 := app2.feed[len(app2.feed)-1].text
+	assert.Contains(t, last2, "Pulled")
+	assert.Contains(t, last2, "Pulled Recipe")
+	require.NotNil(t, app2.store.SessionRecipe())
+	assert.Equal(t, []string{"alpha"}, app2.store.SessionRecipe().Models)
 }

@@ -83,13 +83,12 @@ func (r *RecipeEntry) Ref() string {
 	return r.ID
 }
 
-// RecipesDir returns the path to the shared recipes directory (~/.errata/recipes/).
-func RecipesDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".errata/recipes"
+// SlugFromRef extracts the slug (last path component) from an author/slug ref.
+func SlugFromRef(ref string) string {
+	if i := strings.LastIndex(ref, "/"); i >= 0 {
+		return ref[i+1:]
 	}
-	return filepath.Join(home, ".errata", "recipes")
+	return ref
 }
 
 // RecipeList is the paginated response from GET /recipes.

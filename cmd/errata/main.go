@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
-
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/errata-app/errata-cli/internal/adapters"
@@ -569,18 +568,14 @@ func runPull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("pull failed: %w", err)
 	}
 
-	// Extract slug from ref (last component after /).
-	slug := ref
-	if i := strings.LastIndex(ref, "/"); i >= 0 {
-		slug = ref[i+1:]
-	}
+	slug := api.SlugFromRef(ref)
 
-	dir := api.RecipesDir()
+	dir := paths.RecipesDir()
 	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
 		return fmt.Errorf("could not create recipes directory: %w", mkErr)
 	}
 
-	dest := incrementPath(dir, slug+".md")
+	dest := paths.NextAvailable(dir, slug+".md")
 	if writeErr := os.WriteFile(dest, []byte(raw), 0o600); writeErr != nil {
 		return fmt.Errorf("could not write recipe: %w", writeErr)
 	}
@@ -589,22 +584,4 @@ func runPull(cmd *cobra.Command, args []string) error {
 	base := strings.TrimSuffix(filepath.Base(dest), ".md")
 	fmt.Printf("Saved to %s — run with: errata -r %s\n", dest, base)
 	return nil
-}
-
-// incrementPath returns dir/name if it doesn't exist, otherwise tries
-// name with incrementing numeric suffixes: slug1.md, slug2.md, etc.
-func incrementPath(dir, name string) string {
-	candidate := filepath.Join(dir, name)
-	if _, err := os.Stat(candidate); os.IsNotExist(err) {
-		return candidate
-	}
-	ext := filepath.Ext(name)
-	stem := strings.TrimSuffix(name, ext)
-	for i := 1; i <= 100; i++ {
-		candidate = filepath.Join(dir, fmt.Sprintf("%s%d%s", stem, i, ext))
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
-			return candidate
-		}
-	}
-	return filepath.Join(dir, name) // fallback
 }

@@ -74,12 +74,23 @@ func TestRecipeEntry_Ref(t *testing.T) {
 	})
 }
 
-// ── RecipesDir ───────────────────────────────────────────────────────────────
+// ── SlugFromRef ──────────────────────────────────────────────────────────────
 
-func TestRecipesDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(home, ".errata", "recipes"), RecipesDir())
+func TestSlugFromRef(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want string
+	}{
+		{"alice/my-recipe", "my-recipe"},
+		{"org/sub/slug", "slug"},
+		{"bare-slug", "bare-slug"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			assert.Equal(t, tt.want, SlugFromRef(tt.ref))
+		})
+	}
 }
 
 // ── Me endpoint ──────────────────────────────────────────────────────────────

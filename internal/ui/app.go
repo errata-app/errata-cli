@@ -17,6 +17,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/rivo/uniseg"
 	"github.com/errata-app/errata-cli/internal/adapters"
+	"github.com/errata-app/errata-cli/internal/api"
 	"github.com/errata-app/errata-cli/internal/commands"
 	"github.com/errata-app/errata-cli/internal/config"
 	"github.com/errata-app/errata-cli/internal/datastore"
@@ -55,6 +56,17 @@ type welcomeMsg struct{}
 type escHintMsg struct{} // fired after 300ms to dismiss "ESC again to clear" hint
 
 type panelTickMsg struct{} // periodic re-render during modeRunning for elapsed time
+
+type publishCompleteMsg struct {
+	ref string
+	err error
+}
+
+type pullCompleteMsg struct {
+	raw string
+	ref string
+	err error
+}
 
 // panelTick returns a tea.Cmd that fires a panelTickMsg after 1 second.
 func panelTick() tea.Cmd {
@@ -163,6 +175,9 @@ type App struct {
 	// nil when no reminders are configured in the recipe.
 	reminderState *reminders.State
 
+	// apiClient is the errata.app API client, injected for testability.
+	apiClient *api.Client
+
 	// debugLog is true when --debug-log is active; enables raw API request logging.
 	debugLog bool
 
@@ -225,6 +240,7 @@ func New(adapterList []models.ModelAdapter, cfg config.Config, mcpDefs []tools.T
 		mcpDispatchers: mcpDispatchers,
 		providerModels: providerModels,
 		seed:           cfg.Seed,
+		apiClient:      api.NewClient(),
 		debugLog:       debugLog,
 		store:          store,
 	}
@@ -497,6 +513,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.withMessage(
 			"Welcome to Errata! No models are active. Use /config to add models.",
 		)
+
+	case publishCompleteMsg:
+		if msg.err != nil {
+			return a.withMessage(fmt.Sprintf("Publish failed: %v", msg.err))
+		}
+		return a.withMessage(fmt.Sprintf("Published: %s", msg.ref))
+
+	case pullCompleteMsg:
+		if msg.err != nil {
+			return a.withMessage(fmt.Sprintf("Pull failed: %v", msg.err))
+		}
+		return a.handlePullComplete(msg.raw, msg.ref)
 
 	case compactCompleteMsg:
 		a.store.SetHistories(msg.histories)

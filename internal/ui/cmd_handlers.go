@@ -19,6 +19,7 @@ import (
 	"github.com/errata-app/errata-cli/internal/commands"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
+	"github.com/errata-app/errata-cli/internal/paths"
 	"github.com/errata-app/errata-cli/internal/preferences"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/internal/prompt"
@@ -675,8 +676,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 }
 
 func (a App) handlePublishCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	client := api.NewClient()
-	if !client.IsLoggedIn() {
+	if !a.apiClient.IsLoggedIn() {
 		return a.withMessage("Not logged in. Run: errata login")
 	}
 	rec := a.store.ActiveRecipe()
@@ -685,11 +685,15 @@ func (a App) handlePublishCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // 
 	}
 
 	markdown := rec.MarshalMarkdown()
-	entry, err := client.CreateRecipe(markdown)
-	if err != nil {
-		return a.withMessage(fmt.Sprintf("Publish failed: %v", err))
-	}
-	return a.withMessage(fmt.Sprintf("Published: %s", entry.Ref()))
+	client := a.apiClient
+	app, printCmd := a.withMessage("Publishing…")
+	return app, tea.Batch(printCmd, func() tea.Msg {
+		entry, err := client.CreateRecipe(markdown)
+		if err != nil {
+			return publishCompleteMsg{err: err}
+		}
+		return publishCompleteMsg{ref: entry.Ref()}
+	})
 }
 
 func (a App) handlePullCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -697,12 +701,18 @@ func (a App) handlePullCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocr
 		return a.withMessage("Usage: /pull <author/slug>")
 	}
 
-	client := api.NewClient()
-	raw, err := client.GetRecipeRaw(args)
-	if err != nil {
-		return a.withMessage(fmt.Sprintf("Pull failed: %v", err))
-	}
+	client := a.apiClient
+	app, printCmd := a.withMessage("Pulling " + args + "…")
+	return app, tea.Batch(printCmd, func() tea.Msg {
+		raw, err := client.GetRecipeRaw(args)
+		if err != nil {
+			return pullCompleteMsg{err: err}
+		}
+		return pullCompleteMsg{raw: raw, ref: args}
+	})
+}
 
+func (a App) handlePullComplete(raw, ref string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	rec, err := recipe.ParseContent([]byte(raw))
 	if err != nil {
 		return a.withMessage(fmt.Sprintf("Pull failed (invalid recipe): %v", err))
@@ -713,34 +723,19 @@ func (a App) handlePullCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocr
 	a.applySessionRecipe()
 
 	// Also save to ~/.errata/recipes/ for future -r use.
-	slug := args
-	if i := strings.LastIndex(args, "/"); i >= 0 {
-		slug = args[i+1:]
-	}
-	dir := api.RecipesDir()
+	slug := api.SlugFromRef(ref)
+	dir := paths.RecipesDir()
 	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
 		return a.withMessage(fmt.Sprintf("Pulled recipe loaded, but could not save to disk: %v", mkErr))
 	}
-	dest := filepath.Join(dir, slug+".md")
-	if _, statErr := os.Stat(dest); statErr == nil {
-		// Increment to avoid overwriting.
-		ext := filepath.Ext(dest)
-		stem := strings.TrimSuffix(filepath.Base(dest), ext)
-		for i := 1; i <= 100; i++ {
-			candidate := filepath.Join(dir, fmt.Sprintf("%s%d%s", stem, i, ext))
-			if _, err := os.Stat(candidate); os.IsNotExist(err) {
-				dest = candidate
-				break
-			}
-		}
-	}
+	dest := paths.NextAvailable(dir, slug+".md")
 	if writeErr := os.WriteFile(dest, []byte(raw), 0o600); writeErr != nil {
 		return a.withMessage(fmt.Sprintf("Recipe loaded but could not save to %s: %v", dest, writeErr))
 	}
 
 	name := rec.Name
 	if name == "" {
-		name = args
+		name = ref
 	}
 	return a.withMessage(fmt.Sprintf("Pulled %q — loaded as session recipe. Saved to %s", name, dest))
 }
