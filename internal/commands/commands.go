@@ -21,6 +21,8 @@ var All = []Command{
 	{"/save", "Save session recipe to disk: /save [path]"},
 	{"/load", "Load recipe from disk: /load <path>"},
 	{"/export", "Export output report: /export [path]"},
+	{"/publish", "Publish recipe to errata.app"},
+	{"/pull", "Pull recipe from errata.app: /pull <author/name>"},
 	{"/stats", "Show preference wins and session cost"},
 	{"/exit", "Exit"},
 }

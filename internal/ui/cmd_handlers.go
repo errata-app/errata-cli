@@ -14,10 +14,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/errata-app/errata-cli/internal/adapters"
+	"github.com/errata-app/errata-cli/internal/api"
 	"github.com/errata-app/errata-cli/internal/checkpoint"
 	"github.com/errata-app/errata-cli/internal/commands"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
+	"github.com/errata-app/errata-cli/internal/paths"
 	"github.com/errata-app/errata-cli/internal/preferences"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/internal/prompt"
@@ -42,6 +44,12 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 	}
 	if lower == "/export" || strings.HasPrefix(lower, "/export ") {
 		return a.handleExportCommand(strings.TrimSpace(trimmed[len("/export"):]))
+	}
+	if lower == "/publish" {
+		return a.handlePublishCommand()
+	}
+	if lower == "/pull" || strings.HasPrefix(lower, "/pull ") {
+		return a.handlePullCommand(strings.TrimSpace(trimmed[len("/pull"):]))
 	}
 	switch lower {
 	case "/exit", "/quit":
@@ -665,6 +673,71 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
 	})
 	return a, tea.Batch(resumeBatchCmds...)
+}
+
+func (a App) handlePublishCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if !a.apiClient.IsLoggedIn() {
+		return a.withMessage("Not logged in. Run: errata login")
+	}
+	rec := a.store.ActiveRecipe()
+	if rec == nil {
+		return a.withMessage("No recipe to publish.")
+	}
+
+	markdown := rec.MarshalMarkdown()
+	client := a.apiClient
+	app, printCmd := a.withMessage("Publishing…")
+	return app, tea.Batch(printCmd, func() tea.Msg {
+		entry, err := client.CreateRecipe(markdown)
+		if err != nil {
+			return publishCompleteMsg{err: err}
+		}
+		return publishCompleteMsg{ref: entry.Ref()}
+	})
+}
+
+func (a App) handlePullCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if args == "" {
+		return a.withMessage("Usage: /pull <author/slug>")
+	}
+
+	client := a.apiClient
+	app, printCmd := a.withMessage("Pulling " + args + "…")
+	return app, tea.Batch(printCmd, func() tea.Msg {
+		raw, err := client.GetRecipeRaw(args)
+		if err != nil {
+			return pullCompleteMsg{err: err}
+		}
+		return pullCompleteMsg{raw: raw, ref: args}
+	})
+}
+
+func (a App) handlePullComplete(raw, ref string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	rec, err := recipe.ParseContent([]byte(raw))
+	if err != nil {
+		return a.withMessage(fmt.Sprintf("Pull failed (invalid recipe): %v", err))
+	}
+
+	// Set as session recipe.
+	a.store.SetSessionRecipe(cloneRecipe(rec))
+	a.applySessionRecipe()
+
+	// Also save to ~/.errata/recipes/ for future -r use.
+	slug := api.SlugFromRef(ref)
+	dir := paths.RecipesDir()
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		return a.withMessage(fmt.Sprintf("Pulled recipe loaded, but could not save to disk: %v", mkErr))
+	}
+	dest := paths.NextAvailable(dir, slug+".md")
+	if writeErr := os.WriteFile(dest, []byte(raw), 0o600); writeErr != nil {
+		return a.withMessage(fmt.Sprintf("Recipe loaded but could not save to %s: %v", dest, writeErr))
+	}
+
+	name := rec.Name
+	if name == "" {
+		name = ref
+	}
+	return a.withMessage(fmt.Sprintf("Pulled %q — loaded as session recipe. Saved to %s", name, dest))
 }
 
 func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver

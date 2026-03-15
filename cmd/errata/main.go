@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/errata-app/errata-cli/internal/adapters"
+	"github.com/errata-app/errata-cli/internal/api"
 	"github.com/errata-app/errata-cli/internal/config"
 	"github.com/errata-app/errata-cli/internal/datastore"
 	"github.com/errata-app/errata-cli/internal/headless"
@@ -71,10 +73,76 @@ func main() {
 		RunE:  runSessions,
 	}
 
+	loginCmd := &cobra.Command{
+		Use:   "login",
+		Short: "Log in to errata.app via GitHub OAuth",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return api.Login()
+		},
+	}
+
+	logoutCmd := &cobra.Command{
+		Use:   "logout",
+		Short: "Log out of errata.app",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := api.NewClient()
+			if !client.IsLoggedIn() {
+				fmt.Println("Not logged in.")
+				return nil
+			}
+			if err := client.Logout(); err != nil {
+				return fmt.Errorf("logout failed: %w", err)
+			}
+			fmt.Println("Logged out.")
+			return nil
+		},
+	}
+
+	whoamiCmd := &cobra.Command{
+		Use:   "whoami",
+		Short: "Show current errata.app user",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := api.NewClient()
+			if !client.IsLoggedIn() {
+				fmt.Println("Not logged in. Run: errata login")
+				return nil
+			}
+			user, err := client.Me()
+			if err != nil {
+				return fmt.Errorf("could not fetch user: %w", err)
+			}
+			if user.DisplayName != "" {
+				fmt.Printf("%s (%s)\n", user.DisplayName, user.Username)
+			} else {
+				fmt.Println(user.Username)
+			}
+			return nil
+		},
+	}
+
+	publishCmd := &cobra.Command{
+		Use:   "publish [path]",
+		Short: "Publish a recipe to errata.app",
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runPublish,
+	}
+
+	pullCmd := &cobra.Command{
+		Use:   "pull <author/slug>",
+		Short: "Pull a recipe from errata.app",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runPull,
+	}
+
 	root.AddCommand(
 		statsCmd,
 		runCmd,
 		sessionsCmd,
+		loginCmd,
+		logoutCmd,
+		whoamiCmd,
+		publishCmd,
+		pullCmd,
 	)
 
 	if err := root.Execute(); err != nil {
@@ -463,5 +531,57 @@ func runSessions(cmd *cobra.Command, args []string) error {
 			prompt,
 		)
 	}
+	return nil
+}
+
+func runPublish(cmd *cobra.Command, args []string) error {
+	client := api.NewClient()
+	if !client.IsLoggedIn() {
+		return fmt.Errorf("not logged in — run: errata login")
+	}
+
+	// Determine recipe path: explicit arg or auto-discover.
+	path := recipePath
+	if len(args) > 0 {
+		path = args[0]
+	}
+	rec, err := recipe.Discover(path)
+	if err != nil {
+		return fmt.Errorf("could not load recipe: %w", err)
+	}
+
+	markdown := rec.MarshalMarkdown()
+	entry, err := client.CreateRecipe(markdown)
+	if err != nil {
+		return fmt.Errorf("publish failed: %w", err)
+	}
+	fmt.Printf("Published: %s\n", entry.Ref())
+	return nil
+}
+
+func runPull(cmd *cobra.Command, args []string) error {
+	ref := args[0]
+	client := api.NewClient()
+
+	raw, err := client.GetRecipeRaw(ref)
+	if err != nil {
+		return fmt.Errorf("pull failed: %w", err)
+	}
+
+	slug := api.SlugFromRef(ref)
+
+	dir := paths.RecipesDir()
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		return fmt.Errorf("could not create recipes directory: %w", mkErr)
+	}
+
+	dest := paths.NextAvailable(dir, slug+".md")
+	if writeErr := os.WriteFile(dest, []byte(raw), 0o600); writeErr != nil {
+		return fmt.Errorf("could not write recipe: %w", writeErr)
+	}
+
+	// Print the basename without .md extension for the -r shortcut.
+	base := strings.TrimSuffix(filepath.Base(dest), ".md")
+	fmt.Printf("Saved to %s — run with: errata -r %s\n", dest, base)
 	return nil
 }
