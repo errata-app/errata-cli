@@ -8,23 +8,23 @@ You'll need to install [go](https://go.dev/).
 ## Install
 
 ```bash
-git clone https://github.com/suarezc/Errata.git
-cd Errata
+git clone https://github.com/errata-app/errata-cli.git
+cd errata-cli
 go build -o errata ./cmd/errata
 ```
 
 or
 
 ```bash
-go install github.com/suarezc/errata/cmd/errata@latest
+go install github.com/errata-app/errata-cli/cmd/errata@latest
 ```
 
 or
 
  Windows
  ```bash
-git clone https://github.com/suarezc/Errata.git
-cd Errata
+git clone https://github.com/errata-app/errata-cli.git
+cd errata-cli
 go build -o errata.exe ./cmd/errata
 ```
 
@@ -145,6 +145,9 @@ errata --resume <id>             # resume a specific session
 | `/rewind` | Undo the last run (revert writes and remove from context) |
 | `/save [path]` | Save the session recipe to disk |
 | `/load <path>` | Load a recipe file into the session |
+| `/export [path]` | Export output report |
+| `/publish` | Publish recipe to errata.app |
+| `/pull <author/slug>` | Pull recipe from errata.app |
 | `/verbose` | Toggle showing model text alongside tool events |
 | `/help` | Show all commands |
 
@@ -184,15 +187,21 @@ jq '.summary.per_model | to_entries[] | "\(.key): \(.value.criteria_passed)/\(.v
 
 ---
 
---- Below are features intended for full release, they do not exist as of now. ---
-## Commands
+## Recipe Sharing
 
-| Command | Description |
-|---------|-------------|
-| `errata publish` | Upload a recipe to errata.app |
-| `errata pull <id>` | Download a community recipe |
+Share recipes via [errata.app](https://errata.app). Authenticate with GitHub, then publish and pull recipes from the command line or the TUI.
+
+```bash
+errata login                     # authenticate via GitHub
+errata whoami                    # show current user
+errata publish                   # publish the session recipe
+errata pull alice/code-review    # download a community recipe
+errata logout                    # revoke and delete token
+```
+
+In the TUI, use `/publish` and `/pull <author/slug>` for the same functionality.
 
 ## Community
 
 - **Browse and share recipes:** [errata.app](https://errata.app)
-- **Report issues:** [GitHub Issues](https://github.com/suarezc/errata/issues)
+- **Report issues:** [GitHub Issues](https://github.com/errata-app/errata-cli/issues)
