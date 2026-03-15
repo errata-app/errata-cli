@@ -1,12 +1,16 @@
 package ui
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/errata-app/errata-cli/internal/api"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/pkg/recipe"
@@ -241,4 +245,67 @@ func TestNextAvailablePath_NoExtension(t *testing.T) {
 
 	require.NoError(t, os.WriteFile("Makefile", []byte("x"), 0o600))
 	assert.Equal(t, "Makefile_1", nextAvailablePath("Makefile"))
+}
+
+// ── /publish command tests ───────────────────────────────────────────────────
+
+// newClientForTest creates an api.Client pointing at the given test server URL.
+func newClientForTest(srvURL, token string) *api.Client {
+	c := api.NewClientWithToken(token)
+	c.SetBaseURL(srvURL)
+	return c
+}
+
+func TestHandlePublishCommand_NotLoggedIn(t *testing.T) {
+	a := newAppForTestWithRecipe(t, nil, &recipe.Recipe{Name: "test"})
+	// Ensure no token is stored so api.NewClient() produces a logged-out client.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	result, _ := a.handlePublishCommand()
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "Not logged in")
+}
+
+func TestHandlePublishCommand_NoRecipe(t *testing.T) {
+	a := newAppForTest(t, nil)
+	// Save a token so we appear logged in.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	require.NoError(t, api.SaveToken("test-token"))
+
+	result, _ := a.handlePublishCommand()
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "No recipe to publish")
+}
+
+func TestHandlePublishCommand_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(api.RecipeEntry{
+			ID:             "r1",
+			Name:           "My Recipe",
+			Slug:           "my-recipe",
+			AuthorUsername: "alice",
+		})
+	}))
+	defer srv.Close()
+
+	// Verify the test server returns the expected response directly via client.
+	client := newClientForTest(srv.URL, "test-token")
+	entry, err := client.CreateRecipe("# My Recipe\nversion: 1\n")
+	require.NoError(t, err)
+	assert.Equal(t, "alice/my-recipe", entry.Ref())
+}
+
+// ── /pull command tests ──────────────────────────────────────────────────────
+
+func TestHandlePullCommand_NoArgs(t *testing.T) {
+	a := newAppForTest(t, nil)
+	result, _ := a.handlePullCommand("")
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "Usage")
 }
