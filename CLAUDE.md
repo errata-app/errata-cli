@@ -72,7 +72,7 @@ and `golangci-lint run ./...` before committing. Fix any issues before proceedin
 ```
 errata/
 ├── cmd/errata/
-│   └── main.go              # cobra root (errata, errata stats, errata run, errata sessions)
+│   └── main.go              # cobra root (errata, errata stats, errata run, errata sessions, errata login/logout/whoami/publish/pull)
 ├── pkg/                     # public packages — importable by external repos
 │   ├── recipe/
 │   │   ├── recipe.go        # Recipe struct, Parse(), MarshalMarkdown(), Discover() — recipe.md parser
@@ -122,6 +122,10 @@ errata/
 │   │   └── logger.go        # Logger, Wrap()/WrapAll() — per-run JSONL logging
 │   ├── checkpoint/
 │   │   └── checkpoint.go    # Save(), Load(), Clear(), Build(), IncrementalSaver — interrupted run state persistence
+│   ├── api/
+│   │   ├── client.go        # HTTP client for errata.app backend: auth token, recipe CRUD, user info
+│   │   ├── client_test.go   # httptest-based tests for all API endpoints
+│   │   └── login.go         # GitHub OAuth flow via local HTTP callback server
 │   ├── commands/
 │   │   └── commands.go      # Command{Name,Desc}; All — canonical slash command registry
 │   ├── prompthistory/
@@ -144,9 +148,11 @@ errata/
 │   │   └── subagent.go      # NewDispatcher() — sub-agent delegation (compile-time gated)
 │   ├── session/
 │   │   └── session.go      # GenerateID(), Paths, Meta, FeedEntry — ephemeral session lifecycle
+│   ├── paths/
+│   │   └── paths.go         # Layout{}, New(), Default(), RecipesDir(), NextAvailable() — centralised data paths
 │   ├── ui/
 │   │   ├── app.go           # bubbletea program, mode state machine
-│   │   ├── cmd_handlers.go  # slash command dispatch and handlers
+│   │   ├── cmd_handlers.go  # slash command dispatch and handlers (/save, /load, /export, /publish, /pull)
 │   │   ├── config_panel.go  # /config overlay: sections, scalar/list/text editing
 │   │   ├── complete.go      # tab completion and hint rendering (capped at 8 lines)
 │   │   ├── panels.go        # live agent panel rendering + fmtTokens()
@@ -171,6 +177,11 @@ go build -o errata ./cmd/errata            # build binary
 ./errata stats --config sha256:abc...       # filter stats by config hash
 ./errata --debug-log data/log.jsonl         # enable JSONL debug logging
 ./errata -r myrecipe.md                     # use explicit recipe file
+./errata login                              # authenticate via GitHub OAuth
+./errata logout                             # revoke token and delete locally
+./errata whoami                             # show authenticated user
+./errata publish                            # publish session recipe to errata.app
+./errata pull <author/slug>                 # pull recipe from errata.app to disk
 make test                                   # go test ./...
 make lint                                   # golangci-lint run ./...
 make build-all                              # cross-compile darwin/linux/windows to dist/
@@ -190,11 +201,14 @@ The TUI REPL accepts slash commands.
 | `/verbose` | Toggle verbose mode (model text alongside tool events) |
 | `/compact` | Summarize conversation history to free up context window |
 | `/config` | View/edit configuration; `/config <section>` jumps to section; inline text editing with Ctrl+S to save |
-| `/stats` | Show preference win counts and per-model session cost |
-| `/export recipe [path]` | Export the current session recipe to Markdown (default: `recipe_export.md`) |
-| `/export output [path]` | Export the latest run's output report (default: `data/outputs/`) |
-| `/import recipe <path>` | Import a recipe file, replacing the current session recipe |
+| `/stats` | Show preference wins and session cost |
+| `/save [path]` | Save session recipe to disk (default: `recipe.md`) |
+| `/load <path>` | Load recipe from disk, replacing the session recipe |
+| `/export [path]` | Export output report (default: `data/outputs/`) |
+| `/publish` | Publish recipe to errata.app (async) |
+| `/pull <author/slug>` | Pull recipe from errata.app (async) |
 | `/resume` | Resume an interrupted run — re-runs only the interrupted models, preserving completed results |
+| `/rewind` | Undo last run — revert writes and remove from context |
 | `/exit` or `/quit` | Exit (TUI only) |
 | `Ctrl-D` | Exit (TUI only) |
 
@@ -359,6 +373,8 @@ pkg/recipestore   ← stdlib only (crypto/sha256, encoding/json, os)
 tools          ← stdlib only
 pricing        ← stdlib only
 prompt         ← stdlib only (context)
+paths          ← stdlib only (os, path/filepath, fmt, strings)
+api            ← stdlib only (net/http, encoding/json, os)
 mcp            ← tools (for ToolDef, MCPDispatcher)
 models         ← tools (for FileWrite, tool names, ExecuteRead/ApplyWrites)
 config         ← pkg/recipe (for ApplyRecipe)
@@ -382,8 +398,8 @@ headless       ← models, tools, prompt, pkg/recipe, runner, adapters, config, 
 output         ← models, pkg/recipe, criteria, uid
 session        ← uid, encoding/json, os, path/filepath
 subagent       ← models, config, tools
-ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, pkg/recipestore, commands, prompthistory, checkpoint, pkg/recipe, output, sandbox, subagent, session, bubbletea, lipgloss
-cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, pkg/recipe, session, uid, pkg/recipestore
+ui             ← models, pricing, tools, prompt, runner, diff, history, adapters, config, api, paths, pkg/recipestore, commands, prompthistory, checkpoint, pkg/recipe, output, sandbox, subagent, session, bubbletea, lipgloss
+cmd/errata     ← config, adapters, pricing, logging, ui, headless, mcp, tools, api, paths, pkg/recipe, session, uid, pkg/recipestore
 ```
 
 **Critical:** `tools.FileWrite` lives in `internal/tools`, not `internal/models`.
@@ -529,6 +545,20 @@ return a, func() tea.Msg {
 `tea.Cmd` is returned from `Update` to start the goroutine; `program.Send()` injects
 async results back into the event loop. This is the canonical bubbletea pattern for
 long-running concurrent work.
+
+### Async slash commands (`/publish`, `/pull`)
+
+`/publish` and `/pull` make HTTP calls to errata.app. These are async via the same
+`tea.Cmd` pattern: the handler does synchronous validation (logged in? recipe exists?
+args present?), shows a "Publishing…" / "Pulling…" message, and returns a `tea.Batch`
+containing the print command and a `func() tea.Msg` closure that performs the HTTP call.
+Completion messages (`publishCompleteMsg`, `pullCompleteMsg`) are handled in `Update()`.
+
+### Dependency injection (`apiClient`)
+
+`App` has an `apiClient *api.Client` field, initialized to `api.NewClient()` in `New()`.
+Tests inject httptest-backed clients via `a.apiClient = newClientForTest(srv.URL, token)`.
+All TUI handlers that need API access use `a.apiClient` — never `api.NewClient()` inline.
 
 ---
 
