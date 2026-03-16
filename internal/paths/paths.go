@@ -12,7 +12,6 @@ import (
 // Layout holds all data file paths derived from a single root directory.
 type Layout struct {
 	Root          string // e.g. "data"
-	Preferences   string // e.g. "data/preferences.jsonl"
 	PricingCache  string // e.g. "data/pricing_cache.json"
 	PromptHistory string // e.g. "data/prompt_history.jsonl"
 	ConfigStore   string // e.g. "data/configs.json"
@@ -25,7 +24,6 @@ type Layout struct {
 func New(root string) Layout {
 	return Layout{
 		Root:          root,
-		Preferences:   filepath.Join(root, "preferences.jsonl"),
 		PricingCache:  filepath.Join(root, "pricing_cache.json"),
 		PromptHistory: filepath.Join(root, "prompt_history.jsonl"),
 		ConfigStore:   filepath.Join(root, "configs.json"),

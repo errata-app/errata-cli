@@ -13,7 +13,6 @@ import (
 func TestDefault_RootIsData(t *testing.T) {
 	l := paths.Default()
 	assert.Equal(t, "data", l.Root)
-	assert.Equal(t, "data/preferences.jsonl", l.Preferences)
 	assert.Equal(t, "data/pricing_cache.json", l.PricingCache)
 	assert.Equal(t, "data/prompt_history.jsonl", l.PromptHistory)
 	assert.Equal(t, "data/configs.json", l.ConfigStore)
@@ -25,7 +24,6 @@ func TestDefault_RootIsData(t *testing.T) {
 func TestNew_CustomRoot(t *testing.T) {
 	l := paths.New("/tmp/errata-test")
 	assert.Equal(t, "/tmp/errata-test", l.Root)
-	assert.Equal(t, "/tmp/errata-test/preferences.jsonl", l.Preferences)
 	assert.Equal(t, "/tmp/errata-test/pricing_cache.json", l.PricingCache)
 	assert.Equal(t, "/tmp/errata-test/prompt_history.jsonl", l.PromptHistory)
 	assert.Equal(t, "/tmp/errata-test/configs.json", l.ConfigStore)

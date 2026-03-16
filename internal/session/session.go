@@ -3,14 +3,12 @@
 package session
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/errata-app/errata-cli/internal/uid"
 )
@@ -23,10 +21,9 @@ func GenerateID() string {
 // Paths holds the per-session file paths.
 type Paths struct {
 	Dir            string
-	HistoryPath    string
+	MetadataPath   string
+	ContentPath    string
 	CheckpointPath string
-	MetaPath       string
-	FeedPath       string
 	RecipePath     string
 }
 
@@ -41,57 +38,15 @@ func PathsFor(baseDir, id string) Paths {
 	dir := filepath.Join(baseDir, id)
 	return Paths{
 		Dir:            dir,
-		HistoryPath:    filepath.Join(dir, "history.json"),
+		MetadataPath:   filepath.Join(dir, "session_metadata.json"),
+		ContentPath:    filepath.Join(dir, "session_content.json"),
 		CheckpointPath: filepath.Join(dir, "checkpoint.json"),
-		MetaPath:       filepath.Join(dir, "meta.json"),
-		FeedPath:       filepath.Join(dir, "feed.json"),
 		RecipePath:     filepath.Join(dir, "recipe.md"),
 	}
 }
 
-// Meta holds per-session metadata for listing.
-type Meta struct {
-	ID           string    `json:"id"`
-	FirstPrompt  string    `json:"first_prompt,omitempty"`
-	LastPrompt   string    `json:"last_prompt,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	LastActiveAt time.Time `json:"last_active_at"`
-	PromptCount  int       `json:"prompt_count"`
-	Models       []string  `json:"models,omitempty"`
-}
-
-// SaveMeta atomically writes session metadata to path.
-func SaveMeta(path string, m Meta) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return err
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-// LoadMeta reads session metadata from path.
-// Returns (nil, nil) if the file does not exist.
-func LoadMeta(path string) (*Meta, error) {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, nil //nolint:nilnil // intentional: missing file is not an error
-	}
-	if err != nil {
-		return nil, err
-	}
-	var m Meta
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
-	return &m, nil
-}
+// Meta is an alias for SessionMetadata used by session listing.
+type Meta = SessionMetadata
 
 // LatestID returns the ID of the most recently active session in baseDir.
 func LatestID(baseDir string) (string, error) {
@@ -120,8 +75,8 @@ func List(baseDir string) ([]Meta, error) {
 		if !e.IsDir() {
 			continue
 		}
-		metaPath := filepath.Join(baseDir, e.Name(), "meta.json")
-		m, err := LoadMeta(metaPath)
+		metaPath := filepath.Join(baseDir, e.Name(), "session_metadata.json")
+		m, err := LoadMetadata(metaPath)
 		if err != nil {
 			log.Printf("session: skipping %q: %v", e.Name(), err)
 			continue
@@ -171,51 +126,3 @@ func Resolve(baseDir, prefix string) (string, error) {
 	}
 }
 
-// FeedEntry is a serializable record of one feed item for replay.
-type FeedEntry struct {
-	Kind   string       `json:"kind"`             // "message" | "run"
-	Text   string       `json:"text,omitempty"`   // for messages
-	Prompt string       `json:"prompt,omitempty"` // for runs
-	Models []ModelEntry `json:"models,omitempty"` // per-model results
-	Note   string       `json:"note,omitempty"`   // "Applied: foo.go" / "Skipped."
-}
-
-// ModelEntry is a per-model summary within a FeedEntry.
-type ModelEntry struct {
-	ID            string   `json:"id"`
-	Text          string   `json:"text"`
-	ProposedFiles []string `json:"proposed_files,omitempty"`
-}
-
-// SaveFeed atomically writes feed entries to path.
-func SaveFeed(path string, entries []FeedEntry) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return err
-	}
-	data, err := json.Marshal(entries)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-// LoadFeed reads feed entries from path.
-// Returns (nil, nil) if the file does not exist.
-func LoadFeed(path string) ([]FeedEntry, error) {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var entries []FeedEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, err
-	}
-	return entries, nil
-}

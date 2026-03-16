@@ -21,7 +21,6 @@ import (
 	"github.com/errata-app/errata-cli/internal/mcp"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/paths"
-	"github.com/errata-app/errata-cli/internal/preferences"
 	"github.com/errata-app/errata-cli/internal/pricing"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/pkg/recipestore"
@@ -307,19 +306,16 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	}
 	// If resuming, load existing metadata.
 	if resuming {
-		if existing, err := session.LoadMeta(sp.MetaPath); err == nil && existing != nil {
+		if existing, err := session.LoadMetadata(sp.MetadataPath); err == nil && existing != nil {
 			meta = *existing
 			meta.Models = modelIDs // update with current adapters
 		}
 	}
 
 	store, err := datastore.New(datastore.Options{
-		HistoryPath:    sp.HistoryPath,
 		PromptHistPath: layout.PromptHistory,
 		SessionPaths:   sp,
 		SessionID:      sessionID,
-		PrefPath:       layout.Preferences,
-		OutputDir:      layout.Outputs,
 		Meta:           meta,
 		RecipeStore:    recipestore.New(layout.ConfigStore),
 		Recipe:         rec,
@@ -405,10 +401,10 @@ func runStats(cmd *cobra.Command, args []string) error {
 	filter := resolveStatsFilter(layout.ConfigStore, recipeFilter, configFilter)
 
 	if detail {
-		return runStatsDetailed(layout.Preferences, filter)
+		return runStatsDetailed(layout.Sessions, filter)
 	}
 
-	tally := preferences.Summarize(layout.Preferences, filter)
+	tally := session.SummarizeAcrossSessions(layout.Sessions, filter)
 	if len(tally) == 0 {
 		fmt.Println("No preference data yet.")
 		return nil
@@ -439,15 +435,15 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 // resolveStatsFilter builds a StatsFilter from CLI flags.
 // --config takes precedence; --recipe resolves to matching hashes via the config store.
-func resolveStatsFilter(configStorePath, recipeName, configHash string) *preferences.StatsFilter {
+func resolveStatsFilter(configStorePath, recipeName, configHash string) *session.StatsFilter {
 	if configHash != "" {
-		return &preferences.StatsFilter{ConfigHash: configHash}
+		return &session.StatsFilter{ConfigHash: configHash}
 	}
 	if recipeName != "" {
 		cs := recipestore.New(configStorePath)
 		hashes := cs.HashesForName(recipeName)
 		if len(hashes) == 1 {
-			return &preferences.StatsFilter{ConfigHash: hashes[0]}
+			return &session.StatsFilter{ConfigHash: hashes[0]}
 		}
 		if len(hashes) > 1 {
 			fmt.Fprintf(os.Stderr, "warning: recipe %q has %d configs; showing all. Use --config to filter by specific hash.\n", recipeName, len(hashes))
@@ -458,8 +454,8 @@ func resolveStatsFilter(configStorePath, recipeName, configHash string) *prefere
 	return nil
 }
 
-func runStatsDetailed(preferencesPath string, filter *preferences.StatsFilter) error {
-	stats := preferences.SummarizeDetailed(preferencesPath, filter)
+func runStatsDetailed(sessionsDir string, filter *session.StatsFilter) error {
+	stats := session.SummarizeDetailedAcrossSessions(sessionsDir, filter)
 	if len(stats) == 0 {
 		fmt.Println("No preference data yet.")
 		return nil
@@ -467,7 +463,7 @@ func runStatsDetailed(preferencesPath string, filter *preferences.StatsFilter) e
 
 	type row struct {
 		model string
-		s     preferences.ModelStats
+		s     session.ModelStats
 	}
 	rows := make([]row, 0, len(stats))
 	for m, s := range stats {
