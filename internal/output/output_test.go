@@ -1,8 +1,6 @@
 package output
 
 import (
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -59,190 +57,6 @@ func TestReport_Filename_Default(t *testing.T) {
 	got := r.Filename()
 	if got != want {
 		t.Errorf("Filename() = %q, want %q", got, want)
-	}
-}
-
-func TestSaveAndLoad_RoundTrip(t *testing.T) {
-	dir := t.TempDir()
-
-	temp := 0.7
-	maxTok := 4096
-	seed := int64(42)
-
-	original := &Report{
-		ID:        "deadbeef01234567",
-		Timestamp: time.Date(2026, 2, 25, 12, 0, 0, 0, time.UTC),
-		SessionID: "sess123",
-		Recipe: RecipeSnapshot{
-			Name:         "test recipe",
-			Models:       []string{"model-a", "model-b"},
-			SystemPrompt: "Be helpful.",
-			Tools:        []string{"read_file", "bash"},
-			Constraints:  &ConstraintsSnapshot{MaxSteps: 10, Timeout: "5m0s"},
-			ModelParams:  &ModelParamsSnapshot{Temperature: &temp, MaxTokens: &maxTok, Seed: &seed},
-		},
-		Prompt: "Write a hello world program",
-		Models: []ModelResult{
-			{
-				ModelID:             "model-a",
-				Text:                "Here is your code.",
-				LatencyMS:           1500,
-				InputTokens:         1000,
-				OutputTokens:        500,
-				CostUSD:             0.0042,
-				StopReason:          "complete",
-				ProposedWrites: []WriteEntry{
-					{Path: "main.go", Content: "package main\n"},
-				},
-				Events: []EventEntry{
-					{Type: "reading", Data: "read_file main.go"},
-					{Type: "writing", Data: "write_file main.go"},
-				},
-			},
-			{
-				ModelID:      "model-b",
-				Text:         "Error occurred.",
-				LatencyMS:    2000,
-				InputTokens:  800,
-				OutputTokens: 100,
-				CostUSD:      0.001,
-				Error:        "context limit exceeded",
-				StopReason:   "error",
-				Events:       []EventEntry{},
-			},
-		},
-		Aggregate: AggregateStats{
-			TotalCostUSD:      0.0052,
-			TotalInputTokens:  1800,
-			TotalOutputTokens: 600,
-			ModelCount:        2,
-			SuccessCount:      1,
-			FastestModel:      "model-a",
-			FastestMS:         1500,
-		},
-		Selection: &SelectionOutcome{
-			SelectedModel: "model-a",
-			AppliedFiles:  []string{"main.go"},
-			Timestamp:     time.Date(2026, 2, 25, 12, 1, 0, 0, time.UTC),
-		},
-	}
-
-	path, err := Save(dir, original)
-	if err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	// Verify top-level fields.
-	if loaded.ID != original.ID {
-		t.Errorf("ID = %q, want %q", loaded.ID, original.ID)
-	}
-	if !loaded.Timestamp.Equal(original.Timestamp) {
-		t.Errorf("Timestamp = %v, want %v", loaded.Timestamp, original.Timestamp)
-	}
-	if loaded.SessionID != original.SessionID {
-		t.Errorf("SessionID = %q, want %q", loaded.SessionID, original.SessionID)
-	}
-	if loaded.Prompt != original.Prompt {
-		t.Errorf("Prompt = %q, want %q", loaded.Prompt, original.Prompt)
-	}
-
-	// Recipe snapshot.
-	if loaded.Recipe.Name != original.Recipe.Name {
-		t.Errorf("Recipe.Name = %q, want %q", loaded.Recipe.Name, original.Recipe.Name)
-	}
-	if len(loaded.Recipe.Models) != 2 {
-		t.Errorf("Recipe.Models len = %d, want 2", len(loaded.Recipe.Models))
-	}
-	if loaded.Recipe.SystemPrompt != "Be helpful." {
-		t.Errorf("Recipe.SystemPrompt = %q, want %q", loaded.Recipe.SystemPrompt, "Be helpful.")
-	}
-	if loaded.Recipe.Constraints == nil {
-		t.Fatal("Recipe.Constraints is nil")
-	}
-	if loaded.Recipe.Constraints.MaxSteps != 10 {
-		t.Errorf("Constraints.MaxSteps = %d, want 10", loaded.Recipe.Constraints.MaxSteps)
-	}
-	if loaded.Recipe.Constraints.Timeout != "5m0s" {
-		t.Errorf("Constraints.Timeout = %q, want %q", loaded.Recipe.Constraints.Timeout, "5m0s")
-	}
-	if loaded.Recipe.ModelParams == nil {
-		t.Fatal("Recipe.ModelParams is nil")
-	}
-	if *loaded.Recipe.ModelParams.Temperature != 0.7 {
-		t.Errorf("ModelParams.Temperature = %f, want 0.7", *loaded.Recipe.ModelParams.Temperature)
-	}
-	if *loaded.Recipe.ModelParams.MaxTokens != 4096 {
-		t.Errorf("ModelParams.MaxTokens = %d, want 4096", *loaded.Recipe.ModelParams.MaxTokens)
-	}
-	if *loaded.Recipe.ModelParams.Seed != 42 {
-		t.Errorf("ModelParams.Seed = %d, want 42", *loaded.Recipe.ModelParams.Seed)
-	}
-
-	// Models.
-	if len(loaded.Models) != 2 {
-		t.Fatalf("Models len = %d, want 2", len(loaded.Models))
-	}
-	m0 := loaded.Models[0]
-	if m0.ModelID != "model-a" {
-		t.Errorf("Models[0].ModelID = %q, want %q", m0.ModelID, "model-a")
-	}
-	if m0.Text != "Here is your code." {
-		t.Errorf("Models[0].Text = %q", m0.Text)
-	}
-	if m0.LatencyMS != 1500 {
-		t.Errorf("Models[0].LatencyMS = %d, want 1500", m0.LatencyMS)
-	}
-	if m0.InputTokens != 1000 {
-		t.Errorf("Models[0].InputTokens = %d", m0.InputTokens)
-	}
-	if len(m0.ProposedWrites) != 1 || m0.ProposedWrites[0].Path != "main.go" {
-		t.Errorf("Models[0].ProposedWrites unexpected: %v", m0.ProposedWrites)
-	}
-	if len(m0.Events) != 2 {
-		t.Errorf("Models[0].Events len = %d, want 2", len(m0.Events))
-	}
-
-	m1 := loaded.Models[1]
-	if m1.Error != "context limit exceeded" {
-		t.Errorf("Models[1].Error = %q", m1.Error)
-	}
-
-	// StopReason round-trip.
-	if m0.StopReason != "complete" {
-		t.Errorf("Models[0].StopReason = %q, want %q", m0.StopReason, "complete")
-	}
-	if m1.StopReason != "error" {
-		t.Errorf("Models[1].StopReason = %q, want %q", m1.StopReason, "error")
-	}
-
-	// Aggregate.
-	if loaded.Aggregate.TotalCostUSD != original.Aggregate.TotalCostUSD {
-		t.Errorf("Aggregate.TotalCostUSD = %f", loaded.Aggregate.TotalCostUSD)
-	}
-	if loaded.Aggregate.ModelCount != 2 {
-		t.Errorf("Aggregate.ModelCount = %d", loaded.Aggregate.ModelCount)
-	}
-	if loaded.Aggregate.SuccessCount != 1 {
-		t.Errorf("Aggregate.SuccessCount = %d", loaded.Aggregate.SuccessCount)
-	}
-	if loaded.Aggregate.FastestModel != "model-a" {
-		t.Errorf("Aggregate.FastestModel = %q", loaded.Aggregate.FastestModel)
-	}
-
-	// Selection.
-	if loaded.Selection == nil {
-		t.Fatal("Selection is nil")
-	}
-	if loaded.Selection.SelectedModel != "model-a" {
-		t.Errorf("Selection.SelectedModel = %q", loaded.Selection.SelectedModel)
-	}
-	if len(loaded.Selection.AppliedFiles) != 1 || loaded.Selection.AppliedFiles[0] != "main.go" {
-		t.Errorf("Selection.AppliedFiles = %v", loaded.Selection.AppliedFiles)
 	}
 }
 
@@ -391,81 +205,6 @@ func TestBuildReport_NilRecipe(t *testing.T) {
 	}
 }
 
-func TestRecordSelection_UpdatesFile(t *testing.T) {
-	dir := t.TempDir()
-
-	report := BuildReport("sess", nil, "hello", []models.ModelResponse{
-		{ModelID: "model-a", Text: "hi", LatencyMS: 100},
-	}, nil, nil)
-
-	if _, err := Save(dir, report); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	// Verify no selection initially.
-	loaded, err := Load(filepath.Join(dir, report.Filename()))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if loaded.Selection != nil {
-		t.Fatal("Selection should be nil before RecordSelection")
-	}
-
-	// Record selection.
-	if err := RecordSelection(dir, report, "model-a", []string{"main.go"}, ""); err != nil {
-		t.Fatalf("RecordSelection: %v", err)
-	}
-
-	// Reload and verify.
-	loaded, err = Load(filepath.Join(dir, report.Filename()))
-	if err != nil {
-		t.Fatalf("Load after selection: %v", err)
-	}
-	if loaded.Selection == nil {
-		t.Fatal("Selection is nil after RecordSelection")
-	}
-	if loaded.Selection.SelectedModel != "model-a" {
-		t.Errorf("SelectedModel = %q", loaded.Selection.SelectedModel)
-	}
-	if len(loaded.Selection.AppliedFiles) != 1 || loaded.Selection.AppliedFiles[0] != "main.go" {
-		t.Errorf("AppliedFiles = %v", loaded.Selection.AppliedFiles)
-	}
-}
-
-func TestSave_CreatesDirectory(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "nested", "deep", "outputs")
-	report := BuildReport("sess", nil, "hello", nil, nil, nil)
-
-	path, err := Save(dir, report)
-	if err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("file not created: %v", err)
-	}
-}
-
-func TestSave_NoTmpLeftBehind(t *testing.T) {
-	dir := t.TempDir()
-	report := BuildReport("sess", nil, "hello", nil, nil, nil)
-
-	path, err := Save(dir, report)
-	if err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	// Check no .tmp file exists.
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("expected .tmp file to not exist, got err: %v", err)
-	}
-}
-
-func TestLoad_NonexistentFile(t *testing.T) {
-	_, err := Load("/nonexistent/path/report.json")
-	if err == nil {
-		t.Error("Load should return error for nonexistent file")
-	}
-}
 
 func TestBuildReport_NilRecipeNilCollector(t *testing.T) {
 	responses := []models.ModelResponse{
@@ -541,14 +280,6 @@ func TestBuildReport_AllErrors(t *testing.T) {
 	}
 }
 
-func TestSave_MkdirAllError(t *testing.T) {
-	report := BuildReport("sess", nil, "hello", nil, nil, nil)
-	_, err := Save("/dev/null/sub/outputs", report)
-	if err == nil {
-		t.Error("Save to impossible path should error")
-	}
-}
-
 func TestBuildReport_ReasoningTokens(t *testing.T) {
 	responses := []models.ModelResponse{
 		{
@@ -600,17 +331,6 @@ func TestBuildReport_DeleteField(t *testing.T) {
 	}
 	if writes[1].Path != "removed.go" {
 		t.Errorf("writes[1].Path = %q", writes[1].Path)
-	}
-}
-
-func TestLoad_InvalidJSON(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bad.json")
-	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Load(path)
-	if err == nil {
-		t.Error("Load should return error for invalid JSON")
 	}
 }
 

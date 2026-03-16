@@ -19,7 +19,7 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].note = note
 		}
-		a.store.UpdateLastFeedNote(note)
+		a.store.UpdateLastRunNote(note)
 	}
 
 	// Ctrl combos.
@@ -69,7 +69,7 @@ func (a App) handleRatingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //nolin
 
 		case "s":
 			setNote("Skipped.")
-			a.store.ClearLastReport()
+	
 			a.responses = nil
 			a.mode = modeIdle
 			return a, nil
@@ -114,12 +114,12 @@ func (a App) applySelection(choice string) (tea.Model, tea.Cmd) { //nolint:gocri
 		if len(a.feed) > 0 {
 			a.feed[len(a.feed)-1].note = note
 		}
-		a.store.UpdateLastFeedNote(note)
+		a.store.UpdateLastRunNote(note)
 	}
 
 	if strings.EqualFold(choice, "s") {
 		setNote("Skipped.")
-		a.store.ClearLastReport()
+
 		a.responses = nil
 		a.mode = modeIdle
 		return a, nil

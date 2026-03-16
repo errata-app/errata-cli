@@ -22,6 +22,7 @@ import (
 	"github.com/errata-app/errata-cli/internal/config"
 	"github.com/errata-app/errata-cli/internal/datastore"
 	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/internal/reminders"
 	"github.com/errata-app/errata-cli/internal/runner"
 	"github.com/errata-app/errata-cli/internal/session"
@@ -38,7 +39,7 @@ type agentEventMsg struct {
 type runCompleteMsg struct {
 	responses          []models.ModelResponse
 	compactedHistories map[string][]models.ConversationTurn // non-nil if auto-compact ran
-	reportPath         string                               // path to saved output report (for selection recording)
+	collector          *output.Collector                    // collected per-model events
 	toolNames          []string                             // active tool names during run (for recipe hash)
 }
 
@@ -533,7 +534,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runCompleteMsg:
 		a.cancelRun = nil
-		a.store.SetLastReportInfo(msg.reportPath, msg.toolNames)
+		a.store.SetLastActiveTools(msg.toolNames)
 
 		// Mark panels done. runner.RunAll preserves adapter order, so results[i] == panels[i].
 		for i, resp := range msg.responses {
@@ -570,8 +571,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Append histories (captures pre-lengths internally for rewind).
 		preHistLengths := a.store.AppendHistories(panelIDs, msg.responses, a.lastPrompt)
 
-		// Persist session metadata and feed.
-		a.store.PersistRunState(a.lastPrompt, msg.responses)
+		// Persist session metadata and content.
+		a.store.PersistRunState(a.lastPrompt, msg.responses, msg.collector, msg.toolNames)
 
 		// Push rewind entry (fileSnapshots populated later by applySelection if writes happen).
 		a.store.PushRewindEntry(datastore.RewindEntry{
@@ -813,15 +814,12 @@ func Run(adapterList []models.ModelAdapter, cfg config.Config, warnings []string
 		p.Quit()
 	}()
 
-	// On resume: replay saved feed as visual history.
+	// On resume: replay saved metadata runs as visual history.
 	if resuming {
-		feedEntries, err := session.LoadFeed(store.FeedPath())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not load feed: %v\n", err)
-		}
-		store.SetSessionFeed(feedEntries)
+		meta := store.Metadata()
+		content := store.Content()
 		app.feed = append(app.feed, feedItem{kind: "message", text: fmt.Sprintf("Resumed session %s", store.SessionID())})
-		app.feed = append(app.feed, replayFeed(feedEntries)...)
+		app.feed = append(app.feed, replayFromMetadata(meta.Runs, content.Runs)...)
 	}
 
 	for _, w := range warnings {
@@ -854,67 +852,51 @@ func truncateStr(s string, maxLen int) string {
 	return s
 }
 
-// buildFeedEntry creates a session.FeedEntry from a run's prompt and responses.
-func buildFeedEntry(prompt string, responses []models.ModelResponse) session.FeedEntry {
-	modelEntries := make([]session.ModelEntry, 0, len(responses))
-	for _, r := range responses {
-		files := make([]string, 0, len(r.ProposedWrites))
-		for _, fw := range r.ProposedWrites {
-			files = append(files, fw.Path)
+// replayFromMetadata converts saved metadata runs + content runs into feedItems for display on resume.
+func replayFromMetadata(runs []session.RunSummary, contentRuns []session.RunContent) []feedItem {
+	items := make([]feedItem, 0, len(runs))
+	for i, r := range runs {
+		if r.Type == "rewind" {
+			continue
 		}
-		modelEntries = append(modelEntries, session.ModelEntry{
-			ID:            r.ModelID,
-			Text:          truncateStr(r.Text, 500),
-			ProposedFiles: files,
+		// Build panels from content if available.
+		var panels []*panelState
+		if i < len(contentRuns) {
+			panels = replayPanelsFromContent(contentRuns[i].Models)
+		} else {
+			// Fallback: build minimal panels from metadata model IDs.
+			panels = replayPanelsFromIDs(r.Models)
+		}
+		items = append(items, feedItem{
+			kind:   "run",
+			prompt: r.PromptPreview,
+			note:   r.Note,
+			panels: panels,
 		})
-	}
-	return session.FeedEntry{
-		Kind:   "run",
-		Prompt: prompt,
-		Models: modelEntries,
-	}
-}
-
-// replayFeed converts saved feed entries into feedItem structs for display.
-func replayFeed(entries []session.FeedEntry) []feedItem {
-	items := make([]feedItem, 0, len(entries))
-	for _, e := range entries {
-		switch e.Kind {
-		case "message":
-			items = append(items, feedItem{kind: "message", text: e.Text})
-		case "run":
-			// Build a summary: prompt + per-model text snippets.
-			var sb strings.Builder
-			for _, m := range e.Models {
-				preview := truncateStr(m.Text, 200)
-				preview = strings.ReplaceAll(preview, "\n", " ")
-				fmt.Fprintf(&sb, "  %s: %s", m.ID, preview)
-				if len(m.ProposedFiles) > 0 {
-					fmt.Fprintf(&sb, " [%s]", strings.Join(m.ProposedFiles, ", "))
-				}
-				sb.WriteByte('\n')
-			}
-			items = append(items, feedItem{
-				kind: "run",
-				prompt: e.Prompt,
-				note:   e.Note,
-				panels: replayPanels(e.Models),
-			})
-		}
 	}
 	return items
 }
 
-// replayPanels creates frozen panel states from saved model entries for
-// display during session resume. The panels are marked done with minimal info.
-func replayPanels(entries []session.ModelEntry) []*panelState {
+// replayPanelsFromContent creates frozen panel states from saved content model entries.
+func replayPanelsFromContent(entries []session.ModelRunContent) []*panelState {
 	panels := make([]*panelState, len(entries))
 	for i, m := range entries {
-		ps := newPanelState(m.ID, i)
+		ps := newPanelState(m.ModelID, i)
 		ps.done = true
 		if len(m.Text) > 0 {
 			ps.addEvent(models.AgentEvent{Type: models.EventText, Data: truncateStr(m.Text, 200)})
 		}
+		panels[i] = ps
+	}
+	return panels
+}
+
+// replayPanelsFromIDs creates minimal frozen panels from model IDs only.
+func replayPanelsFromIDs(modelIDs []string) []*panelState {
+	panels := make([]*panelState, len(modelIDs))
+	for i, id := range modelIDs {
+		ps := newPanelState(id, i)
+		ps.done = true
 		panels[i] = ps
 	}
 	return panels

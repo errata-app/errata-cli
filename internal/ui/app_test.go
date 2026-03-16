@@ -37,22 +37,12 @@ func newAppForTest(t *testing.T, ads []models.ModelAdapter) App {
 func newAppForTestWithRecipe(t *testing.T, ads []models.ModelAdapter, rec *recipe.Recipe) App {
 	t.Helper()
 	tmp := t.TempDir()
-	sp := session.Paths{
-		Dir:            filepath.Join(tmp, "session"),
-		HistoryPath:    filepath.Join(tmp, "session", "history.json"),
-		CheckpointPath: filepath.Join(tmp, "session", "checkpoint.json"),
-		MetaPath:       filepath.Join(tmp, "session", "meta.json"),
-		FeedPath:       filepath.Join(tmp, "session", "feed.json"),
-		RecipePath:     filepath.Join(tmp, "session", "recipe.md"),
-	}
-	meta := session.Meta{ID: "test-session"}
+	sp := session.PathsFor(tmp, "session")
+	meta := session.SessionMetadata{ID: "test-session"}
 	store, err := datastore.New(datastore.Options{
-		HistoryPath:    sp.HistoryPath,
 		PromptHistPath: filepath.Join(tmp, "prompt_hist.jsonl"),
 		SessionPaths:   sp,
 		SessionID:      "session",
-		PrefPath:       filepath.Join(tmp, "pref.jsonl"),
-		OutputDir:      filepath.Join(tmp, "outputs"),
 		Meta:           meta,
 		Recipe:         rec,
 	})

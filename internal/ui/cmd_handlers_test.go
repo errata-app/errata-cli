@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/errata-app/errata-cli/internal/api"
 	"github.com/errata-app/errata-cli/internal/models"
-	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 )
 
@@ -191,19 +190,13 @@ func TestHandleExportCommand_NoReport(t *testing.T) {
 	assert.Contains(t, last, "No run output to export")
 }
 
-func TestHandleExportCommand_WithReport(t *testing.T) {
+func TestHandleExportCommand_WithRunContent(t *testing.T) {
 	a := newAppForTest(t, nil)
 
-	// Create a report on disk and tell the store about it.
-	report := &output.Report{
-		ID:     "abc123",
-		Prompt: "test prompt",
-		Recipe: output.RecipeSnapshot{Name: "test"},
-	}
-	tmpDir := t.TempDir()
-	reportPath, err := output.Save(tmpDir, report)
-	require.NoError(t, err)
-	a.store.SetLastReportInfo(reportPath, nil)
+	// Persist a run so there's content to export.
+	a.store.PersistRunState("test prompt", []models.ModelResponse{
+		{ModelID: "m1", Text: "response text", LatencyMS: 100, CostUSD: 0.01},
+	}, nil, nil)
 
 	exportDir := filepath.Join(t.TempDir(), "exports")
 	result, _ := a.handleExportCommand(exportDir)

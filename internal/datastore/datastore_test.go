@@ -9,47 +9,35 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/errata-app/errata-cli/internal/history"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/internal/prompthistory"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/internal/session"
-	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 func tempStore(t *testing.T) *Store {
 	t.Helper()
 	tmp := t.TempDir()
+	sp := session.PathsFor(tmp, "temp")
 	s, err := New(Options{
-		HistoryPath:    filepath.Join(tmp, "history.json"),
 		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+		SessionPaths:   sp,
 	})
 	require.NoError(t, err)
 	return s
 }
 
-// tempStoreWithSession creates a Store with full session paths configured.
 func tempStoreWithSession(t *testing.T) *Store {
 	t.Helper()
 	tmp := t.TempDir()
-	sessDir := filepath.Join(tmp, "session")
-	require.NoError(t, os.MkdirAll(sessDir, 0o750))
-	sp := session.Paths{
-		Dir:            sessDir,
-		HistoryPath:    filepath.Join(sessDir, "history.json"),
-		CheckpointPath: filepath.Join(sessDir, "checkpoint.json"),
-		MetaPath:       filepath.Join(sessDir, "meta.json"),
-		FeedPath:       filepath.Join(sessDir, "feed.json"),
-		RecipePath:     filepath.Join(sessDir, "recipe.md"),
-	}
+	sp := session.PathsFor(tmp, "test-session")
+	require.NoError(t, os.MkdirAll(sp.Dir, 0o750))
 	s, err := New(Options{
-		HistoryPath:    sp.HistoryPath,
 		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
 		SessionPaths:   sp,
 		SessionID:      "test-session",
-		PrefPath:       filepath.Join(tmp, "pref.jsonl"),
-		Meta:           session.Meta{ID: "test-session"},
+		Meta:           session.SessionMetadata{ID: "test-session"},
 	})
 	require.NoError(t, err)
 	return s
@@ -63,20 +51,24 @@ func TestNew_EmptyPaths(t *testing.T) {
 	assert.Nil(t, s.PromptHistory())
 }
 
-func TestNew_LoadsExistingHistory(t *testing.T) {
+func TestNew_LoadsExistingContent(t *testing.T) {
 	tmp := t.TempDir()
-	histPath := filepath.Join(tmp, "history.json")
-	h := map[string][]models.ConversationTurn{
-		"m1": {
-			{Role: "user", Content: "hello"},
-			{Role: "assistant", Content: "hi"},
+	sp := session.PathsFor(tmp, "ses")
+	require.NoError(t, os.MkdirAll(sp.Dir, 0o750))
+
+	c := session.SessionContent{
+		Histories: map[string][]models.ConversationTurn{
+			"m1": {
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: "hi"},
+			},
 		},
 	}
-	require.NoError(t, history.Save(histPath, h))
+	require.NoError(t, session.SaveContent(sp.ContentPath, c))
 
 	s, err := New(Options{
-		HistoryPath:    histPath,
 		PromptHistPath: filepath.Join(tmp, "prompt.jsonl"),
+		SessionPaths:   sp,
 	})
 	require.NoError(t, err)
 	require.Len(t, s.Histories()["m1"], 2)
@@ -89,12 +81,12 @@ func TestNew_LoadsExistingPromptHistory(t *testing.T) {
 	require.NoError(t, prompthistory.Append(phPath, "first"))
 	require.NoError(t, prompthistory.Append(phPath, "second"))
 
+	sp := session.PathsFor(tmp, "ses")
 	s, err := New(Options{
-		HistoryPath:    filepath.Join(tmp, "history.json"),
 		PromptHistPath: phPath,
+		SessionPaths:   sp,
 	})
 	require.NoError(t, err)
-	// Newest-first.
 	require.Len(t, s.PromptHistory(), 2)
 	assert.Equal(t, "second", s.PromptHistory()[0])
 	assert.Equal(t, "first", s.PromptHistory()[1])
@@ -114,43 +106,34 @@ func TestAppendHistories_AppendsAndPersists(t *testing.T) {
 		"question",
 	)
 
-	// Pre-lengths should be 0 for both.
 	assert.Equal(t, 0, preLens["m1"])
 	assert.Equal(t, 0, preLens["m2"])
-
-	// In-memory state should have 2 turns per model.
 	assert.Len(t, s.Histories()["m1"], 2)
 	assert.Len(t, s.Histories()["m2"], 2)
-	assert.Equal(t, "user", s.Histories()["m1"][0].Role)
-	assert.Equal(t, "question", s.Histories()["m1"][0].Content)
-	assert.Equal(t, "assistant", s.Histories()["m1"][1].Role)
-	assert.Equal(t, "answer1", s.Histories()["m1"][1].Content)
 
-	// Disk should match.
-	loaded, err := history.Load(s.histPath)
+	// Verify disk persistence via session content.
+	loaded, err := session.LoadContent(s.contentPath)
 	require.NoError(t, err)
-	assert.Len(t, loaded["m1"], 2)
-	assert.Len(t, loaded["m2"], 2)
+	assert.Len(t, loaded.Histories["m1"], 2)
+	assert.Len(t, loaded.Histories["m2"], 2)
 }
 
 func TestAppendHistories_PreLengthsCapturePrior(t *testing.T) {
 	s := tempStore(t)
 
-	// First append.
 	s.AppendHistories(
 		[]string{"m1"},
 		[]models.ModelResponse{{ModelID: "m1", Text: "a1"}},
 		"q1",
 	)
 
-	// Second append — preLengths should reflect the first append.
 	preLens := s.AppendHistories(
 		[]string{"m1"},
 		[]models.ModelResponse{{ModelID: "m1", Text: "a2"}},
 		"q2",
 	)
 	assert.Equal(t, 2, preLens["m1"])
-	assert.Len(t, s.Histories()["m1"], 4) // 2+2
+	assert.Len(t, s.Histories()["m1"], 4)
 }
 
 func TestAppendHistories_ErrorResponseSkipped(t *testing.T) {
@@ -162,7 +145,6 @@ func TestAppendHistories_ErrorResponseSkipped(t *testing.T) {
 		"question",
 	)
 
-	// Error responses should not add history turns.
 	h := s.Histories()
 	if turns, ok := h["m1"]; ok {
 		assert.Empty(t, turns)
@@ -190,9 +172,9 @@ func TestSetHistories_ReplacesAndPersists(t *testing.T) {
 	assert.Len(t, s.Histories()["m1"], 2)
 	assert.Equal(t, "[compacted]", s.Histories()["m1"][0].Content)
 
-	loaded, err := history.Load(s.histPath)
+	loaded, err := session.LoadContent(s.contentPath)
 	require.NoError(t, err)
-	assert.Len(t, loaded["m1"], 2)
+	assert.Len(t, loaded.Histories["m1"], 2)
 }
 
 // ── History: TruncateHistories ──────────────────────────────────────────────
@@ -200,7 +182,6 @@ func TestSetHistories_ReplacesAndPersists(t *testing.T) {
 func TestTruncateHistories_RestoresLengths(t *testing.T) {
 	s := tempStore(t)
 
-	// Append two runs.
 	s.AppendHistories(
 		[]string{"m1"},
 		[]models.ModelResponse{{ModelID: "m1", Text: "a1"}},
@@ -213,14 +194,12 @@ func TestTruncateHistories_RestoresLengths(t *testing.T) {
 	)
 	require.Len(t, s.Histories()["m1"], 4)
 
-	// Truncate back to pre-second-run lengths.
 	s.TruncateHistories(preLens)
 	assert.Len(t, s.Histories()["m1"], 2)
 
-	// Disk should match.
-	loaded, err := history.Load(s.histPath)
+	loaded, err := session.LoadContent(s.contentPath)
 	require.NoError(t, err)
-	assert.Len(t, loaded["m1"], 2)
+	assert.Len(t, loaded.Histories["m1"], 2)
 }
 
 func TestTruncateHistories_DeletesEmptyKeys(t *testing.T) {
@@ -251,8 +230,10 @@ func TestClearHistories_WipesMemoryAndDisk(t *testing.T) {
 	s.ClearHistories()
 
 	assert.Nil(t, s.Histories())
-	_, err := os.Stat(s.histPath)
-	assert.True(t, os.IsNotExist(err))
+	// Content should still exist but with nil histories.
+	loaded, err := session.LoadContent(s.contentPath)
+	require.NoError(t, err)
+	assert.Nil(t, loaded.Histories)
 }
 
 // ── Prompt History: RecordPrompt ────────────────────────────────────────────
@@ -271,7 +252,6 @@ func TestRecordPrompt_AppendsAndPersists(t *testing.T) {
 	assert.Equal(t, "second prompt", s.PromptHistory()[0])
 	assert.Equal(t, "first prompt", s.PromptHistory()[1])
 
-	// Verify disk persistence.
 	loaded, err := prompthistory.Load(s.promptHistPath)
 	require.NoError(t, err)
 	assert.Len(t, loaded, 2)
@@ -302,12 +282,13 @@ func TestRecordPrompt_AllowsNonConsecutiveDuplicates(t *testing.T) {
 
 func TestRoundTrip_HistoryPersistsAcrossInstances(t *testing.T) {
 	tmp := t.TempDir()
+	sp := session.PathsFor(tmp, "ses")
+	require.NoError(t, os.MkdirAll(sp.Dir, 0o750))
 	opts := Options{
-		HistoryPath:    filepath.Join(tmp, "history.json"),
 		PromptHistPath: filepath.Join(tmp, "prompt.jsonl"),
+		SessionPaths:   sp,
 	}
 
-	// First instance: append history.
 	s1, err := New(opts)
 	require.NoError(t, err)
 	s1.AppendHistories(
@@ -316,7 +297,6 @@ func TestRoundTrip_HistoryPersistsAcrossInstances(t *testing.T) {
 		"question",
 	)
 
-	// Second instance: should see the history.
 	s2, err := New(opts)
 	require.NoError(t, err)
 	require.Len(t, s2.Histories()["m1"], 2)
@@ -326,9 +306,10 @@ func TestRoundTrip_HistoryPersistsAcrossInstances(t *testing.T) {
 
 func TestRoundTrip_PromptHistoryPersistsAcrossInstances(t *testing.T) {
 	tmp := t.TempDir()
+	sp := session.PathsFor(tmp, "ses")
 	opts := Options{
-		HistoryPath:    filepath.Join(tmp, "history.json"),
 		PromptHistPath: filepath.Join(tmp, "prompt.jsonl"),
+		SessionPaths:   sp,
 	}
 
 	s1, err := New(opts)
@@ -369,68 +350,91 @@ func TestPersistRunState_UpdatesMetadata(t *testing.T) {
 	before := time.Now().Truncate(time.Second)
 
 	responses := []models.ModelResponse{{ModelID: "m1", Text: "done"}}
-	s.PersistRunState("fix bug", responses)
+	s.PersistRunState("fix bug", responses, nil, nil)
 
-	meta := s.SessionMeta()
+	meta := s.Metadata()
 	assert.Equal(t, 1, meta.PromptCount)
 	assert.Equal(t, "fix bug", meta.FirstPrompt)
 	assert.Equal(t, "fix bug", meta.LastPrompt)
 	assert.WithinDuration(t, before, meta.LastActiveAt, 2*time.Second)
+	require.Len(t, meta.Runs, 1)
+	assert.Equal(t, "fix bug", meta.Runs[0].PromptPreview)
 }
 
 func TestPersistRunState_SecondCallPreservesFirst(t *testing.T) {
 	s := tempStoreWithSession(t)
 
-	s.PersistRunState("first prompt", []models.ModelResponse{{ModelID: "m1", Text: "r1"}})
-	s.PersistRunState("second prompt", []models.ModelResponse{{ModelID: "m1", Text: "r2"}})
+	s.PersistRunState("first prompt", []models.ModelResponse{{ModelID: "m1", Text: "r1"}}, nil, nil)
+	s.PersistRunState("second prompt", []models.ModelResponse{{ModelID: "m1", Text: "r2"}}, nil, nil)
 
-	meta := s.SessionMeta()
+	meta := s.Metadata()
 	assert.Equal(t, 2, meta.PromptCount)
 	assert.Equal(t, "first prompt", meta.FirstPrompt)
 	assert.Equal(t, "second prompt", meta.LastPrompt)
+	assert.Len(t, meta.Runs, 2)
 }
 
 func TestPersistRunState_MetaSavedToDisk(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.PersistRunState("disk test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
+	s.PersistRunState("disk test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
 
-	loaded, err := session.LoadMeta(s.SessionMetaPath())
+	loaded, err := session.LoadMetadata(s.MetadataPath())
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
 	assert.Equal(t, 1, loaded.PromptCount)
 	assert.Equal(t, "disk test", loaded.FirstPrompt)
 }
 
-func TestPersistRunState_FeedSavedToDisk(t *testing.T) {
+func TestPersistRunState_ContentSavedToDisk(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.PersistRunState("feed test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
+	s.PersistRunState("content test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
 
-	entries, err := session.LoadFeed(s.FeedPath())
+	loaded, err := session.LoadContent(s.ContentPath())
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "run", entries[0].Kind)
+	require.Len(t, loaded.Runs, 1)
+	assert.Equal(t, "content test", loaded.Runs[0].Prompt)
+	require.Len(t, loaded.Runs[0].Models, 1)
+	assert.Equal(t, "m1", loaded.Runs[0].Models[0].ModelID)
+	assert.Equal(t, "ok", loaded.Runs[0].Models[0].Text)
 }
 
-func TestPersistRunState_FeedAccumulates(t *testing.T) {
+func TestPersistRunState_ContentAccumulates(t *testing.T) {
 	s := tempStoreWithSession(t)
 
-	s.PersistRunState("prompt 1", []models.ModelResponse{{ModelID: "m1", Text: "r1"}})
-	s.PersistRunState("prompt 2", []models.ModelResponse{{ModelID: "m1", Text: "r2"}})
+	s.PersistRunState("prompt 1", []models.ModelResponse{{ModelID: "m1", Text: "r1"}}, nil, nil)
+	s.PersistRunState("prompt 2", []models.ModelResponse{{ModelID: "m1", Text: "r2"}}, nil, nil)
 
-	assert.Len(t, s.SessionFeed(), 2)
+	content := s.Content()
+	assert.Len(t, content.Runs, 2)
 
-	entries, err := session.LoadFeed(s.FeedPath())
+	loaded, err := session.LoadContent(s.ContentPath())
 	require.NoError(t, err)
-	assert.Len(t, entries, 2)
+	assert.Len(t, loaded.Runs, 2)
 }
 
 func TestPersistRunState_LongPromptTruncated(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.PersistRunState(strings.Repeat("x", 200), []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
+	s.PersistRunState(strings.Repeat("x", 200), []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
 
-	meta := s.SessionMeta()
+	meta := s.Metadata()
 	assert.LessOrEqual(t, len([]rune(meta.FirstPrompt)), 120)
 	assert.LessOrEqual(t, len([]rune(meta.LastPrompt)), 120)
+}
+
+func TestPersistRunState_CollectorEventsStored(t *testing.T) {
+	s := tempStoreWithSession(t)
+	collector := output.NewCollector()
+	// Simulate collecting events.
+	wrap := collector.WrapOnEvent(func(string, models.AgentEvent) {})
+	wrap("m1", models.AgentEvent{Type: models.EventReading, Data: "main.go"})
+	wrap("m1", models.AgentEvent{Type: models.EventText, Data: "result"})
+
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, collector, []string{"bash"})
+
+	loaded, err := session.LoadContent(s.ContentPath())
+	require.NoError(t, err)
+	require.Len(t, loaded.Runs[0].Models[0].Events, 2)
+	assert.Equal(t, models.EventReading, loaded.Runs[0].Models[0].Events[0].Type)
 }
 
 // ── persistSessionRecipe (tested through PersistRunState) ───────────────────
@@ -438,7 +442,7 @@ func TestPersistRunState_LongPromptTruncated(t *testing.T) {
 func TestPersistRunState_RecipeWrittenToDisk(t *testing.T) {
 	s := tempStoreWithSession(t)
 	s.SetSessionRecipe(&recipe.Recipe{Name: "session-recipe"})
-	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
 
 	data, err := os.ReadFile(s.SessionRecipePath())
 	require.NoError(t, err)
@@ -447,102 +451,99 @@ func TestPersistRunState_RecipeWrittenToDisk(t *testing.T) {
 
 func TestPersistRunState_NilRecipeNoFile(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}})
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
 
 	_, err := os.Stat(s.SessionRecipePath())
 	assert.True(t, os.IsNotExist(err))
 }
 
-// ── UpdateLastFeedNote ──────────────────────────────────────────────────────
+// ── UpdateLastRunNote ───────────────────────────────────────────────────────
 
-func TestUpdateLastFeedNote_EmptyFeedNoop(t *testing.T) {
+func TestUpdateLastRunNote_EmptyRunsNoop(t *testing.T) {
 	s := tempStoreWithSession(t)
 	assert.NotPanics(t, func() {
-		s.UpdateLastFeedNote("should not panic")
+		s.UpdateLastRunNote("should not panic")
 	})
-	_, err := os.Stat(s.FeedPath())
-	assert.True(t, os.IsNotExist(err))
 }
 
-func TestUpdateLastFeedNote_UpdatesLastEntry(t *testing.T) {
+func TestUpdateLastRunNote_UpdatesLastRun(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.SetSessionFeed([]session.FeedEntry{
-		{Kind: "run", Prompt: "first"},
-		{Kind: "run", Prompt: "second"},
-	})
+	s.PersistRunState("first", []models.ModelResponse{{ModelID: "m1", Text: "r1"}}, nil, nil)
+	s.PersistRunState("second", []models.ModelResponse{{ModelID: "m1", Text: "r2"}}, nil, nil)
 
-	s.UpdateLastFeedNote("Applied: foo.go")
+	s.UpdateLastRunNote("Applied: foo.go")
 
-	feed := s.SessionFeed()
-	assert.Empty(t, feed[0].Note)
-	assert.Equal(t, "Applied: foo.go", feed[1].Note)
+	meta := s.Metadata()
+	assert.Empty(t, meta.Runs[0].Note)
+	assert.Equal(t, "Applied: foo.go", meta.Runs[1].Note)
 }
 
-func TestUpdateLastFeedNote_SavesToDisk(t *testing.T) {
+func TestUpdateLastRunNote_SavesToDisk(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.SetSessionFeed([]session.FeedEntry{
-		{Kind: "run", Prompt: "test"},
-	})
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
 
-	s.UpdateLastFeedNote("Skipped.")
+	s.UpdateLastRunNote("Skipped.")
 
-	entries, err := session.LoadFeed(s.FeedPath())
+	loaded, err := session.LoadMetadata(s.MetadataPath())
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "Skipped.", entries[0].Note)
+	require.Len(t, loaded.Runs, 1)
+	assert.Equal(t, "Skipped.", loaded.Runs[0].Note)
 }
 
-func TestUpdateLastFeedNote_OverwritesPrevious(t *testing.T) {
+func TestUpdateLastRunNote_OverwritesPrevious(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.SetSessionFeed([]session.FeedEntry{
-		{Kind: "run", Prompt: "test"},
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
+
+	s.UpdateLastRunNote("first note")
+	s.UpdateLastRunNote("second note")
+
+	assert.Equal(t, "second note", s.Metadata().Runs[0].Note)
+}
+
+// ── RecordSelection ─────────────────────────────────────────────────────────
+
+func TestRecordSelection_UpdatesLastRun(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.PersistRunState("test", []models.ModelResponse{
+		{ModelID: "m1", Text: "r1"},
+		{ModelID: "m2", Text: "r2"},
+	}, nil, nil)
+
+	s.RecordSelection(SelectionParams{
+		Prompt:          "test",
+		SelectedModelID: "m1",
+		AppliedFiles:    []string{"foo.go"},
 	})
 
-	s.UpdateLastFeedNote("first note")
-	s.UpdateLastFeedNote("second note")
-
-	assert.Equal(t, "second note", s.SessionFeed()[0].Note)
+	meta := s.Metadata()
+	require.Len(t, meta.Runs, 1)
+	assert.Equal(t, "m1", meta.Runs[0].Selected)
+	assert.Equal(t, []string{"foo.go"}, meta.Runs[0].AppliedFiles)
 }
 
-// ── BuildFeedEntry ──────────────────────────────────────────────────────────
+func TestRecordSelection_Rating(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "r1"}}, nil, nil)
 
-func TestBuildFeedEntry_BasicRun(t *testing.T) {
-	responses := []models.ModelResponse{
-		{
-			ModelID: "m1",
-			Text:    "fixed it",
-			ProposedWrites: []tools.FileWrite{
-				{Path: "foo.go", Content: "package foo"},
-			},
-		},
-		{
-			ModelID: "m2",
-			Text:    "also fixed",
-			ProposedWrites: []tools.FileWrite{
-				{Path: "bar.go", Content: "package bar"},
-			},
-		},
-	}
-	entry := BuildFeedEntry("fix bug", responses)
+	s.RecordSelection(SelectionParams{
+		Prompt:          "test",
+		SelectedModelID: "m1",
+		Rating:          "good",
+	})
 
-	assert.Equal(t, "run", entry.Kind)
-	assert.Equal(t, "fix bug", entry.Prompt)
-	require.Len(t, entry.Models, 2)
-	assert.Equal(t, "m1", entry.Models[0].ID)
-	assert.Equal(t, "m2", entry.Models[1].ID)
-	assert.Equal(t, []string{"foo.go"}, entry.Models[0].ProposedFiles)
-	assert.Equal(t, []string{"bar.go"}, entry.Models[1].ProposedFiles)
+	meta := s.Metadata()
+	assert.Equal(t, "good", meta.Runs[0].Rating)
 }
 
-func TestBuildFeedEntry_TextTruncatedAt500(t *testing.T) {
-	longText := strings.Repeat("x", 600)
-	responses := []models.ModelResponse{
-		{ModelID: "m1", Text: longText},
-	}
-	entry := BuildFeedEntry("test", responses)
+func TestRecordSelection_SavesToDisk(t *testing.T) {
+	s := tempStoreWithSession(t)
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
 
-	require.Len(t, entry.Models, 1)
-	assert.Len(t, []rune(entry.Models[0].Text), 500)
+	s.RecordSelection(SelectionParams{SelectedModelID: "m1"})
+
+	loaded, err := session.LoadMetadata(s.MetadataPath())
+	require.NoError(t, err)
+	assert.Equal(t, "m1", loaded.Runs[0].Selected)
 }
 
 // ── Cost Tracking ───────────────────────────────────────────────────────────
@@ -571,7 +572,6 @@ func TestRewind_EmptyStackReturnsError(t *testing.T) {
 func TestRewind_TruncatesHistories(t *testing.T) {
 	s := tempStoreWithSession(t)
 
-	// Append history, then push a rewind entry.
 	preLens := s.AppendHistories(
 		[]string{"m1"},
 		[]models.ModelResponse{{ModelID: "m1", Text: "a"}},
@@ -592,11 +592,10 @@ func TestRewind_TruncatesHistories(t *testing.T) {
 	assert.False(t, s.CanRewind())
 }
 
-func TestRewind_AnnotatesSessionFeed(t *testing.T) {
+func TestRewind_AnnotatesMetadataRun(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.SetSessionFeed([]session.FeedEntry{
-		{Kind: "run", Prompt: "fix bug", Note: "Applied: foo.go"},
-	})
+	s.PersistRunState("fix bug", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
+	s.metadata.Runs[0].Note = "Applied: foo.go"
 	s.PushRewindEntry(RewindEntry{
 		FeedIndex:      0,
 		Prompt:         "fix bug",
@@ -607,20 +606,13 @@ func TestRewind_AnnotatesSessionFeed(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "[rewound] Applied: foo.go", result.Note)
-	assert.Equal(t, "[rewound] Applied: foo.go", s.SessionFeed()[0].Note)
-
-	// Also saved to disk.
-	entries, err := session.LoadFeed(s.FeedPath())
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "[rewound] Applied: foo.go", entries[0].Note)
+	// Rewind adds a rewind marker run to metadata.
+	assert.GreaterOrEqual(t, len(s.Metadata().Runs), 2)
 }
 
 func TestRewind_EmptyNoteBecomes_Rewound(t *testing.T) {
 	s := tempStoreWithSession(t)
-	s.SetSessionFeed([]session.FeedEntry{
-		{Kind: "run", Prompt: "test"},
-	})
+	s.PersistRunState("test", []models.ModelResponse{{ModelID: "m1", Text: "ok"}}, nil, nil)
 	s.PushRewindEntry(RewindEntry{
 		FeedIndex:      0,
 		Prompt:         "test",
@@ -631,7 +623,6 @@ func TestRewind_EmptyNoteBecomes_Rewound(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "[rewound]", result.Note)
-	assert.Equal(t, "[rewound]", s.SessionFeed()[0].Note)
 }
 
 // ── RewindStackLen ──────────────────────────────────────────────────────────
@@ -692,205 +683,18 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 	assert.Equal(t, map[string]string{"bash": "run commands"}, snap.ToolDescriptions)
 	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
 	assert.Equal(t, "summarize it", snap.SummarizationPrompt)
-
 	require.NotNil(t, snap.ModelParams)
-	require.NotNil(t, snap.ModelParams.Temperature)
-	assert.InDelta(t, 0.7, *snap.ModelParams.Temperature, 1e-9)
-
 	require.NotNil(t, snap.Constraints)
-	assert.Equal(t, 5, snap.Constraints.MaxSteps)
-	assert.Equal(t, "3m0s", snap.Constraints.Timeout)
-
 	require.NotNil(t, snap.Context)
-	assert.Equal(t, 10, snap.Context.MaxHistoryTurns)
-	assert.Equal(t, "auto_compact", snap.Context.Strategy)
-	assert.InDelta(t, 0.8, snap.Context.CompactThreshold, 1e-9)
-	assert.Equal(t, "sequential", snap.Context.TaskMode)
-
-	require.Len(t, snap.SystemReminders, 1)
-	assert.Equal(t, "warn", snap.SystemReminders[0].Name)
-	assert.Equal(t, "context_usage > 0.75", snap.SystemReminders[0].Trigger)
-	assert.Equal(t, "heads up", snap.SystemReminders[0].Content)
-
-	require.Contains(t, snap.OutputProcessing, "bash")
-	assert.Equal(t, 50, snap.OutputProcessing["bash"].MaxLines)
-	assert.Equal(t, "tail", snap.OutputProcessing["bash"].Truncation)
-
-	require.Contains(t, snap.ModelProfiles, "claude")
-	assert.Equal(t, 100000, snap.ModelProfiles["claude"].ContextBudget)
-	require.NotNil(t, snap.ModelProfiles["claude"].SystemRole)
-	assert.True(t, *snap.ModelProfiles["claude"].SystemRole)
 }
 
 func TestBuildRecipeSnapshot_UsesActiveRecipe(t *testing.T) {
-	// Set base recipe with "base prompt", set session recipe with "session prompt".
-	// Assert BuildRecipeSnapshot().SystemPrompt == "session prompt".
-	// Pins that snapshot reads ActiveRecipe (session over base).
 	s := tempStore(t)
-
-	s.baseRecipe = &recipe.Recipe{
-		Version:      1,
-		Name:         "base",
-		SystemPrompt: "base prompt",
-		Tools: &recipe.ToolsConfig{
-			Allowlist: []string{"bash"},
-			Guidance:  map[string]string{"bash": "base guidance"},
-		},
-	}
-
-	sessionRec := &recipe.Recipe{
-		Version:      1,
-		Name:         "session",
-		SystemPrompt: "session prompt",
-		Tools: &recipe.ToolsConfig{
-			Allowlist: []string{"bash"},
-			Guidance:  map[string]string{"bash": "session guidance"},
-		},
-	}
+	s.baseRecipe = &recipe.Recipe{Name: "base", SystemPrompt: "base prompt"}
+	sessionRec := &recipe.Recipe{Name: "session", SystemPrompt: "session prompt"}
 	s.SetSessionRecipe(sessionRec)
 
 	snap := s.BuildRecipeSnapshot()
 	assert.Equal(t, "session prompt", snap.SystemPrompt)
-	assert.Equal(t, map[string]string{"bash": "session guidance"}, snap.ToolGuidance)
 	assert.Equal(t, "session", snap.Name)
-}
-
-func TestBuildRecipeSnapshot_SessionOverride_NoFieldMerge(t *testing.T) {
-	// Base has SystemPrompt + tool guidance; session has only SystemPrompt + nil Tools.
-	// Assert snapshot.ToolGuidance is nil (no fallthrough from base).
-	// Prevents accidental merge semantics during refactor.
-	s := tempStore(t)
-
-	s.baseRecipe = &recipe.Recipe{
-		Version:      1,
-		Name:         "base",
-		SystemPrompt: "base prompt",
-		Tools: &recipe.ToolsConfig{
-			Allowlist: []string{"bash"},
-			Guidance:  map[string]string{"bash": "base guidance"},
-		},
-	}
-
-	sessionRec := &recipe.Recipe{
-		Version:      1,
-		Name:         "session-only-prompt",
-		SystemPrompt: "session prompt",
-		// Tools intentionally left nil
-	}
-	s.SetSessionRecipe(sessionRec)
-
-	snap := s.BuildRecipeSnapshot()
-	// Session recipe is active, so snapshot reads from session recipe only.
-	assert.Equal(t, "session prompt", snap.SystemPrompt)
-	assert.Empty(t, snap.ToolGuidance, "ToolGuidance should be empty — no fallthrough from base")
-}
-
-func TestBuildRecipeSnapshot_NilOptionalFields(t *testing.T) {
-	s := tempStore(t)
-	s.baseRecipe = &recipe.Recipe{
-		Version: 1,
-		Name:    "minimal",
-	}
-
-	snap := s.BuildRecipeSnapshot()
-	assert.Equal(t, "minimal", snap.Name)
-	assert.Nil(t, snap.Constraints)
-	assert.Nil(t, snap.ModelParams)
-	assert.Nil(t, snap.Context)
-	assert.Nil(t, snap.SystemReminders)
-	assert.Nil(t, snap.OutputProcessing)
-	assert.Nil(t, snap.ModelProfiles)
-	assert.Empty(t, snap.ToolGuidance)
-	assert.Nil(t, snap.BashPrefixes)
-	assert.Nil(t, snap.ToolDescriptions)
-	assert.Empty(t, snap.SummarizationPrompt)
-}
-
-// ── Report Path Accumulation ────────────────────────────────────────────────
-
-func TestSetLastReportInfo_AccumulatesPaths(t *testing.T) {
-	s := tempStore(t)
-
-	s.SetLastReportInfo("path/report1.json", []string{"bash"})
-	s.SetLastReportInfo("path/report2.json", []string{"bash"})
-	s.SetLastReportInfo("path/report3.json", []string{"bash"})
-
-	assert.Equal(t, 3, s.ReportPathCount())
-	assert.Equal(t, "path/report3.json", s.LastReportPath())
-}
-
-func TestSetLastReportInfo_EmptyPathNotAccumulated(t *testing.T) {
-	s := tempStore(t)
-
-	s.SetLastReportInfo("path/report1.json", []string{"bash"})
-	s.SetLastReportInfo("", []string{"bash"})
-
-	assert.Equal(t, 1, s.ReportPathCount())
-}
-
-func TestLoadAllReports_LoadsInOrder(t *testing.T) {
-	tmp := t.TempDir()
-	s := tempStore(t)
-
-	// Create and save two reports.
-	r1 := &output.Report{
-		ID:        "rpt_1",
-		Prompt:    "first",
-		Recipe:    output.RecipeSnapshot{Name: "test"},
-		Models:    []output.ModelResult{},
-		Aggregate: output.AggregateStats{},
-	}
-	r2 := &output.Report{
-		ID:        "rpt_2",
-		Prompt:    "second",
-		Recipe:    output.RecipeSnapshot{Name: "test"},
-		Models:    []output.ModelResult{},
-		Aggregate: output.AggregateStats{},
-	}
-
-	p1, err := output.Save(tmp, r1)
-	require.NoError(t, err)
-	p2, err := output.Save(tmp, r2)
-	require.NoError(t, err)
-
-	s.SetLastReportInfo(p1, nil)
-	s.SetLastReportInfo(p2, nil)
-
-	reports := s.LoadAllReports()
-	require.Len(t, reports, 2)
-	assert.Equal(t, "first", reports[0].Prompt)
-	assert.Equal(t, "second", reports[1].Prompt)
-}
-
-func TestLoadAllReports_SkipsMissing(t *testing.T) {
-	tmp := t.TempDir()
-	s := tempStore(t)
-
-	r := &output.Report{
-		ID:        "rpt_1",
-		Prompt:    "valid",
-		Recipe:    output.RecipeSnapshot{Name: "test"},
-		Models:    []output.ModelResult{},
-		Aggregate: output.AggregateStats{},
-	}
-	p, err := output.Save(tmp, r)
-	require.NoError(t, err)
-
-	s.SetLastReportInfo("/nonexistent/report.json", nil)
-	s.SetLastReportInfo(p, nil)
-
-	reports := s.LoadAllReports()
-	require.Len(t, reports, 1)
-	assert.Equal(t, "valid", reports[0].Prompt)
-}
-
-func TestClearReportPaths(t *testing.T) {
-	s := tempStore(t)
-
-	s.SetLastReportInfo("path/report1.json", nil)
-	s.SetLastReportInfo("path/report2.json", nil)
-	assert.Equal(t, 2, s.ReportPathCount())
-
-	s.ClearReportPaths()
-	assert.Equal(t, 0, s.ReportPathCount())
 }

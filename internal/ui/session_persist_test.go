@@ -1,16 +1,14 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/errata-app/errata-cli/internal/datastore"
 	"github.com/errata-app/errata-cli/internal/models"
-	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/internal/session"
-	"github.com/errata-app/errata-cli/internal/tools"
+	"github.com/errata-app/errata-cli/pkg/recipe"
 )
 
 // ── Group A: truncateStr ────────────────────────────────────────────────────
@@ -38,119 +36,31 @@ func TestTruncateStr(t *testing.T) {
 	}
 }
 
-// ── Group B: buildFeedEntry ─────────────────────────────────────────────────
+// ── Group B: replayFromMetadata ─────────────────────────────────────────────
 
-func TestBuildFeedEntry_BasicRun(t *testing.T) {
-	responses := []models.ModelResponse{
-		{
-			ModelID: "m1",
-			Text:    "fixed it",
-			ProposedWrites: []tools.FileWrite{
-				{Path: "foo.go", Content: "package foo"},
-			},
-		},
-		{
-			ModelID: "m2",
-			Text:    "also fixed",
-			ProposedWrites: []tools.FileWrite{
-				{Path: "bar.go", Content: "package bar"},
-			},
-		},
-	}
-	entry := buildFeedEntry("fix bug", responses)
-
-	assert.Equal(t, "run", entry.Kind)
-	assert.Equal(t, "fix bug", entry.Prompt)
-	require.Len(t, entry.Models, 2)
-	assert.Equal(t, "m1", entry.Models[0].ID)
-	assert.Equal(t, "m2", entry.Models[1].ID)
-	assert.Equal(t, []string{"foo.go"}, entry.Models[0].ProposedFiles)
-	assert.Equal(t, []string{"bar.go"}, entry.Models[1].ProposedFiles)
-}
-
-func TestBuildFeedEntry_TextTruncatedAt500(t *testing.T) {
-	longText := strings.Repeat("x", 600)
-	responses := []models.ModelResponse{
-		{ModelID: "m1", Text: longText},
-	}
-	entry := buildFeedEntry("test", responses)
-
-	require.Len(t, entry.Models, 1)
-	assert.Len(t, []rune(entry.Models[0].Text), 500)
-}
-
-func TestBuildFeedEntry_NoResponses(t *testing.T) {
-	entry := buildFeedEntry("test", nil)
-
-	assert.Equal(t, "run", entry.Kind)
-	assert.Equal(t, "test", entry.Prompt)
-	assert.Empty(t, entry.Models)
-}
-
-func TestBuildFeedEntry_NoProposedWrites(t *testing.T) {
-	responses := []models.ModelResponse{
-		{ModelID: "m1", Text: "just text"},
-	}
-	entry := buildFeedEntry("test", responses)
-
-	require.Len(t, entry.Models, 1)
-	assert.Empty(t, entry.Models[0].ProposedFiles)
-}
-
-func TestBuildFeedEntry_MultipleWrites(t *testing.T) {
-	responses := []models.ModelResponse{
-		{
-			ModelID: "m1",
-			Text:    "wrote files",
-			ProposedWrites: []tools.FileWrite{
-				{Path: "a.go"},
-				{Path: "b.go"},
-				{Path: "c.go"},
-			},
-		},
-	}
-	entry := buildFeedEntry("test", responses)
-
-	require.Len(t, entry.Models, 1)
-	assert.Equal(t, []string{"a.go", "b.go", "c.go"}, entry.Models[0].ProposedFiles)
-}
-
-func TestBuildFeedEntry_EmptyPrompt(t *testing.T) {
-	entry := buildFeedEntry("", nil)
-	assert.Empty(t, entry.Prompt)
-}
-
-// ── Group C: replayFeed ─────────────────────────────────────────────────────
-
-func TestReplayFeed_NilEntries(t *testing.T) {
-	items := replayFeed(nil)
+func TestReplayFromMetadata_NilRuns(t *testing.T) {
+	items := replayFromMetadata(nil, nil)
 	assert.Empty(t, items)
 }
 
-func TestReplayFeed_MessageEntry(t *testing.T) {
-	entries := []session.FeedEntry{
-		{Kind: "message", Text: "hello world"},
-	}
-	items := replayFeed(entries)
-
-	require.Len(t, items, 1)
-	assert.Equal(t, "message", items[0].kind)
-	assert.Equal(t, "hello world", items[0].text)
-}
-
-func TestReplayFeed_RunEntry(t *testing.T) {
-	entries := []session.FeedEntry{
+func TestReplayFromMetadata_RunEntry(t *testing.T) {
+	runs := []session.RunSummary{
 		{
-			Kind:   "run",
+			PromptPreview: "fix bug",
+			Note:          "Applied: foo.go",
+			Models:        []string{"m1", "m2"},
+		},
+	}
+	content := []session.RunContent{
+		{
 			Prompt: "fix bug",
-			Note:   "Applied: foo.go",
-			Models: []session.ModelEntry{
-				{ID: "m1", Text: "response 1"},
-				{ID: "m2", Text: "response 2"},
+			Models: []session.ModelRunContent{
+				{ModelID: "m1", Text: "response 1"},
+				{ModelID: "m2", Text: "response 2"},
 			},
 		},
 	}
-	items := replayFeed(entries)
+	items := replayFromMetadata(runs, content)
 
 	require.Len(t, items, 1)
 	assert.Equal(t, "run", items[0].kind)
@@ -159,56 +69,40 @@ func TestReplayFeed_RunEntry(t *testing.T) {
 	require.Len(t, items[0].panels, 2)
 }
 
-func TestReplayFeed_MixedEntries(t *testing.T) {
-	entries := []session.FeedEntry{
-		{Kind: "message", Text: "msg1"},
-		{Kind: "run", Prompt: "do stuff", Models: []session.ModelEntry{{ID: "m1"}}},
-		{Kind: "message", Text: "msg2"},
+func TestReplayFromMetadata_SkipsRewindEntries(t *testing.T) {
+	runs := []session.RunSummary{
+		{PromptPreview: "original", Models: []string{"m1"}},
+		{Type: "rewind", PromptPreview: "original"},
 	}
-	items := replayFeed(entries)
-
-	require.Len(t, items, 3)
-	assert.Equal(t, "message", items[0].kind)
-	assert.Equal(t, "run", items[1].kind)
-	assert.Equal(t, "message", items[2].kind)
-}
-
-func TestReplayFeed_NewlinesReplacedInSummary(t *testing.T) {
-	entries := []session.FeedEntry{
-		{
-			Kind:   "run",
-			Prompt: "test",
-			Models: []session.ModelEntry{
-				{ID: "m1", Text: "line1\nline2\nline3"},
-			},
-		},
+	content := []session.RunContent{
+		{Prompt: "original", Models: []session.ModelRunContent{{ModelID: "m1", Text: "resp"}}},
 	}
-	items := replayFeed(entries)
-
-	// replayFeed creates panels from models — the text event should not have
-	// raw newlines since it's truncated. The summary is built internally and
-	// replaces newlines. We verify the panel was created correctly.
+	items := replayFromMetadata(runs, content)
 	require.Len(t, items, 1)
-	require.Len(t, items[0].panels, 1)
+	assert.Equal(t, "original", items[0].prompt)
+}
+
+func TestReplayFromMetadata_FallbackToIDs(t *testing.T) {
+	// More runs in metadata than content — should fall back to IDs.
+	runs := []session.RunSummary{
+		{PromptPreview: "test", Models: []string{"m1", "m2"}},
+	}
+	items := replayFromMetadata(runs, nil)
+
+	require.Len(t, items, 1)
+	require.Len(t, items[0].panels, 2)
 	assert.Equal(t, "m1", items[0].panels[0].modelID)
+	assert.Equal(t, "m2", items[0].panels[1].modelID)
 }
 
-func TestReplayFeed_UnknownKindSkipped(t *testing.T) {
-	entries := []session.FeedEntry{
-		{Kind: "bogus", Text: "should be ignored"},
-	}
-	items := replayFeed(entries)
-	assert.Empty(t, items)
-}
+// ── Group C: replayPanelsFromContent ────────────────────────────────────────
 
-// ── Group D: replayPanels ───────────────────────────────────────────────────
-
-func TestReplayPanels_BasicEntries(t *testing.T) {
-	entries := []session.ModelEntry{
-		{ID: "m1", Text: "response 1"},
-		{ID: "m2", Text: "response 2"},
+func TestReplayPanelsFromContent_BasicEntries(t *testing.T) {
+	entries := []session.ModelRunContent{
+		{ModelID: "m1", Text: "response 1"},
+		{ModelID: "m2", Text: "response 2"},
 	}
-	panels := replayPanels(entries)
+	panels := replayPanelsFromContent(entries)
 
 	require.Len(t, panels, 2)
 	assert.Equal(t, "m1", panels[0].modelID)
@@ -217,29 +111,45 @@ func TestReplayPanels_BasicEntries(t *testing.T) {
 	assert.True(t, panels[1].done)
 }
 
-func TestReplayPanels_TextEmittedAsEvent(t *testing.T) {
-	entries := []session.ModelEntry{
-		{ID: "m1", Text: "response"},
+func TestReplayPanelsFromContent_TextEmittedAsEvent(t *testing.T) {
+	entries := []session.ModelRunContent{
+		{ModelID: "m1", Text: "response"},
 	}
-	panels := replayPanels(entries)
+	panels := replayPanelsFromContent(entries)
 
 	require.Len(t, panels, 1)
 	require.Len(t, panels[0].events, 1)
 	assert.Equal(t, models.EventText, panels[0].events[0].Type)
 }
 
-func TestReplayPanels_EmptyTextNoEvent(t *testing.T) {
-	entries := []session.ModelEntry{
-		{ID: "m1", Text: ""},
+func TestReplayPanelsFromContent_EmptyTextNoEvent(t *testing.T) {
+	entries := []session.ModelRunContent{
+		{ModelID: "m1", Text: ""},
 	}
-	panels := replayPanels(entries)
+	panels := replayPanelsFromContent(entries)
 
 	require.Len(t, panels, 1)
 	assert.Empty(t, panels[0].events)
 }
 
-func TestReplayPanels_NilEntries(t *testing.T) {
-	panels := replayPanels(nil)
+func TestReplayPanelsFromContent_NilEntries(t *testing.T) {
+	panels := replayPanelsFromContent(nil)
+	assert.Empty(t, panels)
+}
+
+// ── Group D: replayPanelsFromIDs ────────────────────────────────────────────
+
+func TestReplayPanelsFromIDs_BasicIDs(t *testing.T) {
+	panels := replayPanelsFromIDs([]string{"m1", "m2"})
+	require.Len(t, panels, 2)
+	assert.Equal(t, "m1", panels[0].modelID)
+	assert.Equal(t, "m2", panels[1].modelID)
+	assert.True(t, panels[0].done)
+	assert.True(t, panels[1].done)
+}
+
+func TestReplayPanelsFromIDs_NilIDs(t *testing.T) {
+	panels := replayPanelsFromIDs(nil)
 	assert.Empty(t, panels)
 }
 
@@ -310,13 +220,16 @@ func TestSyncToolAllowlist_AllInactiveEmptiesAllowlist(t *testing.T) {
 	assert.Empty(t, a.toolAllowlist)
 }
 
-// ── Group J: handleRewindCmd feed persistence ───────────────────────────────
+// ── Group J: handleRewindCmd metadata persistence ───────────────────────────
 
-func TestHandleRewindCmd_PersistsAnnotationToSessionFeed(t *testing.T) {
+func TestHandleRewindCmd_PersistsAnnotationToMetadata(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.store.SetSessionFeed([]session.FeedEntry{
-		{Kind: "run", Prompt: "fix bug", Note: "Applied: foo.go"},
-	})
+	// Simulate a run that was persisted.
+	a.store.PersistRunState("fix bug", []models.ModelResponse{
+		{ModelID: "m1", Text: "fixed", LatencyMS: 100},
+	}, nil, nil)
+	// Simulate selection note.
+	a.store.UpdateLastRunNote("Applied: foo.go")
 	a.feed = []feedItem{
 		{kind: "run", prompt: "fix bug", note: "Applied: foo.go"},
 	}
@@ -329,16 +242,18 @@ func TestHandleRewindCmd_PersistsAnnotationToSessionFeed(t *testing.T) {
 
 	// Display feed gets annotated.
 	assert.Equal(t, "[rewound] Applied: foo.go", app.feed[0].note)
-	// Session feed (persisted to disk) must also be updated.
-	require.Len(t, app.store.SessionFeed(), 1)
-	assert.Equal(t, "[rewound] Applied: foo.go", app.store.SessionFeed()[0].Note)
+	// Metadata runs should also reflect annotation.
+	meta := app.store.Metadata()
+	require.NotEmpty(t, meta.Runs)
+	assert.Contains(t, meta.Runs[len(meta.Runs)-2].Note, "[rewound]")
 }
 
 func TestHandleRewindCmd_AnnotationSavedToDisk(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.store.SetSessionFeed([]session.FeedEntry{
-		{Kind: "run", Prompt: "test", Note: "Skipped."},
-	})
+	a.store.PersistRunState("test", []models.ModelResponse{
+		{ModelID: "m1", Text: "resp", LatencyMS: 100},
+	}, nil, nil)
+	a.store.UpdateLastRunNote("Skipped.")
 	a.feed = []feedItem{
 		{kind: "run", prompt: "test", note: "Skipped."},
 	}
@@ -348,17 +263,19 @@ func TestHandleRewindCmd_AnnotationSavedToDisk(t *testing.T) {
 
 	a.handleRewindCmd()
 
-	entries, err := session.LoadFeed(a.store.FeedPath())
+	// Verify via disk read.
+	meta, err := session.LoadMetadata(a.store.MetadataPath())
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "[rewound] Skipped.", entries[0].Note)
+	// Original run should be annotated, plus a rewind marker.
+	require.GreaterOrEqual(t, len(meta.Runs), 1)
+	assert.Contains(t, meta.Runs[0].Note, "[rewound]")
 }
 
 func TestHandleRewindCmd_EmptyNoteBecomes_Rewound(t *testing.T) {
 	a := newAppForTest(t, nil)
-	a.store.SetSessionFeed([]session.FeedEntry{
-		{Kind: "run", Prompt: "test"},
-	})
+	a.store.PersistRunState("test", []models.ModelResponse{
+		{ModelID: "m1", Text: "resp", LatencyMS: 100},
+	}, nil, nil)
 	a.feed = []feedItem{
 		{kind: "run", prompt: "test"},
 	}
@@ -369,5 +286,8 @@ func TestHandleRewindCmd_EmptyNoteBecomes_Rewound(t *testing.T) {
 	result, _ := a.handleRewindCmd()
 	app := result.(App)
 
-	assert.Equal(t, "[rewound]", app.store.SessionFeed()[0].Note)
+	meta := app.store.Metadata()
+	// The original run note should contain [rewound].
+	require.GreaterOrEqual(t, len(meta.Runs), 1)
+	assert.Contains(t, meta.Runs[0].Note, "[rewound]")
 }

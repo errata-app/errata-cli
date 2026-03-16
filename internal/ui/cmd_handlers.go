@@ -20,11 +20,11 @@ import (
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/internal/paths"
-	"github.com/errata-app/errata-cli/internal/preferences"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/internal/prompt"
 	"github.com/errata-app/errata-cli/internal/runner"
 	"github.com/errata-app/errata-cli/internal/sandbox"
+	"github.com/errata-app/errata-cli/internal/session"
 	"github.com/errata-app/errata-cli/internal/subagent"
 	"github.com/errata-app/errata-cli/internal/tools"
 )
@@ -124,7 +124,6 @@ func (a App) handleWipeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubblet
 	a.pastedText = ""
 	a.pastedLineCount = 0
 	a.store.ClearHistories()
-	a.store.ClearReportPaths()
 	return a, clearScreenAndScrollback()
 }
 
@@ -174,8 +173,8 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 }
 
 func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	filter := &preferences.StatsFilter{SessionID: a.store.SessionID()}
-	stats := preferences.SummarizeDetailed(a.store.PrefPath(), filter)
+	meta := a.store.Metadata()
+	stats := session.SummarizeRunsDetailed(meta.Runs, nil)
 	var sb strings.Builder
 	sb.WriteString("Stats (session):\n")
 	if len(stats) == 0 {
@@ -184,7 +183,7 @@ func (a App) handleStatsCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubble
 		sb.WriteString("  Preference wins:\n")
 		type row struct {
 			id string
-			s  preferences.ModelStats
+			s  session.ModelStats
 		}
 		rows := make([]row, 0, len(stats))
 		for id, s := range stats {
@@ -318,8 +317,6 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	projectRoot := a.projectRoot
 	cfg := a.cfg
 	seed := a.seed
-	sessionID := a.store.SessionID()
-	rec := a.store.BaseRecipe()
 	cpPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
@@ -412,13 +409,8 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		for i, d := range activeDefs {
 			toolNames[i] = d.Name
 		}
-		report := output.BuildReport(sessionID, rec, trimmed, responses, collector, toolNames)
-		reportPath, err := output.Save(a.store.OutputDir(), report)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
-		}
 
-		return runCompleteMsg{responses: responses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
+		return runCompleteMsg{responses: responses, compactedHistories: compacted, collector: collector, toolNames: toolNames}
 	})
 	return a, tea.Batch(batchCmds...)
 }
@@ -566,8 +558,6 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	projectRoot := a.projectRoot
 	cfg := a.cfg
 	seed := a.seed
-	sessionID := a.store.SessionID()
-	rec := a.store.BaseRecipe()
 	resumeCPPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
@@ -664,13 +654,8 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		for i, d := range activeDefs {
 			toolNames[i] = d.Name
 		}
-		report := output.BuildReport(sessionID, rec, userPrompt, allResponses, collector, toolNames)
-		reportPath, err := output.Save(a.store.OutputDir(), report)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save output report: %v\n", err)
-		}
 
-		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, reportPath: reportPath, toolNames: toolNames}
+		return runCompleteMsg{responses: allResponses, compactedHistories: compacted, collector: collector, toolNames: toolNames}
 	})
 	return a, tea.Batch(resumeBatchCmds...)
 }
@@ -863,14 +848,66 @@ func (a App) handleLoadCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocr
 }
 
 func (a App) handleExportCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
-	reports := a.store.LoadAllReports()
-	if len(reports) == 0 {
+	meta := a.store.Metadata()
+	content := a.store.Content()
+	if len(content.Runs) == 0 {
 		return a.withMessage("No run output to export. Run a prompt first.")
 	}
 
-	dir := a.store.OutputDir()
+	dir := "."
 	if args != "" {
 		dir = args
+	}
+
+	// Build per-run reports from metadata + content.
+	var reports []*output.Report
+	for i, rc := range content.Runs {
+		var modelResults []output.ModelResult
+		for _, m := range rc.Models {
+			modelResults = append(modelResults, output.ModelResult{
+				ModelID:        m.ModelID,
+				Text:           m.Text,
+				StopReason:     m.StopReason,
+				Steps:          m.Steps,
+				ProposedWrites: m.ProposedWrites,
+				Events:         m.Events,
+			})
+		}
+		// Enrich from metadata if available.
+		var rs *session.RunSummary
+		if i < len(meta.Runs) {
+			rs = &meta.Runs[i]
+			for j, mr := range modelResults {
+				if lat, ok := rs.LatenciesMS[mr.ModelID]; ok {
+					modelResults[j].LatencyMS = lat
+				}
+				if cost, ok := rs.CostsUSD[mr.ModelID]; ok {
+					modelResults[j].CostUSD = cost
+				}
+				if tok, ok := rs.InputTokens[mr.ModelID]; ok {
+					modelResults[j].InputTokens = tok
+				}
+				if tok, ok := rs.OutputTokens[mr.ModelID]; ok {
+					modelResults[j].OutputTokens = tok
+				}
+			}
+		}
+		r := &output.Report{
+			SessionID: a.store.SessionID(),
+			Prompt:    rc.Prompt,
+			Models:    modelResults,
+		}
+		if rs != nil {
+			r.Timestamp = rs.Timestamp
+			if rs.Selected != "" {
+				r.Selection = &output.SelectionOutcome{
+					SelectedModel: rs.Selected,
+					AppliedFiles:  rs.AppliedFiles,
+					Rating:        rs.Rating,
+				}
+			}
+		}
+		reports = append(reports, r)
 	}
 
 	sessionReport := output.BuildSessionReport(a.store.SessionID(), reports)

@@ -1,11 +1,11 @@
 // Package datastore provides a unified data layer for session-scoped persistence.
-// It composes existing data packages (history, prompthistory, runner) and serves
-// as the authoritative source for conversation histories, prompt history, session
-// state, rewind stack, checkpoint, and cost tracking within a session.
+// It composes existing data packages and serves as the authoritative source for
+// conversation histories, prompt history, session state, rewind stack, checkpoint,
+// and cost tracking within a session.
 package datastore
 
 import (
-	"errors"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"os"
@@ -13,10 +13,8 @@ import (
 	"time"
 
 	"github.com/errata-app/errata-cli/internal/checkpoint"
-	"github.com/errata-app/errata-cli/internal/history"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
-	"github.com/errata-app/errata-cli/internal/preferences"
 	"github.com/errata-app/errata-cli/internal/prompthistory"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/pkg/recipestore"
@@ -30,7 +28,7 @@ type RewindEntry struct {
 	FileSnapshots  []tools.FileSnapshot // nil if no writes were applied
 	HistoryLengths map[string]int       // per-adapter history len BEFORE AppendHistory
 	FeedIndex      int                  // index into the UI feed for annotation
-	Prompt         string               // original prompt (for RecordRewind)
+	Prompt         string               // original prompt (for rewind marker)
 }
 
 // RewindResult is returned by Rewind with information the UI needs to update display.
@@ -43,7 +41,6 @@ type RewindResult struct {
 // Store is the single source of truth for persisted and session-scoped data.
 // It owns the in-memory state and persists on mutation.
 type Store struct {
-	histPath       string
 	promptHistPath string
 
 	// Per-model conversation history; keyed by adapter ID.
@@ -53,14 +50,13 @@ type Store struct {
 	promptHist []string
 
 	// Session persistence paths and state.
+	metadataPath      string
+	contentPath       string
 	checkpointPath    string
-	feedPath          string
-	sessionMetaPath   string
 	sessionRecipePath string
 	sessionID         string
-	prefPath          string
-	sessionMeta       session.Meta
-	sessionFeed       []session.FeedEntry
+	metadata          session.SessionMetadata
+	content           session.SessionContent
 
 	// Rewind stack — each entry captures state for one undo step.
 	rewindStack []RewindEntry
@@ -76,24 +72,16 @@ type Store struct {
 	// Recipe store for content-addressed config snapshots.
 	recipeStore *recipestore.Store
 
-	// Output directory for reports.
-	outputDir string
-
-	// Report tracking — path-based (not pointer) so /export works after selection.
-	lastReportPath  string
+	// Active tool names from last run (for recipe snapshot).
 	lastActiveTools []string
-	reportPaths     []string // all per-run report paths this session, in order
 }
 
 // Options configures a new Store.
 type Options struct {
-	HistoryPath    string // path to session history.json
 	PromptHistPath string // path to global prompt_history.jsonl
 	SessionPaths   session.Paths
 	SessionID      string
-	PrefPath       string
-	OutputDir      string // directory for output reports
-	Meta           session.Meta
+	Meta           session.SessionMetadata
 	RecipeStore    *recipestore.Store
 	Recipe         *recipe.Recipe // base recipe loaded at startup
 }
@@ -101,9 +89,13 @@ type Options struct {
 // New creates a Store, loading existing data from disk.
 // Missing files are not errors — the store starts empty.
 func New(opts Options) (*Store, error) {
-	h, err := history.Load(opts.HistoryPath)
+	// Load content (includes histories).
+	c, err := session.LoadContent(opts.SessionPaths.ContentPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load history: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: could not load session content: %v\n", err)
+	}
+	if c == nil {
+		c = &session.SessionContent{}
 	}
 
 	ph, err := prompthistory.Load(opts.PromptHistPath)
@@ -112,18 +104,16 @@ func New(opts Options) (*Store, error) {
 	}
 
 	return &Store{
-		histPath:          opts.HistoryPath,
 		promptHistPath:    opts.PromptHistPath,
-		histories:         h,
+		histories:         c.Histories,
 		promptHist:        ph,
+		metadataPath:      opts.SessionPaths.MetadataPath,
+		contentPath:       opts.SessionPaths.ContentPath,
 		checkpointPath:    opts.SessionPaths.CheckpointPath,
-		feedPath:          opts.SessionPaths.FeedPath,
-		sessionMetaPath:   opts.SessionPaths.MetaPath,
 		sessionRecipePath: opts.SessionPaths.RecipePath,
 		sessionID:         opts.SessionID,
-		prefPath:          opts.PrefPath,
-		outputDir:         opts.OutputDir,
-		sessionMeta:       opts.Meta,
+		metadata:          opts.Meta,
+		content:           *c,
 		costPerModel:      make(map[string]float64),
 		baseRecipe:        opts.Recipe,
 		recipeStore:       opts.RecipeStore,
@@ -150,14 +140,14 @@ func (s *Store) AppendHistories(
 		preLengths[id] = len(s.histories[id])
 	}
 	s.histories = runner.AppendHistory(s.histories, panelIDs, responses, userPrompt)
-	s.saveHistories()
+	s.saveContent()
 	return preLengths
 }
 
 // SetHistories replaces the histories wholesale (used by compaction) and persists.
 func (s *Store) SetHistories(h map[string][]models.ConversationTurn) {
 	s.histories = h
-	s.saveHistories()
+	s.saveContent()
 }
 
 // TruncateHistories restores per-adapter history to the given pre-run lengths
@@ -172,21 +162,21 @@ func (s *Store) TruncateHistories(lengths map[string]int) {
 			delete(s.histories, adapterID)
 		}
 	}
-	s.saveHistories()
+	s.saveContent()
 }
 
-// ClearHistories wipes all conversation history and removes the file from disk.
+// ClearHistories wipes all conversation history and persists.
 func (s *Store) ClearHistories() {
 	s.histories = nil
-	if err := history.Clear(s.histPath); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not clear history: %v\n", err)
-	}
+	s.content.Histories = nil
+	s.saveContent()
 }
 
-// saveHistories persists the current histories to disk.
-func (s *Store) saveHistories() {
-	if err := history.Save(s.histPath, s.histories); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
+// saveContent persists the current content (histories + runs) to disk.
+func (s *Store) saveContent() {
+	s.content.Histories = s.histories
+	if err := session.SaveContent(s.contentPath, s.content); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save session content: %v\n", err)
 	}
 }
 
@@ -213,58 +203,126 @@ func (s *Store) RecordPrompt(prompt string) bool {
 
 // ── Session State ───────────────────────────────────────────────────────────
 
-// SessionMeta returns the current session metadata.
-func (s *Store) SessionMeta() session.Meta { return s.sessionMeta }
+// Metadata returns the current session metadata.
+func (s *Store) Metadata() session.SessionMetadata { return s.metadata }
 
-// SessionFeed returns the session feed entries (for resume replay).
-func (s *Store) SessionFeed() []session.FeedEntry { return s.sessionFeed }
-
-// SetSessionFeed replaces the session feed (used on resume).
-func (s *Store) SetSessionFeed(entries []session.FeedEntry) {
-	s.sessionFeed = entries
-}
+// Content returns the current session content.
+func (s *Store) Content() session.SessionContent { return s.content }
 
 // SaveInitialMeta persists the initial session metadata to disk.
 func (s *Store) SaveInitialMeta() {
-	if err := session.SaveMeta(s.sessionMetaPath, s.sessionMeta); err != nil {
+	if err := session.SaveMetadata(s.metadataPath, s.metadata); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
 	}
 }
 
-// PersistRunState updates session metadata, appends a feed entry, and persists
-// the session recipe. Called from the run-complete handler.
-func (s *Store) PersistRunState(lastPrompt string, responses []models.ModelResponse) {
+// PersistRunState updates session metadata with a RunSummary, appends a
+// RunContent to content, and persists both files plus the session recipe.
+func (s *Store) PersistRunState(
+	lastPrompt string,
+	responses []models.ModelResponse,
+	collector *output.Collector,
+	toolNames []string,
+) {
 	rec := s.ActiveRecipe()
 	now := time.Now()
-	s.sessionMeta.LastActiveAt = now
-	s.sessionMeta.PromptCount++
-	if s.sessionMeta.FirstPrompt == "" {
-		s.sessionMeta.FirstPrompt = truncateStr(lastPrompt, 120)
-	}
-	s.sessionMeta.LastPrompt = truncateStr(lastPrompt, 120)
 
-	if err := session.SaveMeta(s.sessionMetaPath, s.sessionMeta); err != nil {
+	s.lastActiveTools = toolNames
+
+	// Update metadata header fields.
+	s.metadata.LastActiveAt = now
+	s.metadata.PromptCount++
+	if s.metadata.FirstPrompt == "" {
+		s.metadata.FirstPrompt = truncateStr(lastPrompt, 120)
+	}
+	s.metadata.LastPrompt = truncateStr(lastPrompt, 120)
+
+	// Build RunSummary.
+	hash := sha256.Sum256([]byte(lastPrompt))
+	preview := lastPrompt
+	if len(preview) > 120 {
+		preview = preview[:120]
+	}
+
+	modelIDs := make([]string, len(responses))
+	latencies := make(map[string]int64, len(responses))
+	costs := make(map[string]float64, len(responses))
+	inputTokens := make(map[string]int64, len(responses))
+	outputTokens := make(map[string]int64, len(responses))
+	toolCallsMap := make(map[string]map[string]int, len(responses))
+	proposedWritesCount := make(map[string]int, len(responses))
+	for i, r := range responses {
+		modelIDs[i] = r.ModelID
+		latencies[r.ModelID] = r.LatencyMS
+		costs[r.ModelID] = r.CostUSD
+		inputTokens[r.ModelID] = r.InputTokens
+		outputTokens[r.ModelID] = r.OutputTokens
+		toolCallsMap[r.ModelID] = r.ToolCalls
+		proposedWritesCount[r.ModelID] = len(r.ProposedWrites)
+	}
+
+	configHash := s.RecipeHash()
+
+	rs := session.RunSummary{
+		Timestamp:           now,
+		PromptHash:          fmt.Sprintf("sha256:%x", hash),
+		PromptPreview:       preview,
+		Models:              modelIDs,
+		LatenciesMS:         latencies,
+		CostsUSD:            costs,
+		InputTokens:         inputTokens,
+		OutputTokens:        outputTokens,
+		ToolCalls:           toolCallsMap,
+		ProposedWritesCount: proposedWritesCount,
+		ConfigHash:          configHash,
+	}
+	s.metadata.Runs = append(s.metadata.Runs, rs)
+
+	if err := session.SaveMetadata(s.metadataPath, s.metadata); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
 	}
 
-	entry := BuildFeedEntry(lastPrompt, responses)
-	s.sessionFeed = append(s.sessionFeed, entry)
-	if err := session.SaveFeed(s.feedPath, s.sessionFeed); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
+	// Build RunContent.
+	rc := session.RunContent{Prompt: lastPrompt}
+	for _, resp := range responses {
+		var writes []output.WriteEntry
+		for _, fw := range resp.ProposedWrites {
+			writes = append(writes, output.WriteEntry{Path: fw.Path, Content: fw.Content, Delete: fw.Delete})
+		}
+
+		var events []output.EventEntry
+		if collector != nil {
+			events = collector.Events(resp.ModelID)
+		}
+		if events == nil {
+			events = []output.EventEntry{}
+		}
+
+		rc.Models = append(rc.Models, session.ModelRunContent{
+			ModelID:         resp.ModelID,
+			Text:            resp.Text,
+			ProposedWrites:  writes,
+			Events:          events,
+			StopReason:      string(resp.StopReason),
+			Steps:           resp.Steps,
+			ReasoningTokens: resp.ReasoningTokens,
+		})
 	}
+	s.content.Runs = append(s.content.Runs, rc)
+	s.saveContent()
 
 	s.persistSessionRecipe(rec)
 }
 
-// UpdateLastFeedNote updates the note on the most recent session feed entry
-// and re-saves feed.json.
-func (s *Store) UpdateLastFeedNote(note string) {
-	if len(s.sessionFeed) == 0 {
+// UpdateLastRunNote updates the note on the most recent RunSummary in metadata
+// and re-saves session_metadata.json.
+func (s *Store) UpdateLastRunNote(note string) {
+	if len(s.metadata.Runs) == 0 {
 		return
 	}
-	s.sessionFeed[len(s.sessionFeed)-1].Note = note
-	if err := session.SaveFeed(s.feedPath, s.sessionFeed); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
+	s.metadata.Runs[len(s.metadata.Runs)-1].Note = note
+	if err := session.SaveMetadata(s.metadataPath, s.metadata); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
 	}
 }
 
@@ -276,19 +334,6 @@ func (s *Store) persistSessionRecipe(rec *recipe.Recipe) {
 	md := rec.MarshalMarkdown()
 	_ = os.MkdirAll(filepath.Dir(s.sessionRecipePath), 0o750)
 	_ = os.WriteFile(s.sessionRecipePath, []byte(md), 0o600)
-}
-
-// BuildFeedEntry creates a session.FeedEntry from a prompt and responses.
-func BuildFeedEntry(prompt string, responses []models.ModelResponse) session.FeedEntry {
-	entry := session.FeedEntry{Kind: "run", Prompt: prompt}
-	for _, resp := range responses {
-		me := session.ModelEntry{ID: resp.ModelID, Text: truncateStr(resp.Text, 500)}
-		for _, fw := range resp.ProposedWrites {
-			me.ProposedFiles = append(me.ProposedFiles, fw.Path)
-		}
-		entry.Models = append(entry.Models, me)
-	}
-	return entry
 }
 
 // truncateStr limits s to maxLen runes.
@@ -322,7 +367,7 @@ func (s *Store) CanRewind() bool { return len(s.rewindStack) > 0 }
 func (s *Store) ClearRewindStack() { s.rewindStack = nil }
 
 // Rewind pops the top rewind entry, restores files, truncates histories,
-// records a rewind preference, and annotates the session feed.
+// records a rewind marker in metadata, and annotates the run note.
 // Returns a RewindResult for the UI to update display.
 func (s *Store) Rewind() (RewindResult, error) {
 	if len(s.rewindStack) == 0 {
@@ -345,24 +390,28 @@ func (s *Store) Rewind() (RewindResult, error) {
 	// Truncate conversation histories to pre-run lengths.
 	s.TruncateHistories(entry.HistoryLengths)
 
-	// Record rewind marker in preferences.
-	if err := preferences.RecordRewind(s.prefPath, entry.Prompt, s.sessionID); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to record rewind preference: %v\n", err)
-	}
+	// Append rewind marker to metadata runs.
+	hash := sha256.Sum256([]byte(entry.Prompt))
+	s.metadata.Runs = append(s.metadata.Runs, session.RunSummary{
+		Timestamp:  time.Now(),
+		PromptHash: fmt.Sprintf("sha256:%x", hash),
+		Type:       "rewind",
+	})
 
-	// Build note and annotate session feed.
+	// Build note and annotate the original run in metadata.
 	var note string
-	if entry.FeedIndex >= 0 && entry.FeedIndex < len(s.sessionFeed) {
-		existing := s.sessionFeed[entry.FeedIndex].Note
+	if entry.FeedIndex >= 0 && entry.FeedIndex < len(s.metadata.Runs) {
+		existing := s.metadata.Runs[entry.FeedIndex].Note
 		if existing != "" {
 			note = "[rewound] " + existing
 		} else {
 			note = "[rewound]"
 		}
-		s.sessionFeed[entry.FeedIndex].Note = note
-		if err := session.SaveFeed(s.feedPath, s.sessionFeed); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save session feed: %v\n", err)
-		}
+		s.metadata.Runs[entry.FeedIndex].Note = note
+	}
+
+	if err := session.SaveMetadata(s.metadataPath, s.metadata); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
 	}
 
 	return RewindResult{
@@ -401,20 +450,14 @@ func (s *Store) TotalCost() float64 { return s.totalCost }
 // CostPerModel returns the per-model cumulative cost this session.
 func (s *Store) CostPerModel() map[string]float64 { return s.costPerModel }
 
-// PrefPath returns the preferences file path.
-func (s *Store) PrefPath() string { return s.prefPath }
-
-// OutputDir returns the output reports directory.
-func (s *Store) OutputDir() string { return s.outputDir }
-
 // SessionID returns the session ID.
 func (s *Store) SessionID() string { return s.sessionID }
 
-// FeedPath returns the session feed file path (used by Run for resume loading).
-func (s *Store) FeedPath() string { return s.feedPath }
+// MetadataPath returns the path to session_metadata.json.
+func (s *Store) MetadataPath() string { return s.metadataPath }
 
-// SessionMetaPath returns the path to session meta.json (used by tests).
-func (s *Store) SessionMetaPath() string { return s.sessionMetaPath }
+// ContentPath returns the path to session_content.json.
+func (s *Store) ContentPath() string { return s.contentPath }
 
 // SessionRecipePath returns the path to session recipe.md (used by tests).
 func (s *Store) SessionRecipePath() string { return s.sessionRecipePath }
@@ -424,6 +467,12 @@ func (s *Store) RewindStackLen() int { return len(s.rewindStack) }
 
 // RecipeStore returns the recipe store (for /stats filter).
 func (s *Store) RecipeStore() *recipestore.Store { return s.recipeStore }
+
+// LastActiveTools returns the tool names from the last run.
+func (s *Store) LastActiveTools() []string { return s.lastActiveTools }
+
+// SetLastActiveTools sets the last active tool names (used after run complete).
+func (s *Store) SetLastActiveTools(names []string) { s.lastActiveTools = names }
 
 // ── Recipe State ────────────────────────────────────────────────────────────
 
@@ -444,62 +493,10 @@ func (s *Store) ActiveRecipe() *recipe.Recipe {
 	return s.baseRecipe
 }
 
-// ── Report Tracking ─────────────────────────────────────────────────────────
-
-// SetLastReportInfo records the saved report path and active tool names
-// from the most recent run. Called from the runCompleteMsg handler.
-func (s *Store) SetLastReportInfo(reportPath string, toolNames []string) {
-	s.lastReportPath = reportPath
-	s.lastActiveTools = toolNames
-	if reportPath != "" {
-		s.reportPaths = append(s.reportPaths, reportPath)
-	}
-}
-
-// LastReportPath returns the path to the last saved report.
-func (s *Store) LastReportPath() string { return s.lastReportPath }
-
-// ErrNoReport is returned when no report path is set.
-var ErrNoReport = errors.New("no report available")
-
-// LoadLastReport loads the last report from disk.
-// Returns ErrNoReport if no report path is set.
-func (s *Store) LoadLastReport() (*output.Report, error) {
-	if s.lastReportPath == "" {
-		return nil, ErrNoReport
-	}
-	return output.Load(s.lastReportPath)
-}
-
-// ClearLastReport clears the last report path (called on skip).
-func (s *Store) ClearLastReport() { s.lastReportPath = "" }
-
-// LoadAllReports loads all accumulated per-run reports from disk, in order.
-// Reports that fail to load (missing, corrupt) are skipped with a log warning.
-func (s *Store) LoadAllReports() []*output.Report {
-	var reports []*output.Report
-	for _, p := range s.reportPaths {
-		r, err := output.Load(p)
-		if err != nil {
-			log.Printf("warning: could not load report %s: %v", p, err)
-			continue
-		}
-		reports = append(reports, r)
-	}
-	return reports
-}
-
-// ReportPathCount returns the number of accumulated report paths.
-func (s *Store) ReportPathCount() int { return len(s.reportPaths) }
-
-// ClearReportPaths resets the accumulated report paths.
-func (s *Store) ClearReportPaths() { s.reportPaths = nil }
-
 // ── Recipe Snapshot ─────────────────────────────────────────────────────────
 
 // BuildRecipeSnapshot creates a RecipeSnapshot from the active recipe and
-// the last active tools. All fields are mapped directly from the recipe
-// struct — no intermediate state.
+// the last active tools.
 func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 	rec := s.ActiveRecipe()
 	snap := &recipestore.RecipeSnapshot{Name: "default"}
@@ -610,30 +607,19 @@ type SelectionParams struct {
 	Rating          string   // "" for selection, "good" or "bad" for rating
 }
 
-// RecordSelection records a preference entry and updates the output report
-// with the selection outcome.
+// RecordSelection updates the last RunSummary in metadata with the selection outcome.
 func (s *Store) RecordSelection(p SelectionParams) {
-	hash := s.RecipeHash()
-
-	if p.Rating == "bad" {
-		if err := preferences.RecordBad(s.prefPath, p.Prompt, p.SelectedModelID, hash, s.sessionID, p.Responses); err != nil {
-			log.Printf("warning: failed to record preference: %v", err)
-		}
-	} else {
-		if err := preferences.Record(s.prefPath, p.Prompt, p.SelectedModelID, hash, s.sessionID, p.Responses); err != nil {
-			log.Printf("warning: failed to record preference: %v", err)
-		}
+	if len(s.metadata.Runs) == 0 {
+		return
+	}
+	last := &s.metadata.Runs[len(s.metadata.Runs)-1]
+	last.Selected = p.SelectedModelID
+	last.Rating = p.Rating
+	if len(p.AppliedFiles) > 0 {
+		last.AppliedFiles = p.AppliedFiles
 	}
 
-	// Update the on-disk report with selection outcome.
-	if s.lastReportPath != "" {
-		report, err := output.Load(s.lastReportPath)
-		if err != nil {
-			log.Printf("warning: could not load report for selection recording: %v", err)
-			return
-		}
-		if err := output.RecordSelection(filepath.Dir(s.lastReportPath), report, p.SelectedModelID, p.AppliedFiles, p.Rating); err != nil {
-			log.Printf("warning: failed to record selection in report: %v", err)
-		}
+	if err := session.SaveMetadata(s.metadataPath, s.metadata); err != nil {
+		log.Printf("warning: could not save session metadata: %v", err)
 	}
 }
