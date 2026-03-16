@@ -1209,7 +1209,7 @@ func TestRewind_TextOnlyRun(t *testing.T) {
 	assert.False(t, a.store.CanRewind())
 }
 
-func TestRewind_ClearClearsStack(t *testing.T) {
+func TestRewind_ClearPreservesStack(t *testing.T) {
 	a := newAppForTest(t, []models.ModelAdapter{&scenarioAdapter{id: "m1"}})
 	setupRunState(&a, "question", []string{"m1"})
 	msg := runCompleteMsg{responses: []models.ModelResponse{
@@ -1222,6 +1222,12 @@ func TestRewind_ClearClearsStack(t *testing.T) {
 
 	result, _ = a.handleClearCmd()
 	a = appFrom(t, result)
+	assert.True(t, a.store.CanRewind(), "/clear should preserve the rewind stack")
+
+	// Rewind should still work after /clear.
+	result, _ = a.handleRewindCmd()
+	a = appFrom(t, result)
+	assert.Empty(t, a.store.Histories()["m1"])
 	assert.False(t, a.store.CanRewind())
 }
 

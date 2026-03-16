@@ -111,7 +111,6 @@ func (a App) handleVerboseCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 func (a App) handleClearCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	a.feed = nil
 	a.lastRunInView = false
-	a.store.ClearRewindStack()
 	a.pastedText = ""
 	a.pastedLineCount = 0
 	return a, clearScreenAndScrollback()
