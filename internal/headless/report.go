@@ -2,13 +2,11 @@ package headless
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/errata-app/errata-cli/internal/criteria"
+	"github.com/errata-app/errata-cli/internal/jsonutil"
 	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/internal/uid"
 )
@@ -85,35 +83,12 @@ func RunDirName(recipeName, reportID string) string {
 // Save writes the report as pretty-printed JSON to dir/report.json.
 // Parent directories are created as needed. Returns the full path.
 func Save(dir string, report *RunReport) (string, error) {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
-	}
-	path := filepath.Join(dir, report.Filename())
-	data, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshal: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", fmt.Errorf("write: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return "", fmt.Errorf("rename: %w", err)
-	}
-	return path, nil
+	return jsonutil.SaveJSON(dir, report.Filename(), report)
 }
 
 // Load reads a RunReport JSON file at the given path.
 func Load(path string) (*RunReport, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var r RunReport
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
-	}
-	return &r, nil
+	return jsonutil.LoadJSON[RunReport](path)
 }
 
 // newReportID generates a type-prefixed UUID v7 report ID.
@@ -237,33 +212,10 @@ func BuildMetadataReport(full *RunReport) *MetadataReport {
 // SaveMetadata writes the metadata report as pretty-printed JSON to dir/meta.json.
 // Parent directories are created as needed. Returns the full path.
 func SaveMetadata(dir string, report *MetadataReport) (string, error) {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
-	}
-	path := filepath.Join(dir, "meta.json")
-	data, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshal: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", fmt.Errorf("write: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return "", fmt.Errorf("rename: %w", err)
-	}
-	return path, nil
+	return jsonutil.SaveJSON(dir, "meta.json", report)
 }
 
 // LoadMetadata reads a MetadataReport JSON file at the given path.
 func LoadMetadata(path string) (*MetadataReport, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var r MetadataReport
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
-	}
-	return &r, nil
+	return jsonutil.LoadJSON[MetadataReport](path)
 }
