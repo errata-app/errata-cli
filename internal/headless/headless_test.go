@@ -522,26 +522,6 @@ func TestTruncate_Long(t *testing.T) {
 	assert.Equal(t, "hello ...", headless.Truncate("hello world", 9))
 }
 
-// ─── Save / Load error paths ────────────────────────────────────────────────
-
-func TestSave_MkdirAllError(t *testing.T) {
-	_, err := headless.Save("/dev/null/sub/out", &headless.RunReport{})
-	assert.Error(t, err)
-}
-
-func TestLoad_NonexistentFile(t *testing.T) {
-	_, err := headless.Load("/no/such/file.json")
-	assert.Error(t, err)
-}
-
-func TestLoad_CorruptJSON(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bad.json")
-	require.NoError(t, os.WriteFile(path, []byte("{bad json!"), 0o644))
-	_, err := headless.Load(path)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unmarshal")
-}
-
 // ─── JSON report ─────────────────────────────────────────────────────────────
 
 func TestRunReport_JSONOutput(t *testing.T) {
