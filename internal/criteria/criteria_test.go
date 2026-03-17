@@ -413,3 +413,55 @@ func TestPassCount(t *testing.T) {
 func TestPassCount_Empty(t *testing.T) {
 	assert.Equal(t, 0, criteria.PassCount(nil))
 }
+
+// ─── RedactSensitiveDetails tests ────────────────────────────────────────────
+
+func TestRedactSensitiveDetails(t *testing.T) {
+	tests := []struct {
+		name          string
+		criterion     string
+		detail        string
+		expectRedacted bool
+	}{
+		{"no_errors redacted", "no_errors", "error: api timeout", true},
+		{"run: redacted", "run: go test ./...", "FAIL: test_foo.go:42", true},
+		{"run(timeout=30): redacted", "run(timeout=30): make build", "exit status 1", true},
+		{"contains: redacted", "contains: secret text", "text does not contain \"secret text\"", true},
+		{"max_cost preserved", "max_cost: 0.05", "cost $0.1000 exceeds max $0.0500", false},
+		{"has_writes preserved", "has_writes", "no files proposed", false},
+		{"max_latency preserved", "max_latency: 5000", "latency 10000ms exceeds max 5000ms", false},
+		{"tool_used preserved", "tool_used: edit_file", "tool \"edit_file\" was not used", false},
+		{"max_tool_calls preserved", "max_tool_calls: 20", "total tool calls 25 exceeds max 20", false},
+		{"files_written preserved", "files_written >= 3", "proposed 1 files, need >= 3", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []criteria.Result{
+				{Criterion: tt.criterion, Passed: false, Detail: tt.detail},
+			}
+			result := criteria.RedactSensitiveDetails(input)
+			require.Len(t, result, 1)
+			assert.Equal(t, tt.criterion, result[0].Criterion)
+			assert.False(t, result[0].Passed)
+			if tt.expectRedacted {
+				assert.Empty(t, result[0].Detail, "detail should be redacted for %s", tt.criterion)
+			} else {
+				assert.Equal(t, tt.detail, result[0].Detail, "detail should be preserved for %s", tt.criterion)
+			}
+		})
+	}
+}
+
+func TestRedactSensitiveDetails_PreservesOriginal(t *testing.T) {
+	original := []criteria.Result{
+		{Criterion: "no_errors", Passed: false, Detail: "error: something"},
+		{Criterion: "max_cost: 0.05", Passed: true, Detail: ""},
+	}
+	redacted := criteria.RedactSensitiveDetails(original)
+
+	// Original should be unmodified.
+	assert.Equal(t, "error: something", original[0].Detail)
+	// Redacted copy should have detail cleared for no_errors.
+	assert.Empty(t, redacted[0].Detail)
+}

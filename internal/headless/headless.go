@@ -95,9 +95,10 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		recipeName(rec), len(rec.Tasks), len(opts.Adapters), taskMode)
 
 	// Create per-model working directories for filesystem isolation.
-	// Generate the report ID early so we can use it for the worktree directory.
+	// Generate the report ID early so we can use it for the bundled run directory.
 	reportID := newReportID()
-	workBase := filepath.Join(opts.OutputDir, reportID+"_worktrees")
+	runDir := filepath.Join(opts.OutputDir, RunDirName(recipeName(rec), reportID))
+	workBase := filepath.Join(runDir, "worktrees")
 
 	setupStart := time.Now()
 	workDirs, _, baselines, cleanupFn, err := createModelWorkDirs(cwd, workBase, opts.Adapters)
@@ -252,15 +253,21 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		},
 	}
 
-	outputDir := opts.OutputDir
-	path, err := Save(outputDir, headlessReport)
+	path, err := Save(runDir, headlessReport)
 	if err != nil {
 		fmt.Fprintf(w, "warning: could not save report: %v\n", err)
 	} else {
 		fmt.Fprintf(w, "\nReport saved to %s\n", path)
 	}
 
-	fmt.Fprintf(w, "Worktrees preserved at %s\n", workBase)
+	metaReport := BuildMetadataReport(headlessReport)
+	if metaPath, metaErr := SaveMetadata(runDir, metaReport); metaErr != nil {
+		fmt.Fprintf(w, "warning: could not save metadata report: %v\n", metaErr)
+	} else {
+		fmt.Fprintf(w, "Metadata report saved to %s\n", metaPath)
+	}
+
+	fmt.Fprintf(w, "Run output saved to %s\n", runDir)
 	fmt.Fprintf(w, "Summary: %d tasks, $%.4f total cost\n", len(rec.Tasks), totalCost)
 
 	if opts.JSON {

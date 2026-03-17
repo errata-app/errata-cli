@@ -75,9 +75,10 @@ type ModelResult struct {
 	CostUSD             float64      `json:"cost_usd"`
 	Error               string       `json:"error,omitempty"`
 	StopReason          string       `json:"stop_reason,omitempty"`
-	Steps               int          `json:"steps,omitempty"`
-	ProposedWrites      []WriteEntry `json:"proposed_writes,omitempty"`
-	Events              []EventEntry `json:"events"`
+	Steps               int            `json:"steps,omitempty"`
+	ToolCalls           map[string]int `json:"tool_calls,omitempty"`
+	ProposedWrites      []WriteEntry   `json:"proposed_writes,omitempty"`
+	Events              []EventEntry   `json:"events"`
 }
 
 // WriteEntry captures one proposed file write.
@@ -338,6 +339,7 @@ func BuildReport(
 			Error:               resp.Error,
 			StopReason:          string(resp.StopReason),
 			Steps:               resp.Steps,
+			ToolCalls:           resp.ToolCalls,
 			ProposedWrites:      writes,
 			Events:              events,
 		}

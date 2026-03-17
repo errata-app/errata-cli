@@ -253,6 +253,36 @@ func TailLines(s string, n int) string {
 	return fmt.Sprintf("[...truncated %d lines...]\n%s", truncated, strings.Join(tail, "\n"))
 }
 
+// RedactSensitiveDetails returns a copy of results with Detail cleared
+// for criteria whose output may contain sensitive data (error messages,
+// command output). Safe criteria (max_cost, has_writes, etc.) are preserved.
+func RedactSensitiveDetails(results []Result) []Result {
+	out := make([]Result, len(results))
+	for i, r := range results {
+		out[i] = r
+		if isSensitiveCriterion(r.Criterion) {
+			out[i].Detail = ""
+		}
+	}
+	return out
+}
+
+// isSensitiveCriterion returns true for criteria whose Detail field may
+// contain prompts, command output, or error messages.
+func isSensitiveCriterion(criterion string) bool {
+	lower := strings.ToLower(criterion)
+	if lower == "no_errors" {
+		return true
+	}
+	if strings.HasPrefix(lower, "run:") || strings.HasPrefix(lower, "run(") {
+		return true
+	}
+	if strings.HasPrefix(lower, "contains:") {
+		return true
+	}
+	return false
+}
+
 // PassCount returns how many results passed.
 func PassCount(results []Result) int {
 	n := 0
