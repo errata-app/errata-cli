@@ -373,6 +373,112 @@ func TestEvaluate_MaxToolCalls_Fail(t *testing.T) {
 	assert.Contains(t, results[0].Detail, "exceeds max")
 }
 
+// ─── Protected criterion tests ────────────────────────────────────────────────
+
+func TestParse_Protected(t *testing.T) {
+	parsed := criteria.Parse([]string{"protected: *_test.go"})
+	require.Len(t, parsed, 1)
+	assert.Equal(t, "protected", parsed[0].Type)
+	assert.Equal(t, "*_test.go", parsed[0].Arg)
+}
+
+func TestParse_Protected_Empty(t *testing.T) {
+	parsed := criteria.Parse([]string{"protected: "})
+	require.Len(t, parsed, 1)
+	assert.Equal(t, "unknown", parsed[0].Type)
+}
+
+func TestEvaluate_Protected_Pass(t *testing.T) {
+	c := criteria.Parse([]string{"protected: *_test.go"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "main.go", Content: "package main"},
+			{Path: "lib/helper.go", Content: "package lib"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Passed)
+}
+
+func TestEvaluate_Protected_Fail_BaseName(t *testing.T) {
+	c := criteria.Parse([]string{"protected: *_test.go"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "main.go", Content: "package main"},
+			{Path: "pkg/foo_test.go", Content: "package pkg"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Contains(t, results[0].Detail, "pkg/foo_test.go")
+}
+
+func TestEvaluate_Protected_Fail_FullPath(t *testing.T) {
+	c := criteria.Parse([]string{"protected: cmd/*"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "cmd/main.go", Content: "package main"},
+			{Path: "internal/foo.go", Content: "package internal"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Contains(t, results[0].Detail, "cmd/main.go")
+	assert.NotContains(t, results[0].Detail, "internal/foo.go")
+}
+
+func TestEvaluate_Protected_Fail_MultipleViolations(t *testing.T) {
+	c := criteria.Parse([]string{"protected: *_test.go"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "a_test.go", Content: "package a"},
+			{Path: "b_test.go", Content: "package b"},
+			{Path: "main.go", Content: "package main"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Contains(t, results[0].Detail, "a_test.go")
+	assert.Contains(t, results[0].Detail, "b_test.go")
+}
+
+func TestEvaluate_Protected_NoWrites(t *testing.T) {
+	c := criteria.Parse([]string{"protected: *_test.go"})
+	resp := models.ModelResponse{}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Passed, "no writes means nothing violated")
+}
+
+func TestEvaluate_Protected_ExactFile(t *testing.T) {
+	c := criteria.Parse([]string{"protected: go.mod"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "go.mod", Content: "module foo"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Contains(t, results[0].Detail, "go.mod")
+}
+
+func TestEvaluate_Protected_DeletedFile(t *testing.T) {
+	c := criteria.Parse([]string{"protected: go.sum"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "go.sum", Delete: true},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed, "deleting a protected file should also fail")
+}
+
 // ─── tailLines tests ─────────────────────────────────────────────────────────
 
 func TestTailLines_Short(t *testing.T) {
