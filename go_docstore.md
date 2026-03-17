@@ -45,4 +45,5 @@ max_steps: 30
 - no_errors
 - files_written >= 2
 - tool_used: edit_file
+- protected: *_test.go
 - run: cd go_gauntlet_test/challenge11_docstore && go test -v ./...
