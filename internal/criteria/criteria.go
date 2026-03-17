@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ import (
 // Criterion is a single parsed success criterion.
 type Criterion struct {
 	Raw     string // original string from the recipe
-	Type    string // "no_errors" | "has_writes" | "contains" | "files_written" | "run" | "max_cost" | "max_latency" | "tool_used" | "max_tool_calls" | "unknown"
+	Type    string // "no_errors" | "has_writes" | "contains" | "files_written" | "run" | "max_cost" | "max_latency" | "tool_used" | "max_tool_calls" | "protected" | "unknown"
 	Arg     string // comparison value when applicable
 	Timeout int    // seconds; used only by "run" type (0 = default 60s)
 }
@@ -132,6 +133,17 @@ func parseSingle(s string) Criterion {
 		}
 	}
 
+	// "protected: <glob>" — fails if model wrote to any file matching the pattern
+	if strings.HasPrefix(lower, "protected:") {
+		arg := strings.TrimSpace(s[len("protected:"):])
+		if arg != "" {
+			// Validate glob pattern at parse time.
+			if _, err := filepath.Match(arg, ""); err == nil {
+				return Criterion{Raw: s, Type: "protected", Arg: arg}
+			}
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "criteria: unknown criterion %q, will always pass\n", s)
 	return Criterion{Raw: s, Type: "unknown"}
 }
@@ -206,8 +218,33 @@ func evaluateSingle(c Criterion, resp models.ModelResponse, ectx EvalContext) Re
 		}
 		return Result{Criterion: c.Raw, Passed: false, Detail: fmt.Sprintf("total tool calls %d exceeds max %d", total, threshold)}
 
+	case "protected":
+		return evaluateProtected(c, resp)
+
 	default: // "unknown" — always passes
 		return Result{Criterion: c.Raw, Passed: true}
+	}
+}
+
+func evaluateProtected(c Criterion, resp models.ModelResponse) Result {
+	var violated []string
+	for _, fw := range resp.ProposedWrites {
+		// Match against the full relative path and just the base name,
+		// so "*.go" matches "pkg/foo.go" and "protected: cmd/*" matches "cmd/main.go".
+		base := filepath.Base(fw.Path)
+		matchFull, _ := filepath.Match(c.Arg, fw.Path)
+		matchBase, _ := filepath.Match(c.Arg, base)
+		if matchFull || matchBase {
+			violated = append(violated, fw.Path)
+		}
+	}
+	if len(violated) == 0 {
+		return Result{Criterion: c.Raw, Passed: true}
+	}
+	return Result{
+		Criterion: c.Raw,
+		Passed:    false,
+		Detail:    fmt.Sprintf("protected files modified: %s", strings.Join(violated, ", ")),
 	}
 }
 
@@ -251,6 +288,36 @@ func TailLines(s string, n int) string {
 	truncated := len(lines) - n
 	tail := lines[len(lines)-n:]
 	return fmt.Sprintf("[...truncated %d lines...]\n%s", truncated, strings.Join(tail, "\n"))
+}
+
+// RedactSensitiveDetails returns a copy of results with Detail cleared
+// for criteria whose output may contain sensitive data (error messages,
+// command output). Safe criteria (max_cost, has_writes, etc.) are preserved.
+func RedactSensitiveDetails(results []Result) []Result {
+	out := make([]Result, len(results))
+	for i, r := range results {
+		out[i] = r
+		if isSensitiveCriterion(r.Criterion) {
+			out[i].Detail = ""
+		}
+	}
+	return out
+}
+
+// isSensitiveCriterion returns true for criteria whose Detail field may
+// contain prompts, command output, or error messages.
+func isSensitiveCriterion(criterion string) bool {
+	lower := strings.ToLower(criterion)
+	if lower == "no_errors" {
+		return true
+	}
+	if strings.HasPrefix(lower, "run:") || strings.HasPrefix(lower, "run(") {
+		return true
+	}
+	if strings.HasPrefix(lower, "contains:") {
+		return true
+	}
+	return false
 }
 
 // PassCount returns how many results passed.

@@ -125,6 +125,132 @@ func testOpts(rec *recipe.Recipe, adapters []models.ModelAdapter, outputDir stri
 
 // ─── Run tests ────────────────────────────────────────────────────────────────
 
+// ─── Metadata Report tests ────────────────────────────────────────────────────
+
+func TestMetadataReport_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	meta := &headless.MetadataReport{
+		ID:        "rpt_test123",
+		SessionID: "sess1",
+		TaskMode:  "independent",
+		Recipe: headless.MetaRecipeSnapshot{
+			Name:            "test",
+			Version:         1,
+			Models:          []string{"model-a"},
+			Tasks:           []string{"task1"},
+			SuccessCriteria: []string{"no_errors"},
+		},
+		Tasks: []headless.MetaTaskResult{
+			{
+				Index:      0,
+				PromptHash: "abc123",
+				Models: []headless.MetaModelResult{
+					{
+						ModelID:           "model-a",
+						LatencyMS:         500,
+						InputTokens:       1000,
+						OutputTokens:      200,
+						CostUSD:           0.01,
+						Steps:             3,
+						ToolCalls:         map[string]int{"read_file": 2},
+						FilesChangedCount: 1,
+					},
+				},
+			},
+		},
+		Summary: headless.Summary{TotalTasks: 1, CompletedTasks: 1},
+	}
+
+	path, err := headless.SaveMetadata(dir, meta)
+	require.NoError(t, err)
+
+	loaded, err := headless.LoadMetadata(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, meta.ID, loaded.ID)
+	assert.Equal(t, meta.SessionID, loaded.SessionID)
+	assert.Equal(t, meta.TaskMode, loaded.TaskMode)
+	assert.Equal(t, meta.Recipe.Name, loaded.Recipe.Name)
+	require.Len(t, loaded.Tasks, 1)
+	assert.Equal(t, "abc123", loaded.Tasks[0].PromptHash)
+	require.Len(t, loaded.Tasks[0].Models, 1)
+	assert.Equal(t, int64(500), loaded.Tasks[0].Models[0].LatencyMS)
+	assert.Equal(t, 2, loaded.Tasks[0].Models[0].ToolCalls["read_file"])
+	assert.Equal(t, 1, loaded.Tasks[0].Models[0].FilesChangedCount)
+}
+
+func TestMetadataReport_NoSensitiveContent(t *testing.T) {
+	t.Chdir(t.TempDir())
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	rec := testRecipe([]string{"Write a secret program"}, []string{"no_errors"})
+	rec.SystemPrompt = "You are a super secret system prompt"
+
+	a1 := &mockAdapter{
+		id: "model-a",
+		response: models.ModelResponse{
+			Text:      "Here is the secret response with file contents",
+			LatencyMS: 100,
+			Error:     "detailed error with sensitive info",
+		},
+	}
+
+	opts := testOpts(rec, []models.ModelAdapter{a1}, outDir)
+	report, err := headless.Run(context.Background(), opts)
+	require.NoError(t, err)
+
+	meta := headless.BuildMetadataReport(report)
+	data, err := json.Marshal(meta)
+	require.NoError(t, err)
+	jsonStr := string(data)
+
+	// Must NOT contain sensitive content (system prompt, model response text).
+	// Note: recipe task strings appear in MetaRecipeSnapshot.Tasks as structural metadata.
+	// Note: error strings appear in MetaModelResult.Error as operational metadata.
+	assert.NotContains(t, jsonStr, "super secret system prompt")
+	assert.NotContains(t, jsonStr, "Here is the secret response")
+
+	// Must contain structural metadata.
+	assert.Contains(t, jsonStr, "prompt_hash")
+	assert.Contains(t, jsonStr, "model-a")
+	assert.Contains(t, jsonStr, "no_errors")
+}
+
+func TestRun_BundledOutputDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	rec := testRecipe([]string{"task"}, nil)
+	a1 := &mockAdapter{
+		id:       "model-a",
+		response: models.ModelResponse{Text: "done", LatencyMS: 100},
+	}
+
+	opts := testOpts(rec, []models.ModelAdapter{a1}, outDir)
+	report, err := headless.Run(context.Background(), opts)
+	require.NoError(t, err)
+
+	// Find the run directory.
+	runDirName := headless.RunDirName(report.Recipe.Name, report.ID)
+	runDir := filepath.Join(outDir, runDirName)
+
+	// Verify bundled structure.
+	assert.FileExists(t, filepath.Join(runDir, "report.json"))
+	assert.FileExists(t, filepath.Join(runDir, "meta.json"))
+	assert.DirExists(t, filepath.Join(runDir, "worktrees"))
+
+	// Verify report.json loads correctly.
+	loaded, err := headless.Load(filepath.Join(runDir, "report.json"))
+	require.NoError(t, err)
+	assert.Equal(t, report.ID, loaded.ID)
+
+	// Verify meta.json loads correctly.
+	meta, err := headless.LoadMetadata(filepath.Join(runDir, "meta.json"))
+	require.NoError(t, err)
+	assert.Equal(t, report.ID, meta.ID)
+}
+
 func TestRun_IndependentMode(t *testing.T) {
 	t.Chdir(t.TempDir())
 	outDir := filepath.Join(t.TempDir(), "out")
@@ -320,17 +446,10 @@ func TestRunReport_RoundTrip(t *testing.T) {
 	report, err := headless.Run(context.Background(), opts)
 	require.NoError(t, err)
 
-	// Find the saved report file (skip the worktrees directory).
-	entries, err := os.ReadDir(outDir)
-	require.NoError(t, err)
-	var reportPath string
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
-			reportPath = filepath.Join(outDir, e.Name())
-			break
-		}
-	}
-	require.NotEmpty(t, reportPath, "expected a .json report file in outDir")
+	// Load from the bundled run directory.
+	runDirName := headless.RunDirName(report.Recipe.Name, report.ID)
+	reportPath := filepath.Join(outDir, runDirName, "report.json")
+	require.FileExists(t, reportPath)
 
 	loaded, err := headless.Load(reportPath)
 	require.NoError(t, err)
@@ -401,26 +520,6 @@ func TestTruncate_ExactLength(t *testing.T) {
 
 func TestTruncate_Long(t *testing.T) {
 	assert.Equal(t, "hello ...", headless.Truncate("hello world", 9))
-}
-
-// ─── Save / Load error paths ────────────────────────────────────────────────
-
-func TestSave_MkdirAllError(t *testing.T) {
-	_, err := headless.Save("/dev/null/sub/out", &headless.RunReport{})
-	assert.Error(t, err)
-}
-
-func TestLoad_NonexistentFile(t *testing.T) {
-	_, err := headless.Load("/no/such/file.json")
-	assert.Error(t, err)
-}
-
-func TestLoad_CorruptJSON(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bad.json")
-	require.NoError(t, os.WriteFile(path, []byte("{bad json!"), 0o644))
-	_, err := headless.Load(path)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unmarshal")
 }
 
 // ─── JSON report ─────────────────────────────────────────────────────────────

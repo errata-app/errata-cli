@@ -373,6 +373,112 @@ func TestEvaluate_MaxToolCalls_Fail(t *testing.T) {
 	assert.Contains(t, results[0].Detail, "exceeds max")
 }
 
+// ─── Protected criterion tests ────────────────────────────────────────────────
+
+func TestParse_Protected(t *testing.T) {
+	parsed := criteria.Parse([]string{"protected: *_test.go"})
+	require.Len(t, parsed, 1)
+	assert.Equal(t, "protected", parsed[0].Type)
+	assert.Equal(t, "*_test.go", parsed[0].Arg)
+}
+
+func TestParse_Protected_Empty(t *testing.T) {
+	parsed := criteria.Parse([]string{"protected: "})
+	require.Len(t, parsed, 1)
+	assert.Equal(t, "unknown", parsed[0].Type)
+}
+
+func TestEvaluate_Protected_Pass(t *testing.T) {
+	c := criteria.Parse([]string{"protected: *_test.go"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "main.go", Content: "package main"},
+			{Path: "lib/helper.go", Content: "package lib"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Passed)
+}
+
+func TestEvaluate_Protected_Fail_BaseName(t *testing.T) {
+	c := criteria.Parse([]string{"protected: *_test.go"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "main.go", Content: "package main"},
+			{Path: "pkg/foo_test.go", Content: "package pkg"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Contains(t, results[0].Detail, "pkg/foo_test.go")
+}
+
+func TestEvaluate_Protected_Fail_FullPath(t *testing.T) {
+	c := criteria.Parse([]string{"protected: cmd/*"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "cmd/main.go", Content: "package main"},
+			{Path: "internal/foo.go", Content: "package internal"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Contains(t, results[0].Detail, "cmd/main.go")
+	assert.NotContains(t, results[0].Detail, "internal/foo.go")
+}
+
+func TestEvaluate_Protected_Fail_MultipleViolations(t *testing.T) {
+	c := criteria.Parse([]string{"protected: *_test.go"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "a_test.go", Content: "package a"},
+			{Path: "b_test.go", Content: "package b"},
+			{Path: "main.go", Content: "package main"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Contains(t, results[0].Detail, "a_test.go")
+	assert.Contains(t, results[0].Detail, "b_test.go")
+}
+
+func TestEvaluate_Protected_NoWrites(t *testing.T) {
+	c := criteria.Parse([]string{"protected: *_test.go"})
+	resp := models.ModelResponse{}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Passed, "no writes means nothing violated")
+}
+
+func TestEvaluate_Protected_ExactFile(t *testing.T) {
+	c := criteria.Parse([]string{"protected: go.mod"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "go.mod", Content: "module foo"},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Contains(t, results[0].Detail, "go.mod")
+}
+
+func TestEvaluate_Protected_DeletedFile(t *testing.T) {
+	c := criteria.Parse([]string{"protected: go.sum"})
+	resp := models.ModelResponse{
+		ProposedWrites: []tools.FileWrite{
+			{Path: "go.sum", Delete: true},
+		},
+	}
+	results := criteria.Evaluate(c, resp, criteria.EvalContext{})
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed, "deleting a protected file should also fail")
+}
+
 // ─── tailLines tests ─────────────────────────────────────────────────────────
 
 func TestTailLines_Short(t *testing.T) {
@@ -412,4 +518,56 @@ func TestPassCount(t *testing.T) {
 
 func TestPassCount_Empty(t *testing.T) {
 	assert.Equal(t, 0, criteria.PassCount(nil))
+}
+
+// ─── RedactSensitiveDetails tests ────────────────────────────────────────────
+
+func TestRedactSensitiveDetails(t *testing.T) {
+	tests := []struct {
+		name          string
+		criterion     string
+		detail        string
+		expectRedacted bool
+	}{
+		{"no_errors redacted", "no_errors", "error: api timeout", true},
+		{"run: redacted", "run: go test ./...", "FAIL: test_foo.go:42", true},
+		{"run(timeout=30): redacted", "run(timeout=30): make build", "exit status 1", true},
+		{"contains: redacted", "contains: secret text", "text does not contain \"secret text\"", true},
+		{"max_cost preserved", "max_cost: 0.05", "cost $0.1000 exceeds max $0.0500", false},
+		{"has_writes preserved", "has_writes", "no files proposed", false},
+		{"max_latency preserved", "max_latency: 5000", "latency 10000ms exceeds max 5000ms", false},
+		{"tool_used preserved", "tool_used: edit_file", "tool \"edit_file\" was not used", false},
+		{"max_tool_calls preserved", "max_tool_calls: 20", "total tool calls 25 exceeds max 20", false},
+		{"files_written preserved", "files_written >= 3", "proposed 1 files, need >= 3", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []criteria.Result{
+				{Criterion: tt.criterion, Passed: false, Detail: tt.detail},
+			}
+			result := criteria.RedactSensitiveDetails(input)
+			require.Len(t, result, 1)
+			assert.Equal(t, tt.criterion, result[0].Criterion)
+			assert.False(t, result[0].Passed)
+			if tt.expectRedacted {
+				assert.Empty(t, result[0].Detail, "detail should be redacted for %s", tt.criterion)
+			} else {
+				assert.Equal(t, tt.detail, result[0].Detail, "detail should be preserved for %s", tt.criterion)
+			}
+		})
+	}
+}
+
+func TestRedactSensitiveDetails_PreservesOriginal(t *testing.T) {
+	original := []criteria.Result{
+		{Criterion: "no_errors", Passed: false, Detail: "error: something"},
+		{Criterion: "max_cost: 0.05", Passed: true, Detail: ""},
+	}
+	redacted := criteria.RedactSensitiveDetails(original)
+
+	// Original should be unmodified.
+	assert.Equal(t, "error: something", original[0].Detail)
+	// Redacted copy should have detail cleared for no_errors.
+	assert.Empty(t, redacted[0].Detail)
 }

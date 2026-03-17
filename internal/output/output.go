@@ -10,15 +10,12 @@
 package output
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/errata-app/errata-cli/internal/jsonutil"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/internal/uid"
@@ -75,9 +72,10 @@ type ModelResult struct {
 	CostUSD             float64      `json:"cost_usd"`
 	Error               string       `json:"error,omitempty"`
 	StopReason          string       `json:"stop_reason,omitempty"`
-	Steps               int          `json:"steps,omitempty"`
-	ProposedWrites      []WriteEntry `json:"proposed_writes,omitempty"`
-	Events              []EventEntry `json:"events"`
+	Steps               int            `json:"steps,omitempty"`
+	ToolCalls           map[string]int `json:"tool_calls,omitempty"`
+	ProposedWrites      []WriteEntry   `json:"proposed_writes,omitempty"`
+	Events              []EventEntry   `json:"events"`
 }
 
 // WriteEntry captures one proposed file write.
@@ -187,35 +185,12 @@ func (r *SessionReport) Filename() string {
 // SaveSession writes the session report as pretty-printed JSON to dir/{filename}.
 // Parent directories are created as needed. Returns the full path.
 func SaveSession(dir string, report *SessionReport) (string, error) {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
-	}
-	path := filepath.Join(dir, report.Filename())
-	data, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshal: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", fmt.Errorf("write: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return "", fmt.Errorf("rename: %w", err)
-	}
-	return path, nil
+	return jsonutil.SaveJSON(dir, report.Filename(), report)
 }
 
 // LoadSession reads a session report JSON file at the given path.
 func LoadSession(path string) (*SessionReport, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var r SessionReport
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
-	}
-	return &r, nil
+	return jsonutil.LoadJSON[SessionReport](path)
 }
 
 // ─── Collector ───────────────────────────────────────────────────────────────
@@ -338,6 +313,7 @@ func BuildReport(
 			Error:               resp.Error,
 			StopReason:          string(resp.StopReason),
 			Steps:               resp.Steps,
+			ToolCalls:           resp.ToolCalls,
 			ProposedWrites:      writes,
 			Events:              events,
 		}

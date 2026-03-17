@@ -1,13 +1,12 @@
 package headless
 
 import (
-	"encoding/json"
+	"crypto/sha256"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/errata-app/errata-cli/internal/criteria"
+	"github.com/errata-app/errata-cli/internal/jsonutil"
 	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/internal/uid"
 )
@@ -71,46 +70,152 @@ type ModelSummary struct {
 	AvgLatencyMS   float64 `json:"avg_latency_ms"`
 }
 
-// Filename returns the output filename for the headless report.
+// Filename returns the fixed filename within the bundled run directory.
 func (r *RunReport) Filename() string {
-	return output.SanitizeName(r.Recipe.Name) + "_run_" + r.ID + ".json"
+	return "report.json"
 }
 
-// Save writes the report as pretty-printed JSON to dir/{filename}.
+// RunDirName returns the directory name for a bundled run output.
+func RunDirName(recipeName, reportID string) string {
+	return output.SanitizeName(recipeName) + "_run_" + reportID
+}
+
+// Save writes the report as pretty-printed JSON to dir/report.json.
 // Parent directories are created as needed. Returns the full path.
 func Save(dir string, report *RunReport) (string, error) {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
-	}
-	path := filepath.Join(dir, report.Filename())
-	data, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshal: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", fmt.Errorf("write: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return "", fmt.Errorf("rename: %w", err)
-	}
-	return path, nil
+	return jsonutil.SaveJSON(dir, report.Filename(), report)
 }
 
 // Load reads a RunReport JSON file at the given path.
 func Load(path string) (*RunReport, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var r RunReport
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
-	}
-	return &r, nil
+	return jsonutil.LoadJSON[RunReport](path)
 }
 
 // newReportID generates a type-prefixed UUID v7 report ID.
 func newReportID() string {
 	return uid.New("rpt_")
+}
+
+// ─── Metadata Report ─────────────────────────────────────────────────────────
+
+// MetadataReport is a shareable, redacted report containing only benchmark
+// metrics — no prompts, responses, file contents, or raw events.
+type MetadataReport struct {
+	ID        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	SessionID string    `json:"session_id"`
+
+	Recipe   MetaRecipeSnapshot `json:"recipe"`
+	TaskMode string             `json:"task_mode"`
+
+	Tasks []MetaTaskResult `json:"tasks"`
+
+	Summary Summary `json:"summary"`
+}
+
+// MetaRecipeSnapshot captures recipe configuration without the system prompt.
+type MetaRecipeSnapshot struct {
+	Name            string   `json:"name"`
+	Version         int      `json:"version"`
+	Models          []string `json:"models,omitempty"`
+	Tasks           []string `json:"tasks"`
+	SuccessCriteria []string `json:"success_criteria,omitempty"`
+}
+
+// MetaTaskResult captures one task's metrics without sensitive content.
+type MetaTaskResult struct {
+	Index           int                          `json:"index"`
+	PromptHash      string                       `json:"prompt_hash"`
+	Models          []MetaModelResult            `json:"models"`
+	CriteriaResults map[string][]criteria.Result  `json:"criteria_results,omitempty"`
+	SelectedModel   string                       `json:"selected_model,omitempty"`
+}
+
+// MetaModelResult captures per-model metrics without text or file contents.
+type MetaModelResult struct {
+	ModelID           string         `json:"model_id"`
+	LatencyMS         int64          `json:"latency_ms"`
+	InputTokens       int64          `json:"input_tokens"`
+	OutputTokens      int64          `json:"output_tokens"`
+	ReasoningTokens   int64          `json:"reasoning_tokens,omitempty"`
+	CostUSD           float64        `json:"cost_usd"`
+	StopReason        string         `json:"stop_reason,omitempty"`
+	Steps             int            `json:"steps,omitempty"`
+	ToolCalls         map[string]int `json:"tool_calls,omitempty"`
+	FilesChangedCount int            `json:"files_changed_count"`
+	Error             string         `json:"error,omitempty"`
+}
+
+// BuildMetadataReport constructs a MetadataReport from a full RunReport,
+// hashing prompts and stripping sensitive content.
+func BuildMetadataReport(full *RunReport) *MetadataReport {
+	meta := &MetadataReport{
+		ID:        full.ID,
+		Timestamp: full.Timestamp,
+		SessionID: full.SessionID,
+		Recipe: MetaRecipeSnapshot{
+			Name:            full.Recipe.Name,
+			Version:         full.Recipe.Version,
+			Models:          full.Recipe.Models,
+			Tasks:           full.Recipe.Tasks,
+			SuccessCriteria: full.Recipe.SuccessCriteria,
+		},
+		TaskMode: full.TaskMode,
+		Tasks:    make([]MetaTaskResult, len(full.Tasks)),
+		Summary:  full.Summary,
+	}
+
+	for i, task := range full.Tasks {
+		hash := sha256.Sum256([]byte(task.Prompt))
+
+		var metaModels []MetaModelResult
+		if task.Report != nil {
+			metaModels = make([]MetaModelResult, len(task.Report.Models))
+			for j, mr := range task.Report.Models {
+				metaModels[j] = MetaModelResult{
+					ModelID:           mr.ModelID,
+					LatencyMS:         mr.LatencyMS,
+					InputTokens:       mr.InputTokens,
+					OutputTokens:      mr.OutputTokens,
+					ReasoningTokens:   mr.ReasoningTokens,
+					CostUSD:           mr.CostUSD,
+					StopReason:        mr.StopReason,
+					Steps:             mr.Steps,
+					ToolCalls:         mr.ToolCalls,
+					FilesChangedCount: len(mr.ProposedWrites),
+					Error:             mr.Error,
+				}
+			}
+		}
+
+		// Redact criteria results.
+		var redactedCriteria map[string][]criteria.Result
+		if len(task.CriteriaResults) > 0 {
+			redactedCriteria = make(map[string][]criteria.Result, len(task.CriteriaResults))
+			for modelID, results := range task.CriteriaResults {
+				redactedCriteria[modelID] = criteria.RedactSensitiveDetails(results)
+			}
+		}
+
+		meta.Tasks[i] = MetaTaskResult{
+			Index:           task.Index,
+			PromptHash:      fmt.Sprintf("%x", hash),
+			Models:          metaModels,
+			CriteriaResults: redactedCriteria,
+			SelectedModel:   task.SelectedModel,
+		}
+	}
+
+	return meta
+}
+
+// SaveMetadata writes the metadata report as pretty-printed JSON to dir/meta.json.
+// Parent directories are created as needed. Returns the full path.
+func SaveMetadata(dir string, report *MetadataReport) (string, error) {
+	return jsonutil.SaveJSON(dir, "meta.json", report)
+}
+
+// LoadMetadata reads a MetadataReport JSON file at the given path.
+func LoadMetadata(path string) (*MetadataReport, error) {
+	return jsonutil.LoadJSON[MetadataReport](path)
 }

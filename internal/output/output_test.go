@@ -1,11 +1,14 @@
 package output
 
 import (
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/internal/tools"
@@ -299,6 +302,47 @@ func TestBuildReport_ReasoningTokens(t *testing.T) {
 	if report.Models[0].ReasoningTokens != 14500 {
 		t.Errorf("ReasoningTokens = %d, want 14500", report.Models[0].ReasoningTokens)
 	}
+}
+
+func TestBuildReport_ToolCalls(t *testing.T) {
+	responses := []models.ModelResponse{
+		{
+			ModelID:      "model-a",
+			Text:         "done",
+			LatencyMS:    100,
+			InputTokens:  500,
+			OutputTokens: 200,
+			CostUSD:      0.01,
+			ToolCalls:    map[string]int{"read_file": 3, "edit_file": 2},
+		},
+		{
+			ModelID:      "model-b",
+			Text:         "done too",
+			LatencyMS:    200,
+			InputTokens:  400,
+			OutputTokens: 150,
+			CostUSD:      0.02,
+		},
+	}
+
+	report := BuildReport("sess", nil, "hello", responses, nil, nil)
+	require.Len(t, report.Models, 2)
+
+	// model-a should have ToolCalls populated.
+	assert.Equal(t, map[string]int{"read_file": 3, "edit_file": 2}, report.Models[0].ToolCalls)
+
+	// model-b should have nil ToolCalls (omitempty).
+	assert.Nil(t, report.Models[1].ToolCalls)
+
+	// Round-trip through JSON to verify serialization.
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+
+	var loaded Report
+	require.NoError(t, json.Unmarshal(data, &loaded))
+	assert.Equal(t, 3, loaded.Models[0].ToolCalls["read_file"])
+	assert.Equal(t, 2, loaded.Models[0].ToolCalls["edit_file"])
+	assert.Nil(t, loaded.Models[1].ToolCalls)
 }
 
 func TestBuildReport_DeleteField(t *testing.T) {
