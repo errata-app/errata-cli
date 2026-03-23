@@ -652,7 +652,6 @@ func TestBuildRecipeSnapshot_DefaultRecipe(t *testing.T) {
 
 func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 	s := tempStore(t)
-	temp := 0.7
 	sysRole := true
 	s.baseRecipe = &recipe.Recipe{
 		Version:      1,
@@ -663,13 +662,11 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 			BashPrefixes: []string{"go test"},
 			Guidance:     map[string]string{"bash": "use tools wisely"},
 		},
-		ToolDescriptions: map[string]string{"bash": "run commands"},
-		ModelParams:      recipe.ModelParamsConfig{Temperature: &temp},
-		Constraints:      recipe.ConstraintsConfig{MaxSteps: 5, Timeout: 3 * time.Minute},
-		Context:          recipe.ContextConfig{MaxHistoryTurns: 10, Strategy: "auto_compact", CompactThreshold: 0.8, TaskMode: "sequential"},
-		SystemReminders:  []recipe.SystemReminderConfig{{Name: "warn", Trigger: "context_usage > 0.75", Content: "heads up"}},
-		OutputProcessing: map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
-		ModelProfiles:    map[string]recipe.ModelProfileConfig{"claude": {ContextBudget: 100000, SystemRole: &sysRole}},
+		ToolDescriptions:    map[string]string{"bash": "run commands"},
+		Constraints:         recipe.ConstraintsConfig{MaxSteps: 5, Timeout: 3 * time.Minute},
+		Context:             recipe.ContextConfig{MaxHistoryTurns: 10, Strategy: "auto_compact", CompactThreshold: 0.8, TaskMode: "sequential"},
+		OutputProcessing:    map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
+		ModelProfiles:       map[string]recipe.ModelProfileConfig{"claude": {ContextBudget: 100000, SystemRole: &sysRole}},
 		SummarizationPrompt: "summarize it",
 	}
 	s.lastActiveTools = []string{"bash", "read_file"}
@@ -684,7 +681,6 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 	assert.Equal(t, map[string]string{"bash": "run commands"}, snap.ToolDescriptions)
 	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
 	assert.Equal(t, "summarize it", snap.SummarizationPrompt)
-	require.NotNil(t, snap.ModelParams)
 	require.NotNil(t, snap.Constraints)
 	require.NotNil(t, snap.Context)
 }

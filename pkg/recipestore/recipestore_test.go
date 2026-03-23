@@ -94,12 +94,10 @@ func TestPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "configs.json")
 	s1 := recipestore.New(path)
 
-	temp := 0.7
 	cfg := &recipestore.RecipeSnapshot{
 		Name:         "persisted",
 		SystemPrompt: "Be brief.",
 		Tools:        []string{"read_file", "bash"},
-		ModelParams:  &recipestore.ModelParamsConfig{Temperature: &temp},
 	}
 	h := s1.Put(cfg)
 
@@ -110,9 +108,6 @@ func TestPersistence(t *testing.T) {
 	assert.Equal(t, "persisted", got.Name)
 	assert.Equal(t, "Be brief.", got.SystemPrompt)
 	assert.Equal(t, []string{"read_file", "bash"}, got.Tools)
-	require.NotNil(t, got.ModelParams)
-	require.NotNil(t, got.ModelParams.Temperature)
-	assert.InDelta(t, 0.7, *got.ModelParams.Temperature, 1e-9)
 }
 
 func TestHash_DifferentToolGuidance(t *testing.T) {
@@ -133,18 +128,7 @@ func TestHash_DifferentContext(t *testing.T) {
 	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2))
 }
 
-func TestHash_DifferentSystemReminders(t *testing.T) {
-	cfg1 := &recipestore.RecipeSnapshot{
-		SystemReminders: []recipestore.SystemReminderConfig{{Name: "a", Content: "reminder"}},
-	}
-	cfg2 := &recipestore.RecipeSnapshot{}
-	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2))
-}
-
 func TestRecipeSnapshot_RoundTrip(t *testing.T) {
-	temp := 0.5
-	maxTok := 1024
-	seed := int64(42)
 	sysRole := true
 	midConvo := false
 	cfg := &recipestore.RecipeSnapshot{
@@ -160,19 +144,11 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 			MaxSteps: 10,
 			Timeout:  "5m0s",
 		},
-		ModelParams: &recipestore.ModelParamsConfig{
-			Temperature: &temp,
-			MaxTokens:   &maxTok,
-			Seed:        &seed,
-		},
 		Context: &recipestore.ContextConfig{
 			MaxHistoryTurns:  20,
 			Strategy:         "auto_compact",
 			CompactThreshold: 0.8,
 			TaskMode:         "sequential",
-		},
-		SystemReminders: []recipestore.SystemReminderConfig{
-			{Name: "ctx-warn", Trigger: "context_usage > 0.75", Content: "Context is filling up."},
 		},
 		OutputProcessing: map[string]recipestore.OutputRuleConfig{
 			"bash": {MaxLines: 50, Truncation: "tail", TruncationMessage: "truncated"},
@@ -206,24 +182,11 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 	assert.Equal(t, 10, got.Constraints.MaxSteps)
 	assert.Equal(t, "5m0s", got.Constraints.Timeout)
 
-	require.NotNil(t, got.ModelParams)
-	require.NotNil(t, got.ModelParams.Temperature)
-	assert.InDelta(t, 0.5, *got.ModelParams.Temperature, 1e-9)
-	require.NotNil(t, got.ModelParams.MaxTokens)
-	assert.Equal(t, 1024, *got.ModelParams.MaxTokens)
-	require.NotNil(t, got.ModelParams.Seed)
-	assert.Equal(t, int64(42), *got.ModelParams.Seed)
-
 	require.NotNil(t, got.Context)
 	assert.Equal(t, 20, got.Context.MaxHistoryTurns)
 	assert.Equal(t, "auto_compact", got.Context.Strategy)
 	assert.InDelta(t, 0.8, got.Context.CompactThreshold, 1e-9)
 	assert.Equal(t, "sequential", got.Context.TaskMode)
-
-	require.Len(t, got.SystemReminders, 1)
-	assert.Equal(t, "ctx-warn", got.SystemReminders[0].Name)
-	assert.Equal(t, "context_usage > 0.75", got.SystemReminders[0].Trigger)
-	assert.Equal(t, "Context is filling up.", got.SystemReminders[0].Content)
 
 	require.Contains(t, got.OutputProcessing, "bash")
 	assert.Equal(t, 50, got.OutputProcessing["bash"].MaxLines)
