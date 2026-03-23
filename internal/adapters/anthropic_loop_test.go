@@ -272,7 +272,7 @@ func TestAnthropicAdapter_MaxOutputTokensFromCapabilities(t *testing.T) {
 	}{
 		{"claude-sonnet-4-6", 16_000},
 		{"claude-opus-4-6", 32_000},
-		{"claude-haiku-4-5", 8096},
+		{"claude-haiku-4-5", 8192},
 	}
 	for _, tt := range tests {
 		t.Run(tt.modelID, func(t *testing.T) {

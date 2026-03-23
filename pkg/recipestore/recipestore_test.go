@@ -129,8 +129,6 @@ func TestHash_DifferentContext(t *testing.T) {
 }
 
 func TestRecipeSnapshot_RoundTrip(t *testing.T) {
-	sysRole := true
-	midConvo := false
 	cfg := &recipestore.RecipeSnapshot{
 		Version:             1,
 		Name:                "full-config",
@@ -155,10 +153,7 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 		},
 		ModelProfiles: map[string]recipestore.ModelProfileConfig{
 			"claude-sonnet-4-6": {
-				ContextBudget:  100000,
-				ToolFormat:     "native",
-				SystemRole:     &sysRole,
-				MidConvoSystem: &midConvo,
+				ContextBudget: 100000,
 			},
 		},
 	}
@@ -195,11 +190,6 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 	require.Contains(t, got.ModelProfiles, "claude-sonnet-4-6")
 	prof := got.ModelProfiles["claude-sonnet-4-6"]
 	assert.Equal(t, 100000, prof.ContextBudget)
-	assert.Equal(t, "native", prof.ToolFormat)
-	require.NotNil(t, prof.SystemRole)
-	assert.True(t, *prof.SystemRole)
-	require.NotNil(t, prof.MidConvoSystem)
-	assert.False(t, *prof.MidConvoSystem)
 }
 
 func TestList(t *testing.T) {

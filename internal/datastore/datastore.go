@@ -576,10 +576,7 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 			snap.ModelProfiles = make(map[string]recipestore.ModelProfileConfig, len(rec.ModelProfiles))
 			for name, p := range rec.ModelProfiles {
 				snap.ModelProfiles[name] = recipestore.ModelProfileConfig{
-					ContextBudget:  p.ContextBudget,
-					ToolFormat:     p.ToolFormat,
-					SystemRole:     p.SystemRole,
-					MidConvoSystem: p.MidConvoSystem,
+					ContextBudget: p.ContextBudget,
 				}
 			}
 		}

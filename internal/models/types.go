@@ -85,34 +85,16 @@ type CapabilitySource int
 
 const (
 	SourceDefault CapabilitySource = iota // hardcoded fallback
-	SourceConfig                          // user override from recipe ModelProfiles
 	SourceAPI                             // discovered from provider API
 )
 
-// ToolFormat describes how a model receives tool definitions.
-type ToolFormat int
-
-const (
-	ToolFormatNone         ToolFormat = iota // no tool support
-	ToolFormatNative                         // Anthropic-style (tool blocks in content)
-	ToolFormatFunctionCall                   // OpenAI-style (function_call / tool_call)
-	ToolFormatTextInPrompt                   // no API support; described in system prompt
-)
-
-// ModelCapabilities describes a model's known capabilities, used by the prompt
-// assembler to produce model-specific payloads.
+// ModelCapabilities describes a model's known capabilities.
 type ModelCapabilities struct {
 	ModelID             string
 	Provider            string
 	ContextWindow       int
 	MaxOutputTokens     int
-	ToolFormat          ToolFormat
-	ParallelToolCalls   bool
-	SystemRole          bool     // model accepts a system role message
-	MidConvoSystem      bool     // model accepts system messages mid-conversation
-	SupportedInputMedia []string // e.g. ["text", "image", "pdf"]
 	ContextWindowSource CapabilitySource
-	ToolFormatSource    CapabilitySource
 }
 
 // ModelAdapter is the interface every provider adapter must implement.
