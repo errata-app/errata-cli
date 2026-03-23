@@ -710,9 +710,9 @@ func (a App) handlePullComplete(raw, ref string) (tea.Model, tea.Cmd) { //nolint
 	a.store.SetSessionRecipe(cloneRecipe(rec))
 	a.applySessionRecipe()
 
-	// Also save to ~/.errata/recipes/ for future -r use.
+	// Save to data/recipes/ for future -r use.
 	slug := api.SlugFromRef(ref)
-	dir := paths.RecipesDir()
+	dir := a.store.RecipesDir()
 	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
 		return a.withMessage(fmt.Sprintf("Pulled recipe loaded, but could not save to disk: %v", mkErr))
 	}

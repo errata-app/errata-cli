@@ -465,9 +465,15 @@ func (s *Store) SessionRecipePath() string { return s.sessionRecipePath }
 // RewindStackLen returns the number of entries in the rewind stack (used by tests).
 func (s *Store) RewindStackLen() int { return len(s.rewindStack) }
 
-// SessionsDir returns the base sessions directory (parent of all session dirs).
+// SessionsDir returns the base sessions directory (data/sessions/).
 func (s *Store) SessionsDir() string {
+	// metadataPath is data/sessions/{id}/session_metadata.json
 	return filepath.Dir(filepath.Dir(s.metadataPath))
+}
+
+// RecipesDir returns the recipes directory (data/recipes/).
+func (s *Store) RecipesDir() string {
+	return filepath.Join(filepath.Dir(s.SessionsDir()), "recipes")
 }
 
 // RecipeNameLookup returns a function that resolves a config hash to a recipe name.
