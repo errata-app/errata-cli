@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -50,6 +51,9 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 	}
 	if lower == "/pull" || strings.HasPrefix(lower, "/pull ") {
 		return a.handlePullCommand(strings.TrimSpace(trimmed[len("/pull"):]))
+	}
+	if lower == "/sync" {
+		return a.handleSyncCommand()
 	}
 	switch lower {
 	case "/exit", "/quit":
@@ -722,6 +726,31 @@ func (a App) handlePullComplete(raw, ref string) (tea.Model, tea.Cmd) { //nolint
 		name = ref
 	}
 	return a.withMessage(fmt.Sprintf("Pulled %q — loaded as session recipe. Saved to %s", name, dest))
+}
+
+func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if !a.apiClient.IsLoggedIn() {
+		return a.withMessage("Not logged in. Run: errata login")
+	}
+
+	client := a.apiClient
+	sessionsDir := a.store.SessionsDir()
+	nameLookup := a.store.RecipeNameLookup()
+
+	app, printCmd := a.withMessage("Syncing…")
+	return app, tea.Batch(printCmd, func() tea.Msg {
+		since := api.LoadLastSync()
+		sessions := session.CollectForUpload(sessionsDir, since, nameLookup)
+		if len(sessions) == 0 {
+			return syncCompleteMsg{accepted: 0}
+		}
+		accepted, err := client.UploadPreferences(api.PreferenceUpload{Sessions: sessions})
+		if err != nil {
+			return syncCompleteMsg{err: err}
+		}
+		_ = api.SaveLastSync(time.Now())
+		return syncCompleteMsg{accepted: accepted}
+	})
 }
 
 func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver

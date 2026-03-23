@@ -265,7 +265,7 @@ func (s *Store) PersistRunState(
 
 	rs := session.RunSummary{
 		Timestamp:           now,
-		PromptHash:          fmt.Sprintf("sha256:%x", hash),
+		PromptHash:          fmt.Sprintf("ph_%x", hash),
 		PromptPreview:       preview,
 		Models:              modelIDs,
 		LatenciesMS:         latencies,
@@ -394,7 +394,7 @@ func (s *Store) Rewind() (RewindResult, error) {
 	hash := sha256.Sum256([]byte(entry.Prompt))
 	s.metadata.Runs = append(s.metadata.Runs, session.RunSummary{
 		Timestamp:  time.Now(),
-		PromptHash: fmt.Sprintf("sha256:%x", hash),
+		PromptHash: fmt.Sprintf("ph_%x", hash),
 		Type:       "rewind",
 	})
 
@@ -464,6 +464,24 @@ func (s *Store) SessionRecipePath() string { return s.sessionRecipePath }
 
 // RewindStackLen returns the number of entries in the rewind stack (used by tests).
 func (s *Store) RewindStackLen() int { return len(s.rewindStack) }
+
+// SessionsDir returns the base sessions directory (parent of all session dirs).
+func (s *Store) SessionsDir() string {
+	return filepath.Dir(filepath.Dir(s.metadataPath))
+}
+
+// RecipeNameLookup returns a function that resolves a config hash to a recipe name.
+func (s *Store) RecipeNameLookup() func(string) string {
+	return func(hash string) string {
+		if s.recipeStore == nil {
+			return ""
+		}
+		if snap := s.recipeStore.Get(hash); snap != nil {
+			return snap.Name
+		}
+		return ""
+	}
+}
 
 // RecipeStore returns the recipe store (for /stats filter).
 func (s *Store) RecipeStore() *recipestore.Store { return s.recipeStore }

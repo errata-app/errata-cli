@@ -199,7 +199,7 @@ func BuildMetadataReport(full *RunReport) *MetadataReport {
 
 		meta.Tasks[i] = MetaTaskResult{
 			Index:           task.Index,
-			PromptHash:      fmt.Sprintf("%x", hash),
+			PromptHash:      fmt.Sprintf("ph_%x", hash),
 			Models:          metaModels,
 			CriteriaResults: redactedCriteria,
 			SelectedModel:   task.SelectedModel,
