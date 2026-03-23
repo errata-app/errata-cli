@@ -60,10 +60,7 @@ type OutputRuleConfig struct {
 
 // ModelProfileConfig captures capability overrides for a model.
 type ModelProfileConfig struct {
-	ContextBudget  int    `json:"context_budget,omitempty"`
-	ToolFormat     string `json:"tool_format,omitempty"`
-	SystemRole     *bool  `json:"system_role,omitempty"`
-	MidConvoSystem *bool  `json:"mid_convo_system,omitempty"`
+	ContextBudget int `json:"context_budget,omitempty"`
 }
 
 // Hash returns the content-addressed key for a RecipeSnapshot.

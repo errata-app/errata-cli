@@ -544,9 +544,6 @@ context_budget: 1000000
 
 	gpt := r.ModelProfiles["gpt-4o"]
 	assert.Equal(t, 32000, gpt.ContextBudget)
-	assert.Equal(t, "function_calling", gpt.ToolFormat)
-	require.NotNil(t, gpt.MidConvoSystem)
-	assert.False(t, *gpt.MidConvoSystem)
 
 	gemini := r.ModelProfiles["gemini-2.0-flash"]
 	assert.Equal(t, 1000000, gemini.ContextBudget)
@@ -683,16 +680,12 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	require.NotNil(t, r.ModelProfiles)
 	gpt := r.ModelProfiles["gpt-4o"]
 	assert.Equal(t, 128000, gpt.ContextBudget)
-	assert.Equal(t, "function_calling", gpt.ToolFormat)
 
 	gemini := r.ModelProfiles["gemini-2.0-flash"]
 	assert.Equal(t, 1000000, gemini.ContextBudget)
 
 	llama := r.ModelProfiles["local-llama"]
 	assert.Equal(t, 8192, llama.ContextBudget)
-	assert.Equal(t, "text_in_prompt", llama.ToolFormat)
-	require.NotNil(t, llama.MidConvoSystem)
-	assert.False(t, *llama.MidConvoSystem)
 }
 
 // ─── Parse edge cases ───────────────────────────────────────────────────────

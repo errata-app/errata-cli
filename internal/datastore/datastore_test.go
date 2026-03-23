@@ -652,7 +652,6 @@ func TestBuildRecipeSnapshot_DefaultRecipe(t *testing.T) {
 
 func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 	s := tempStore(t)
-	sysRole := true
 	s.baseRecipe = &recipe.Recipe{
 		Version:      1,
 		Name:         "test-recipe",
@@ -666,7 +665,7 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 		Constraints:         recipe.ConstraintsConfig{MaxSteps: 5, Timeout: 3 * time.Minute},
 		Context:             recipe.ContextConfig{MaxHistoryTurns: 10, Strategy: "auto_compact", CompactThreshold: 0.8, TaskMode: "sequential"},
 		OutputProcessing:    map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
-		ModelProfiles:       map[string]recipe.ModelProfileConfig{"claude": {ContextBudget: 100000, SystemRole: &sysRole}},
+		ModelProfiles:       map[string]recipe.ModelProfileConfig{"claude": {ContextBudget: 100000}},
 		SummarizationPrompt: "summarize it",
 	}
 	s.lastActiveTools = []string{"bash", "read_file"}

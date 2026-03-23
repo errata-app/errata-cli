@@ -135,10 +135,7 @@ type OutputRuleConfig struct {
 
 // ModelProfileConfig overrides auto-discovered model capabilities.
 type ModelProfileConfig struct {
-	ContextBudget  int    // override context budget (0 = not set)
-	ToolFormat     string // "native", "function_calling", "text_in_prompt" ("" = not set)
-	SystemRole     *bool  // nil = not set
-	MidConvoSystem *bool  // nil = not set
+	ContextBudget int // override context window budget (0 = not set)
 }
 
 // ─── Runner (version-pinned execution) ──────────────────────────────────────
@@ -507,17 +504,6 @@ func parseModelProfiles(body string) map[string]ModelProfileConfig {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				p.ContextBudget = n
 			}
-		}
-		if v, ok := kv["tool_format"]; ok {
-			p.ToolFormat = v
-		}
-		if v, ok := kv["system_role"]; ok {
-			b := strings.EqualFold(v, "true")
-			p.SystemRole = &b
-		}
-		if v, ok := kv["mid_convo_system"]; ok {
-			b := strings.EqualFold(v, "true")
-			p.MidConvoSystem = &b
 		}
 		m[s.name] = p
 	}
