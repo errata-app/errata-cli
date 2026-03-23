@@ -156,10 +156,25 @@ func main() {
 	}
 }
 
+// resolveRecipePath resolves the -r flag to a file path.
+// Short names (no path separators, no .md suffix) resolve to data/recipes/<name>.md.
+// Paths with separators or .md suffix are used as-is.
+func resolveRecipePath(flag, recipesDir string) string {
+	if flag == "" {
+		return ""
+	}
+	if !strings.ContainsAny(flag, "/\\") && !strings.HasSuffix(flag, ".md") {
+		return filepath.Join(recipesDir, flag+".md")
+	}
+	return flag
+}
+
 // loadRecipe discovers and parses the recipe for the current invocation.
 // Falls back to the built-in default on any error.
 func loadRecipe() *recipe.Recipe {
-	rec, err := recipe.Discover(recipePath)
+	cfg := config.Load()
+	layout := paths.New(cfg.DataDir)
+	rec, err := recipe.Discover(resolveRecipePath(recipePath, layout.Recipes))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load recipe: %v\n", err)
 		return recipe.Default()
@@ -543,12 +558,17 @@ func runPublish(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not logged in — run: errata login")
 	}
 
-	// Determine recipe path: explicit arg or auto-discover.
-	path := recipePath
+	// Determine recipe path: positional arg or -r flag.
+	cfg := config.Load()
+	layout := paths.New(cfg.DataDir)
+	path := resolveRecipePath(recipePath, layout.Recipes)
 	if len(args) > 0 {
 		path = args[0]
 	}
-	rec, err := recipe.Discover(path)
+	if path == "" {
+		return fmt.Errorf("no recipe specified — use: errata publish <path> or errata -r <name> publish")
+	}
+	rec, err := recipe.Parse(path)
 	if err != nil {
 		return fmt.Errorf("could not load recipe: %w", err)
 	}
@@ -573,7 +593,9 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	slug := api.SlugFromRef(ref)
 
-	dir := paths.RecipesDir()
+	cfg := config.Load()
+	layout := paths.New(cfg.DataDir)
+	dir := layout.Recipes
 	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
 		return fmt.Errorf("could not create recipes directory: %w", mkErr)
 	}

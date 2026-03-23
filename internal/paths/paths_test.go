@@ -19,6 +19,7 @@ func TestDefault_RootIsData(t *testing.T) {
 	assert.Equal(t, "data/outputs", l.Outputs)
 	assert.Equal(t, "data/sessions", l.Sessions)
 	assert.Equal(t, "data/checkpoint.json", l.Checkpoint)
+	assert.Equal(t, "data/recipes", l.Recipes)
 }
 
 func TestNew_CustomRoot(t *testing.T) {
@@ -30,16 +31,11 @@ func TestNew_CustomRoot(t *testing.T) {
 	assert.Equal(t, "/tmp/errata-test/outputs", l.Outputs)
 	assert.Equal(t, "/tmp/errata-test/sessions", l.Sessions)
 	assert.Equal(t, "/tmp/errata-test/checkpoint.json", l.Checkpoint)
+	assert.Equal(t, "/tmp/errata-test/recipes", l.Recipes)
 }
 
 func TestDefault_EqualsNewData(t *testing.T) {
 	assert.Equal(t, paths.New("data"), paths.Default())
-}
-
-func TestRecipesDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(home, ".errata", "recipes"), paths.RecipesDir())
 }
 
 func TestNextAvailable_NoConflict(t *testing.T) {

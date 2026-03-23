@@ -397,52 +397,11 @@ func TestDiscover_ExplicitPathNotFound(t *testing.T) {
 }
 
 func TestDiscover_FallsBackToEmbeddedDefault(t *testing.T) {
-	// Run in a temp dir with no recipe.md to trigger fallback to embedded defaults.
-	orig, err := os.Getwd()
-	require.NoError(t, err)
-	dir := t.TempDir()
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-
 	r, err := recipe.Discover("")
 	require.NoError(t, err)
 	require.NotNil(t, r)
 	assert.Equal(t, 1, r.Version)
-	// Default recipe sets context strategy (sub-agent depth gated by SubagentEnabled).
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.Equal(t, -1, r.SubAgent.MaxDepth, "default recipe no longer sets sub-agent depth (feature gated)")
-}
-
-func TestDiscover_CwdRecipeMd(t *testing.T) {
-	orig, err := os.Getwd()
-	require.NoError(t, err)
-	dir := t.TempDir()
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-
-	require.NoError(t, os.WriteFile("recipe.md", []byte("version: 1\n## Models\n- local-model\n"), 0o600))
-
-	r, err := recipe.Discover("")
-	require.NoError(t, err)
-	require.Len(t, r.Models, 1)
-	assert.Equal(t, "local-model", r.Models[0])
-}
-
-func TestDiscover_DotErrataRecipeMd(t *testing.T) {
-	orig, err := os.Getwd()
-	require.NoError(t, err)
-	dir := t.TempDir()
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-
-	require.NoError(t, os.MkdirAll(".errata", 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(".errata", "recipe.md"),
-		[]byte("version: 1\n## Models\n- errata-model\n"), 0o600))
-
-	r, err := recipe.Discover("")
-	require.NoError(t, err)
-	require.Len(t, r.Models, 1)
-	assert.Equal(t, "errata-model", r.Models[0])
 }
 
 

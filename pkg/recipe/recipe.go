@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -899,45 +898,12 @@ func parseMetadata(body string) MetadataConfig {
 
 // ─── Discover ─────────────────────────────────────────────────────────────────
 
-// Discover finds and parses the appropriate recipe using the discovery chain.
-// explicitPath may be:
-//   - An absolute or relative file path
-//   - A short name (no path separators) resolved against ~/.errata/recipes/<name>.md
-//   - Empty string to use auto-discovery
+// Discover parses the recipe at explicitPath, or returns the built-in
+// embedded default if explicitPath is empty.
 func Discover(explicitPath string) (*Recipe, error) {
 	if explicitPath != "" {
-		// Check if it looks like a short name (no directory separator).
-		if !strings.ContainsAny(explicitPath, "/\\") && !strings.HasSuffix(explicitPath, ".md") {
-			home, err := os.UserHomeDir()
-			if err == nil {
-				named := filepath.Join(home, ".errata", "recipes", explicitPath+".md")
-				if _, err := os.Stat(named); err == nil {
-					return Parse(named)
-				}
-			}
-		}
 		return Parse(explicitPath)
 	}
-
-	// 2. recipe.md in cwd
-	if _, err := os.Stat("recipe.md"); err == nil {
-		return Parse("recipe.md")
-	}
-
-	// 3. .errata/recipe.md in cwd
-	if _, err := os.Stat(".errata/recipe.md"); err == nil {
-		return Parse(".errata/recipe.md")
-	}
-
-	// 4. ~/.errata/default.recipe.md
-	if home, err := os.UserHomeDir(); err == nil {
-		p := filepath.Join(home, ".errata", "default.recipe.md")
-		if _, err := os.Stat(p); err == nil {
-			return Parse(p)
-		}
-	}
-
-	// 5. Built-in embedded defaults.
 	return parseEmbedded(), nil
 }
 

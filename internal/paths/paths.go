@@ -18,6 +18,7 @@ type Layout struct {
 	Outputs       string // e.g. "data/outputs"
 	Sessions      string // e.g. "data/sessions"
 	Checkpoint    string // e.g. "data/checkpoint.json"
+	Recipes       string // e.g. "data/recipes"
 }
 
 // New creates a Layout with all paths derived from the given root directory.
@@ -30,21 +31,13 @@ func New(root string) Layout {
 		Outputs:       filepath.Join(root, "outputs"),
 		Sessions:      filepath.Join(root, "sessions"),
 		Checkpoint:    filepath.Join(root, "checkpoint.json"),
+		Recipes:       filepath.Join(root, "recipes"),
 	}
 }
 
 // Default returns a Layout rooted at "data".
 func Default() Layout {
 	return New("data")
-}
-
-// RecipesDir returns the path to the shared recipes directory (~/.errata/recipes/).
-func RecipesDir() string {
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		return ".errata/recipes"
-	}
-	return filepath.Join(home, ".errata", "recipes")
 }
 
 // NextAvailable returns dir/name if it doesn't exist, otherwise tries
