@@ -69,6 +69,11 @@ type pullCompleteMsg struct {
 	err error
 }
 
+type syncCompleteMsg struct {
+	accepted int
+	err      error
+}
+
 // panelTick returns a tea.Cmd that fires a panelTickMsg after 1 second.
 func panelTick() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return panelTickMsg{} })
@@ -526,6 +531,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.withMessage(fmt.Sprintf("Pull failed: %v", msg.err))
 		}
 		return a.handlePullComplete(msg.raw, msg.ref)
+
+	case syncCompleteMsg:
+		if msg.err != nil {
+			return a.withMessage(fmt.Sprintf("Sync failed: %v", msg.err))
+		}
+		return a.withMessage(fmt.Sprintf("Synced: %d runs uploaded.", msg.accepted))
 
 	case compactCompleteMsg:
 		a.store.SetHistories(msg.histories)

@@ -83,18 +83,19 @@ type ModelProfileConfig struct {
 }
 
 // Hash returns the content-addressed key for a RecipeSnapshot.
-// The hash is SHA-256 of the canonical JSON representation, prefixed with "sha256:".
 //
-// Name and Version are excluded — they are metadata about the recipe format,
-// not settings that affect model behavior. Two recipes with identical behavioral
-// fields produce the same hash regardless of name or schema version.
+// Name is excluded — it is a display label, not a behavioral setting.
+// Version is included because it determines which Runner implementation
+// executes the recipe, so identical fields under different schema versions
+// produce different behavior.
+//
+// Format: cfg_v{version}_{sha256hex}
 func Hash(cfg *RecipeSnapshot) string {
 	hashable := *cfg
 	hashable.Name = ""
-	hashable.Version = 0
 	data, _ := json.Marshal(hashable)
 	h := sha256.Sum256(data)
-	return fmt.Sprintf("sha256:%x", h)
+	return fmt.Sprintf("cfg_v%d_%x", cfg.Version, h)
 }
 
 // Store is a content-addressed store for RecipeSnapshot values.

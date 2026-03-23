@@ -337,3 +337,34 @@ func TestHandlePullCommand_Success(t *testing.T) {
 	require.NotNil(t, app2.store.SessionRecipe())
 	assert.Equal(t, []string{"alpha"}, app2.store.SessionRecipe().Models)
 }
+
+// ── /sync command tests ──────────────────────────────────────────────────────
+
+func TestHandleSyncCommand_NotLoggedIn(t *testing.T) {
+	a := newAppForTest(t, nil)
+	a.apiClient = newClientForTest("http://unused", "")
+
+	result, _ := a.handleSyncCommand()
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "Not logged in")
+}
+
+func TestHandleSyncCommand_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "/preferences", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]int{"accepted": 3})
+	}))
+	defer srv.Close()
+
+	a := newAppForTest(t, nil)
+	a.apiClient = newClientForTest(srv.URL, "test-token")
+
+	result, cmd := a.handleSyncCommand()
+	app := result.(App)
+	last := app.feed[len(app.feed)-1].text
+	assert.Contains(t, last, "Syncing")
+	assert.NotNil(t, cmd)
+}

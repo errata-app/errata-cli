@@ -133,6 +133,12 @@ func main() {
 		RunE:  runPull,
 	}
 
+	syncCmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Upload preference data to errata.app",
+		RunE:  runSync,
+	}
+
 	root.AddCommand(
 		statsCmd,
 		runCmd,
@@ -142,6 +148,7 @@ func main() {
 		whoamiCmd,
 		publishCmd,
 		pullCmd,
+		syncCmd,
 	)
 
 	if err := root.Execute(); err != nil {
@@ -579,5 +586,47 @@ func runPull(cmd *cobra.Command, args []string) error {
 	// Print the basename without .md extension for the -r shortcut.
 	base := strings.TrimSuffix(filepath.Base(dest), ".md")
 	fmt.Printf("Saved to %s — run with: errata -r %s\n", dest, base)
+	return nil
+}
+
+func runSync(cmd *cobra.Command, args []string) error {
+	client := api.NewClient()
+	if !client.IsLoggedIn() {
+		return fmt.Errorf("not logged in — run: errata login")
+	}
+
+	cfg := config.Load()
+	layout := paths.New(cfg.DataDir)
+	since := api.LoadLastSync()
+
+	rs := recipestore.New(layout.ConfigStore)
+	nameLookup := func(hash string) string {
+		if snap := rs.Get(hash); snap != nil {
+			return snap.Name
+		}
+		return ""
+	}
+
+	sessions := session.CollectForUpload(layout.Sessions, since, nameLookup)
+	if len(sessions) == 0 {
+		fmt.Println("Nothing new to sync.")
+		return nil
+	}
+
+	totalRuns := 0
+	for _, s := range sessions {
+		totalRuns += len(s.Runs)
+	}
+	fmt.Printf("Uploading %d runs across %d sessions…\n", totalRuns, len(sessions))
+
+	accepted, err := client.UploadPreferences(api.PreferenceUpload{Sessions: sessions})
+	if err != nil {
+		return fmt.Errorf("sync failed: %w", err)
+	}
+
+	if saveErr := api.SaveLastSync(time.Now()); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save sync timestamp: %v\n", saveErr)
+	}
+	fmt.Printf("Synced: %d runs accepted.\n", accepted)
 	return nil
 }

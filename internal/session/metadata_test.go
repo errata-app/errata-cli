@@ -27,7 +27,7 @@ func TestSaveMetadata_LoadMetadata_RoundTrip(t *testing.T) {
 		Runs: []RunSummary{
 			{
 				Timestamp:     now,
-				PromptHash:    "sha256:deadbeef",
+				PromptHash:    "ph_deadbeef",
 				PromptPreview: "fix the bug",
 				Models:        []string{"claude-sonnet-4-6", "gpt-4o"},
 				Selected:      "claude-sonnet-4-6",
@@ -58,7 +58,7 @@ func TestSaveMetadata_LoadMetadata_RoundTrip(t *testing.T) {
 
 	require.Len(t, loaded.Runs, 1)
 	r := loaded.Runs[0]
-	assert.Equal(t, "sha256:deadbeef", r.PromptHash)
+	assert.Equal(t, "ph_deadbeef", r.PromptHash)
 	assert.Equal(t, "claude-sonnet-4-6", r.Selected)
 	assert.Equal(t, []string{"main.go"}, r.AppliedFiles)
 	assert.Equal(t, "Applied: main.go", r.Note)

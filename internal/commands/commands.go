@@ -23,6 +23,7 @@ var All = []Command{
 	{"/export", "Export output report: /export [path]"},
 	{"/publish", "Publish recipe to errata.app"},
 	{"/pull", "Pull recipe from errata.app: /pull <author/name>"},
+	{"/sync", "Upload preference data to errata.app"},
 	{"/stats", "Show preference wins and session cost"},
 	{"/exit", "Exit"},
 }

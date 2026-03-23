@@ -13,6 +13,7 @@ import (
 	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/internal/prompthistory"
 	"github.com/errata-app/errata-cli/pkg/recipe"
+	"github.com/errata-app/errata-cli/pkg/recipestore"
 	"github.com/errata-app/errata-cli/internal/session"
 )
 
@@ -697,4 +698,54 @@ func TestBuildRecipeSnapshot_UsesActiveRecipe(t *testing.T) {
 	snap := s.BuildRecipeSnapshot()
 	assert.Equal(t, "session prompt", snap.SystemPrompt)
 	assert.Equal(t, "session", snap.Name)
+}
+
+func TestSessionsDir(t *testing.T) {
+	tmp := t.TempDir()
+	sp := session.PathsFor(filepath.Join(tmp, "sessions"), "ses_abc")
+	s, err := New(Options{
+		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+		SessionPaths:   sp,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(tmp, "sessions"), s.SessionsDir())
+}
+
+func TestRecipeNameLookup_Hit(t *testing.T) {
+	tmp := t.TempDir()
+	sp := session.PathsFor(tmp, "ses_test")
+	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+	hash := rs.Put(&recipestore.RecipeSnapshot{Name: "My Recipe", SystemPrompt: "test"})
+
+	s, err := New(Options{
+		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+		SessionPaths:   sp,
+		RecipeStore:    rs,
+	})
+	require.NoError(t, err)
+
+	lookup := s.RecipeNameLookup()
+	assert.Equal(t, "My Recipe", lookup(hash))
+}
+
+func TestRecipeNameLookup_Miss(t *testing.T) {
+	tmp := t.TempDir()
+	sp := session.PathsFor(tmp, "ses_test")
+	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+
+	s, err := New(Options{
+		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+		SessionPaths:   sp,
+		RecipeStore:    rs,
+	})
+	require.NoError(t, err)
+
+	lookup := s.RecipeNameLookup()
+	assert.Empty(t, lookup("cfg_v1_nonexistent"))
+}
+
+func TestRecipeNameLookup_NilStore(t *testing.T) {
+	s := tempStore(t)
+	lookup := s.RecipeNameLookup()
+	assert.Empty(t, lookup("cfg_v1_anything"))
 }
