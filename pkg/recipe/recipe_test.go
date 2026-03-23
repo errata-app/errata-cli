@@ -338,24 +338,6 @@ some content here
 	assert.Len(t, r.Models, 1)
 }
 
-func TestParse_Metadata(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Metadata
-name: Go Refactoring Suite
-description: Tests Go refactoring tasks
-tags: go, refactoring
-author: charlessuarez
-version: 1.0
-contribute: true
-`)))
-	require.NoError(t, err)
-	assert.Equal(t, "Go Refactoring Suite", r.Metadata.Name)
-	assert.Equal(t, "charlessuarez", r.Metadata.Author)
-	assert.True(t, r.Metadata.Contribute)
-	require.Len(t, r.Metadata.Tags, 2)
-	assert.Equal(t, "go", r.Metadata.Tags[0])
-}
-
 // ─── Discover tests ───────────────────────────────────────────────────────────
 
 func TestDiscover_ExplicitPath(t *testing.T) {

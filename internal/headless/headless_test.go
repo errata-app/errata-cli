@@ -498,11 +498,6 @@ func TestRecipeName_UsesName(t *testing.T) {
 	assert.Equal(t, "Explicit", headless.RecipeName(rec))
 }
 
-func TestRecipeName_FallsBackToMetadataName(t *testing.T) {
-	rec := &recipe.Recipe{Metadata: recipe.MetadataConfig{Name: "MetaName"}}
-	assert.Equal(t, "MetaName", headless.RecipeName(rec))
-}
-
 func TestRecipeName_FallsBackToDefault(t *testing.T) {
 	rec := &recipe.Recipe{}
 	assert.Equal(t, "default", headless.RecipeName(rec))

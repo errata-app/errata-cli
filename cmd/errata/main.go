@@ -182,15 +182,15 @@ func loadRecipe() *recipe.Recipe {
 	return rec
 }
 
-// applyProjectRoot changes the process working directory to rec.Metadata.ProjectRoot
+// applyProjectRoot changes the process working directory to rec.Constraints.ProjectRoot
 // when it is set. All cwd-based path guards in file tools then automatically
 // enforce the project boundary without further changes.
 func applyProjectRoot(rec *recipe.Recipe) {
-	if rec == nil || rec.Metadata.ProjectRoot == "" {
+	if rec == nil || rec.Constraints.ProjectRoot == "" {
 		return
 	}
-	if err := os.Chdir(rec.Metadata.ProjectRoot); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not set project_root %q: %v\n", rec.Metadata.ProjectRoot, err)
+	if err := os.Chdir(rec.Constraints.ProjectRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not set project_root %q: %v\n", rec.Constraints.ProjectRoot, err)
 	}
 }
 
