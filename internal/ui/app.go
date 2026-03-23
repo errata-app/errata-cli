@@ -249,7 +249,7 @@ func New(adapterList []models.ModelAdapter, cfg config.Config, mcpDefs []tools.T
 		app.contextStrategy = rec.Context.Strategy
 		app.sandboxFilesystem = rec.Sandbox.Filesystem
 		app.sandboxNetwork = rec.Sandbox.Network
-		app.projectRoot = rec.Metadata.ProjectRoot
+		app.projectRoot = rec.Constraints.ProjectRoot
 	}
 	return app
 }

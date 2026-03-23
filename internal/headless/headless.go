@@ -328,7 +328,7 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	ctx = sandbox.WithConfig(ctx, sandbox.Config{
 		Filesystem:  rec.Sandbox.Filesystem,
 		Network:     rec.Sandbox.Network,
-		ProjectRoot: rec.Metadata.ProjectRoot,
+		ProjectRoot: rec.Constraints.ProjectRoot,
 	})
 	ctx = runner.WithRunOptions(ctx, runner.RunOptions{
 		Timeout:          opts.Cfg.AgentTimeout,
@@ -707,9 +707,6 @@ func snapshotRecipe(rec *recipe.Recipe) RecipeSnapshot {
 func recipeName(rec *recipe.Recipe) string {
 	if rec.Name != "" {
 		return rec.Name
-	}
-	if rec.Metadata.Name != "" {
-		return rec.Metadata.Name
 	}
 	return "default"
 }

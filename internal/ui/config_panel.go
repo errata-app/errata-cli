@@ -599,8 +599,8 @@ func (a *App) applySessionRecipe() {
 	a.contextStrategy = rec.Context.Strategy
 	a.sandboxFilesystem = rec.Sandbox.Filesystem
 	a.sandboxNetwork = rec.Sandbox.Network
-	if rec.Metadata.ProjectRoot != "" {
-		a.projectRoot = rec.Metadata.ProjectRoot
+	if rec.Constraints.ProjectRoot != "" {
+		a.projectRoot = rec.Constraints.ProjectRoot
 	}
 	if rec.Constraints.Timeout > 0 {
 		a.cfg.AgentTimeout = rec.Constraints.Timeout

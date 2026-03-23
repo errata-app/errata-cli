@@ -49,7 +49,6 @@ type Recipe struct {
 	Sandbox     SandboxConfig
 	Tasks           []string
 	SuccessCriteria []string
-	Metadata        MetadataConfig
 
 	// Uniform per-tool description overrides (applied to all models).
 	ToolDescriptions map[string]string // tool_name → description
@@ -96,6 +95,7 @@ type ConstraintsConfig struct {
 	MaxSteps    int           // 0 = not set (unlimited)
 	Timeout     time.Duration // 0 = not set (use runner default)
 	BashTimeout time.Duration // 0 = not set (use tools default 2m)
+	ProjectRoot string        // working directory override; "" = cwd
 }
 
 // ContextConfig controls conversation history management.
@@ -111,18 +111,6 @@ type SandboxConfig struct {
 	Filesystem      string // "" | "unrestricted" | "project_only" | "read_only"
 	Network         string // "" | "full" | "none"
 	AllowLocalFetch bool   // allow web_fetch to target localhost URLs
-}
-
-// MetadataConfig carries recipe labels and sharing settings.
-type MetadataConfig struct {
-	Name        string
-	Description string
-	Tags        []string
-	Author      string
-	Version     string
-	Extends     string
-	Contribute  bool
-	ProjectRoot string
 }
 
 // OutputRuleConfig is a deterministic output processing rule (Gap 7).
@@ -337,8 +325,6 @@ func parseV1(data []byte) (*Recipe, error) {
 			r.Tasks = parseList(body)
 		case "success criteria":
 			r.SuccessCriteria = parseList(body)
-		case "metadata":
-			r.Metadata = parseMetadata(body)
 		case "tool descriptions":
 			r.ToolDescriptions = parseSubSectionMap(body)
 		case "context summarization prompt":
@@ -347,7 +333,7 @@ func parseV1(data []byte) (*Recipe, error) {
 			r.OutputProcessing = parseOutputRules(body)
 		case "model profiles":
 			r.ModelProfiles = parseModelProfiles(body)
-		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks":
+		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata":
 			// Removed sections — silently ignored for backward compatibility.
 
 		default:
@@ -618,6 +604,9 @@ func parseConstraints(body string) ConstraintsConfig {
 			cfg.MaxSteps = n
 		}
 	}
+	if v, ok := m["project_root"]; ok {
+		cfg.ProjectRoot = v
+	}
 	return cfg
 }
 
@@ -676,29 +665,6 @@ func parseSandbox(body string) SandboxConfig {
 	}
 	if v, ok := m["allow_local_fetch"]; ok {
 		cfg.AllowLocalFetch = strings.EqualFold(v, "true")
-	}
-	return cfg
-}
-
-// parseMetadata parses the ## Metadata section.
-func parseMetadata(body string) MetadataConfig {
-	m := parseMap(body)
-	var cfg MetadataConfig
-	cfg.Name = m["name"]
-	cfg.Description = m["description"]
-	cfg.Author = m["author"]
-	cfg.Version = m["version"]
-	cfg.Extends = m["extends"]
-	cfg.ProjectRoot = m["project_root"]
-	if v, ok := m["tags"]; ok {
-		for t := range strings.SplitSeq(v, ",") {
-			if t = strings.TrimSpace(t); t != "" {
-				cfg.Tags = append(cfg.Tags, t)
-			}
-		}
-	}
-	if v, ok := m["contribute"]; ok {
-		cfg.Contribute = strings.EqualFold(v, "true")
 	}
 	return cfg
 }
@@ -782,7 +748,9 @@ func (r *Recipe) MarshalMarkdown() string {
 	}
 
 	// Constraints
-	if r.Constraints.Timeout > 0 || r.Constraints.MaxSteps > 0 || r.Constraints.BashTimeout > 0 {
+	hasConstraints := r.Constraints.Timeout > 0 || r.Constraints.MaxSteps > 0 ||
+		r.Constraints.BashTimeout > 0 || r.Constraints.ProjectRoot != ""
+	if hasConstraints {
 		sb.WriteString("\n## Constraints\n")
 		if r.Constraints.Timeout > 0 {
 			fmt.Fprintf(&sb, "timeout: %s\n", r.Constraints.Timeout.String())
@@ -792,6 +760,9 @@ func (r *Recipe) MarshalMarkdown() string {
 		}
 		if r.Constraints.MaxSteps > 0 {
 			fmt.Fprintf(&sb, "max_steps: %d\n", r.Constraints.MaxSteps)
+		}
+		if r.Constraints.ProjectRoot != "" {
+			fmt.Fprintf(&sb, "project_root: %s\n", r.Constraints.ProjectRoot)
 		}
 	}
 
@@ -844,28 +815,6 @@ func (r *Recipe) MarshalMarkdown() string {
 		sb.WriteString("\n## Context Summarization Prompt\n")
 		sb.WriteString(r.SummarizationPrompt)
 		sb.WriteByte('\n')
-	}
-
-	// Metadata
-	hasMeta := r.Metadata.Description != "" || r.Metadata.Author != "" ||
-		r.Metadata.Version != "" || len(r.Metadata.Tags) > 0 || r.Metadata.ProjectRoot != ""
-	if hasMeta {
-		sb.WriteString("\n## Metadata\n")
-		if r.Metadata.Description != "" {
-			fmt.Fprintf(&sb, "description: %s\n", r.Metadata.Description)
-		}
-		if r.Metadata.Author != "" {
-			fmt.Fprintf(&sb, "author: %s\n", r.Metadata.Author)
-		}
-		if r.Metadata.Version != "" {
-			fmt.Fprintf(&sb, "version: %s\n", r.Metadata.Version)
-		}
-		if len(r.Metadata.Tags) > 0 {
-			fmt.Fprintf(&sb, "tags: %s\n", strings.Join(r.Metadata.Tags, ", "))
-		}
-		if r.Metadata.ProjectRoot != "" {
-			fmt.Fprintf(&sb, "project_root: %s\n", r.Metadata.ProjectRoot)
-		}
 	}
 
 	return sb.String()

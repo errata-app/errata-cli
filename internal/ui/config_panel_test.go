@@ -738,11 +738,9 @@ func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
 			Filesystem: "project_only",
 			Network:    "none",
 		},
-		Metadata: recipe.MetadataConfig{
-			ProjectRoot: "/opt/project",
-		},
 		Constraints: recipe.ConstraintsConfig{
-			Timeout: 10 * time.Minute,
+			Timeout:     10 * time.Minute,
+			ProjectRoot: "/opt/project",
 		},
 	}
 	a.store.SetSessionRecipe(sessionRec)
