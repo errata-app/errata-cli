@@ -11,7 +11,6 @@ import (
 	"github.com/errata-app/errata-cli/internal/adapters"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/pkg/recipe"
-	"github.com/errata-app/errata-cli/internal/tools"
 )
 
 // ── buildConfigSections ─────────────────────────────────────────────────────
@@ -44,12 +43,8 @@ func TestBuildConfigSections_SectionKinds(t *testing.T) {
 	assert.Equal(t, "list", kindMap["models"])
 	assert.Equal(t, "list", kindMap["tools"])
 	assert.Equal(t, "text", kindMap["system-prompt"])
-	assert.Equal(t, "scalar", kindMap["parameters"])
 	assert.Equal(t, "scalar", kindMap["constraints"])
 	assert.Equal(t, "scalar", kindMap["context"])
-	if tools.SubagentEnabled {
-		assert.Equal(t, "scalar", kindMap["sub-agent"])
-	}
 	assert.Equal(t, "scalar", kindMap["sandbox"])
 }
 
@@ -136,30 +131,6 @@ func TestSummarizeTools_WithAllowlist(t *testing.T) {
 	assert.Equal(t, "2 enabled", s) // read_file + write_file (bash disabled)
 }
 
-func TestSummarizeParameters_AllSet(t *testing.T) {
-	seed := int64(42)
-	temp := 0.7
-	maxTok := 4096
-	rec := &recipe.Recipe{
-		ModelParams: recipe.ModelParamsConfig{
-			Seed:        &seed,
-			Temperature: &temp,
-			MaxTokens:   &maxTok,
-		},
-	}
-	s := summarizeParameters(rec)
-	assert.Contains(t, s, "seed: 42")
-	assert.Contains(t, s, "temperature: 0.7")
-	assert.Contains(t, s, "max_tokens: 4096")
-}
-
-func TestSummarizeParameters_Defaults(t *testing.T) {
-	rec := &recipe.Recipe{}
-	s := summarizeParameters(rec)
-	assert.Contains(t, s, "seed=none")
-	assert.Contains(t, s, "provider")
-}
-
 func TestSummarizeContext_AllSet(t *testing.T) {
 	rec := &recipe.Recipe{
 		Context: recipe.ContextConfig{
@@ -180,28 +151,6 @@ func TestSummarizeContext_Defaults(t *testing.T) {
 	assert.Contains(t, s, "auto_compact")
 	assert.Contains(t, s, "20 turns")
 	assert.Contains(t, s, "threshold=0.80")
-}
-
-func TestSummarizeSubAgent_WithFields(t *testing.T) {
-	rec := &recipe.Recipe{
-		SubAgent: recipe.SubAgentConfig{
-			Model:    "gpt-4o",
-			MaxDepth: 2,
-			Tools:    "inherit",
-		},
-	}
-	s := summarizeSubAgent(rec)
-	assert.Contains(t, s, "gpt-4o")
-	assert.Contains(t, s, "depth: 2")
-	assert.Contains(t, s, "tools: inherit")
-}
-
-func TestSummarizeSubAgent_Defaults(t *testing.T) {
-	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
-	s := summarizeSubAgent(rec)
-	assert.Contains(t, s, "model=parent")
-	assert.Contains(t, s, "depth=1")
-	assert.Contains(t, s, "tools=all")
 }
 
 func TestSummarizeMCPServers_None(t *testing.T) {
@@ -253,40 +202,11 @@ func TestSetConfigValue_RoundTrip(t *testing.T) {
 		{"context.compact_threshold", "0.75", "0.75"},
 		{"sandbox.filesystem", "read_only", "read_only"},
 		{"sandbox.network", "none", "none"},
-		{"parameters.seed", "42", "42"},
-		{"parameters.temperature", "0.7", "0.7"},
-		{"parameters.max_tokens", "4096", "4096"},
 		{"system_prompt", "You are helpful.", "You are helpful."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
-			err := setConfigValue(rec, tt.path, tt.value)
-			require.NoError(t, err)
-			got := getConfigValue(rec, tt.path)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestSetConfigValue_SubAgentPaths(t *testing.T) {
-	if !tools.SubagentEnabled {
-		// sub_agent paths are not registered when SubagentEnabled is false.
-		rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
-		err := setConfigValue(rec, "sub_agent.model", "claude-sonnet-4-6")
-		require.Error(t, err, "sub_agent paths should be unknown when feature is disabled")
-		return
-	}
-	tests := []struct {
-		path, value, want string
-	}{
-		{"sub_agent.model", "claude-sonnet-4-6", "claude-sonnet-4-6"},
-		{"sub_agent.max_depth", "3", "3"},
-		{"sub_agent.tools", "inherit", "inherit"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
+			rec := &recipe.Recipe{}
 			err := setConfigValue(rec, tt.path, tt.value)
 			require.NoError(t, err)
 			got := getConfigValue(rec, tt.path)
@@ -321,7 +241,7 @@ func TestSetConfigValue_InvalidValue(t *testing.T) {
 
 func TestConfigPathCandidates_ReturnsAllPaths(t *testing.T) {
 	candidates := configPathCandidates()
-	assert.GreaterOrEqual(t, len(candidates), 10)
+	assert.GreaterOrEqual(t, len(candidates), 7)
 	// Check a few expected paths exist.
 	pathSet := make(map[string]bool)
 	for _, p := range candidates {
@@ -329,19 +249,16 @@ func TestConfigPathCandidates_ReturnsAllPaths(t *testing.T) {
 	}
 	assert.True(t, pathSet["constraints.timeout"])
 	assert.True(t, pathSet["sandbox.filesystem"])
-	assert.True(t, pathSet["parameters.seed"])
 	assert.True(t, pathSet["system_prompt"])
 }
 
 // ── cloneRecipe ─────────────────────────────────────────────────────────────
 
 func TestCloneRecipe_DeepCopy(t *testing.T) {
-	seed := int64(42)
 	original := &recipe.Recipe{
 		Name:         "test",
 		Models:       []string{"m1", "m2"},
 		SystemPrompt: "hello",
-		ModelParams:  recipe.ModelParamsConfig{Seed: &seed},
 		Constraints:  recipe.ConstraintsConfig{Timeout: 5 * time.Minute},
 	}
 	clone := cloneRecipe(original)
@@ -350,13 +267,11 @@ func TestCloneRecipe_DeepCopy(t *testing.T) {
 	clone.Name = "modified"
 	clone.Models[0] = "changed"
 	clone.SystemPrompt = "world"
-	*clone.ModelParams.Seed = 99
 	clone.Constraints.Timeout = 10 * time.Minute
 
 	assert.Equal(t, "test", original.Name)
 	assert.Equal(t, "m1", original.Models[0])
 	assert.Equal(t, "hello", original.SystemPrompt)
-	assert.Equal(t, int64(42), *original.ModelParams.Seed)
 	assert.Equal(t, 5*time.Minute, original.Constraints.Timeout)
 }
 
@@ -681,8 +596,8 @@ func TestSectionDescriptions_ExpandedViewShowsDetail(t *testing.T) {
 	rec := recipe.Default()
 	sections := buildConfigSections(rec, nil, nil)
 	fields := buildScalarFields("constraints", rec)
-	// Expand constraints (index 5).
-	out := renderConfigOverlay(sections, 5, 5, 80, 40, nil, 0, 0, fields, 0, "", false, "", "")
+	// Expand constraints (index 4: models, system-prompt, tools, mcp-servers, constraints).
+	out := renderConfigOverlay(sections, 4, 4, 80, 40, nil, 0, 0, fields, 0, "", false, "", "")
 	assert.Contains(t, out, "Set wall-clock timeout and maximum tool-call steps per model.")
 }
 
@@ -795,7 +710,7 @@ func TestRenderConfigOverlay_ListWindowedWithOffset(t *testing.T) {
 func TestSetConfigValue_SystemPrompt_SetsRecipeField(t *testing.T) {
 	// Pins that setConfigValue("system_prompt") sets the recipe field.
 	// The value flows to adapters at run time via context injection.
-	rec := &recipe.Recipe{SubAgent: recipe.SubAgentConfig{MaxDepth: -1}}
+	rec := &recipe.Recipe{}
 	err := setConfigValue(rec, "system_prompt", "Test prompt from config")
 	require.NoError(t, err)
 
@@ -809,7 +724,6 @@ func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}}
 	a := newAppForTest(t, ads)
 
-	seed := int64(42)
 	sessionRec := &recipe.Recipe{
 		Tools: &recipe.ToolsConfig{
 			Allowlist:    []string{"read_file", "bash"},
@@ -827,9 +741,6 @@ func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
 		Metadata: recipe.MetadataConfig{
 			ProjectRoot: "/opt/project",
 		},
-		ModelParams: recipe.ModelParamsConfig{
-			Seed: &seed,
-		},
 		Constraints: recipe.ConstraintsConfig{
 			Timeout: 10 * time.Minute,
 		},
@@ -844,8 +755,6 @@ func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
 	assert.Equal(t, "project_only", a.sandboxFilesystem)
 	assert.Equal(t, "none", a.sandboxNetwork)
 	assert.Equal(t, "/opt/project", a.projectRoot)
-	require.NotNil(t, a.seed)
-	assert.Equal(t, int64(42), *a.seed)
 
 	// Config fields.
 	assert.Equal(t, 10*time.Minute, a.cfg.AgentTimeout)
@@ -865,8 +774,6 @@ func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
 	a.sandboxFilesystem = "read_only"
 	a.sandboxNetwork = "full"
 	a.projectRoot = "/existing/root"
-	existingSeed := int64(99)
-	a.seed = &existingSeed
 	a.cfg.AgentTimeout = 7 * time.Minute
 	a.cfg.MaxHistoryTurns = 40
 	a.cfg.CompactThreshold = 0.90
@@ -888,8 +795,6 @@ func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
 	// sandboxFilesystem and sandboxNetwork are always synced too.
 	// projectRoot is only synced when non-empty.
 	assert.Equal(t, "/existing/root", a.projectRoot)
-	require.NotNil(t, a.seed)
-	assert.Equal(t, int64(99), *a.seed)
 	assert.Equal(t, 7*time.Minute, a.cfg.AgentTimeout)
 	assert.Equal(t, 40, a.cfg.MaxHistoryTurns)
 	assert.InDelta(t, 0.90, a.cfg.CompactThreshold, 1e-9)

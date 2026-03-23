@@ -302,31 +302,6 @@ func TestParse_ContextOff(t *testing.T) {
 	assert.Equal(t, "off", r.Context.Strategy)
 }
 
-func TestParse_SubAgent(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Sub-Agent
-model: claude-haiku-3
-max_depth: 2
-tools: read_file, search_files
-`)))
-	require.NoError(t, err)
-	assert.Equal(t, "claude-haiku-3", r.SubAgent.Model)
-	assert.Equal(t, 2, r.SubAgent.MaxDepth)
-	assert.Equal(t, "read_file, search_files", r.SubAgent.Tools)
-}
-
-func TestParse_SubAgentMaxDepthZero(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1("## Sub-Agent\nmax_depth: 0\n")))
-	require.NoError(t, err)
-	assert.Equal(t, 0, r.SubAgent.MaxDepth, "max_depth: 0 should disable sub-agents")
-}
-
-func TestParse_SubAgentNotSet(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
-	require.NoError(t, err)
-	assert.Equal(t, -1, r.SubAgent.MaxDepth, "unset max_depth should be -1 sentinel")
-}
-
 func TestParse_Sandbox(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Sandbox
@@ -405,46 +380,6 @@ func TestDiscover_FallsBackToEmbeddedDefault(t *testing.T) {
 }
 
 
-func TestParse_ModelParamsSeed(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Model Parameters
-seed: 42
-`)))
-	require.NoError(t, err)
-	require.NotNil(t, r.ModelParams.Seed)
-	assert.Equal(t, int64(42), *r.ModelParams.Seed)
-}
-
-func TestParse_ModelParamsSeedZero(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Model Parameters
-seed: 0
-`)))
-	require.NoError(t, err)
-	require.NotNil(t, r.ModelParams.Seed, "seed: 0 should be set, not nil")
-	assert.Equal(t, int64(0), *r.ModelParams.Seed)
-}
-
-func TestParse_ModelParamsSeedNegative(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Model Parameters
-seed: -1
-`)))
-	require.NoError(t, err)
-	require.NotNil(t, r.ModelParams.Seed)
-	assert.Equal(t, int64(-1), *r.ModelParams.Seed)
-}
-
-func TestParse_ModelParamsSeedAbsent(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Model Parameters
-temperature: 0.5
-`)))
-	require.NoError(t, err)
-	assert.Nil(t, r.ModelParams.Seed, "absent seed should be nil")
-}
-
-
 func TestParse_SuccessCriteria(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1(`
 ## Success Criteria
@@ -492,7 +427,6 @@ func TestDefault_IsNonNil(t *testing.T) {
 	require.NotNil(t, r)
 	assert.Equal(t, 1, r.Version)
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.Equal(t, -1, r.SubAgent.MaxDepth, "default recipe no longer sets sub-agent depth (feature gated)")
 	assert.Equal(t, 5*time.Minute, r.Constraints.Timeout)
 }
 
@@ -553,84 +487,6 @@ Read files to understand code.
 }
 
 // ─── Gap 3: Sub-Agent Modes ─────────────────────────────────────────────────
-
-func TestParse_SubAgentModes(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Sub-Agent Modes
-### explore
-You are a codebase exploration specialist. READ-ONLY mode.
-
-### plan
-You are a planning specialist. Do NOT make changes.
-`)))
-	require.NoError(t, err)
-	require.Len(t, r.SubAgentModes, 2)
-	assert.Contains(t, r.SubAgentModes["explore"], "READ-ONLY")
-	assert.Contains(t, r.SubAgentModes["plan"], "planning specialist")
-}
-
-// ─── Gap 4: System Reminders ─────────────────────────────────────────────────
-
-func TestParse_SystemReminders(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## System Reminders
-### context_warning
-trigger: context_usage > 0.75
-
-Approaching context limit. Be concise.
-
-### tool_failure
-trigger: last_tool_call_failed
-
-Analyze the error before retrying.
-`)))
-	require.NoError(t, err)
-	require.Len(t, r.SystemReminders, 2)
-
-	assert.Equal(t, "context_warning", r.SystemReminders[0].Name)
-	assert.Equal(t, "context_usage > 0.75", r.SystemReminders[0].Trigger)
-	assert.Contains(t, r.SystemReminders[0].Content, "Approaching context limit")
-
-	assert.Equal(t, "tool_failure", r.SystemReminders[1].Name)
-	assert.Equal(t, "last_tool_call_failed", r.SystemReminders[1].Trigger)
-	assert.Contains(t, r.SystemReminders[1].Content, "Analyze the error")
-}
-
-// ─── Gap 5: Hooks ────────────────────────────────────────────────────────────
-
-func TestParse_Hooks(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Hooks
-### post_edit_vet
-event: post_tool_use
-matcher: edit_file
-command: go vet ./... 2>&1 | head -20
-timeout: 30s
-inject_output: true
-
-### response_logger
-event: post_response
-command: echo 'done' >> /tmp/log.txt
-timeout: 5s
-`)))
-	require.NoError(t, err)
-	require.Len(t, r.Hooks, 2)
-
-	h0 := r.Hooks[0]
-	assert.Equal(t, "post_edit_vet", h0.Name)
-	assert.Equal(t, "post_tool_use", h0.Event)
-	assert.Equal(t, "edit_file", h0.Matcher)
-	assert.Equal(t, "go vet ./... 2>&1 | head -20", h0.Command)
-	assert.Equal(t, "30s", h0.Timeout)
-	assert.True(t, h0.InjectOutput)
-	assert.Equal(t, "command", h0.Action) // default action
-
-	h1 := r.Hooks[1]
-	assert.Equal(t, "response_logger", h1.Name)
-	assert.Equal(t, "post_response", h1.Event)
-	assert.Empty(t, h1.Matcher)
-	assert.False(t, h1.InjectOutput)
-}
 
 // ─── Gap 6: Summarization Prompt ─────────────────────────────────────────────
 
@@ -781,18 +637,10 @@ seed: 42
 	assert.Equal(t, 50, r.Constraints.MaxSteps)
 	assert.Equal(t, 30, r.Context.MaxHistoryTurns)
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.Equal(t, "claude-sonnet-4-6", r.SubAgent.Model)
-	assert.Equal(t, 2, r.SubAgent.MaxDepth)
 	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
-	require.NotNil(t, r.ModelParams.Seed)
-	assert.Equal(t, int64(42), *r.ModelParams.Seed)
 
-	// New sections also parsed.
 	assert.Len(t, r.ToolDescriptions, 1)
 	assert.Len(t, r.ModelProfiles, 1)
-	assert.Len(t, r.SubAgentModes, 1)
-	assert.Len(t, r.SystemReminders, 1)
-	assert.Len(t, r.Hooks, 1)
 	assert.NotEmpty(t, r.SummarizationPrompt)
 	assert.Len(t, r.OutputProcessing, 1)
 }
@@ -819,35 +667,8 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Contains(t, r.ToolDescriptions, "search_code")
 	assert.Contains(t, r.ToolDescriptions["bash"], "exit codes")
 
-	// Sub-Agent Modes removed from example recipe (feature gated).
-	assert.Empty(t, r.SubAgentModes)
-
 	// Context Summarization Prompt
 	assert.Contains(t, r.SummarizationPrompt, "Summarize this conversation")
-
-	// System Reminders
-	require.Len(t, r.SystemReminders, 4)
-	assert.Equal(t, "context_warning", r.SystemReminders[0].Name)
-	assert.Equal(t, "context_usage > 0.75", r.SystemReminders[0].Trigger)
-	assert.Contains(t, r.SystemReminders[0].Content, "context limit")
-	assert.Equal(t, "many_turns", r.SystemReminders[1].Name)
-	assert.Equal(t, "tool_failure", r.SystemReminders[2].Name)
-	assert.Equal(t, "focus_reminder", r.SystemReminders[3].Name)
-	assert.Equal(t, "manual", r.SystemReminders[3].Trigger)
-	assert.Contains(t, r.SystemReminders[3].Content, "focus on the specific task")
-
-	// Hooks
-	require.Len(t, r.Hooks, 3)
-	assert.Equal(t, "post_edit_vet", r.Hooks[0].Name)
-	assert.Equal(t, "post_tool_use", r.Hooks[0].Event)
-	assert.Equal(t, "edit_file", r.Hooks[0].Matcher)
-	assert.Contains(t, r.Hooks[0].Command, "go vet")
-	assert.Equal(t, "30s", r.Hooks[0].Timeout)
-	assert.True(t, r.Hooks[0].InjectOutput)
-
-	assert.Equal(t, "post_edit_test", r.Hooks[1].Name)
-	assert.Equal(t, "session_start_check", r.Hooks[2].Name)
-	assert.Equal(t, "session_start", r.Hooks[2].Event)
 
 	// Output Processing
 	require.NotNil(t, r.OutputProcessing)
@@ -886,25 +707,6 @@ func TestParse_MCPServers_EmptyNameOrCommand(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1("## MCP Servers\n- :\n- name:\n- :cmd\n")))
 	require.NoError(t, err)
 	assert.Empty(t, r.MCPServers, "empty name or command should be skipped")
-}
-
-func TestParse_ModelParams_InvalidValues(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Model Parameters
-temperature: not_a_number
-max_tokens: abc
-seed: xyz
-`)))
-	require.NoError(t, err)
-	assert.Nil(t, r.ModelParams.Temperature)
-	assert.Nil(t, r.ModelParams.MaxTokens)
-	assert.Nil(t, r.ModelParams.Seed)
-}
-
-func TestParse_ModelParams_MaxTokensZero(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1("## Model Parameters\nmax_tokens: 0\n")))
-	require.NoError(t, err)
-	assert.Nil(t, r.ModelParams.MaxTokens, "max_tokens: 0 should be ignored (must be > 0)")
 }
 
 func TestParse_Sandbox_UnknownValues(t *testing.T) {
@@ -948,16 +750,11 @@ func TestParse_EmptyNewSections(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, r.ToolDescriptions)
 	assert.Nil(t, r.ModelProfiles)
-	assert.Empty(t, r.SystemReminders)
-	assert.Empty(t, r.Hooks)
 }
 
 // ─── MarshalMarkdown tests ───────────────────────────────────────────────────
 
 func TestMarshalMarkdown_RoundTrip(t *testing.T) {
-	seed := int64(42)
-	temp := 0.7
-	maxTok := 4096
 	orig := &recipe.Recipe{
 		Version:      1,
 		Name:         "Test Recipe",
@@ -970,11 +767,6 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 		MCPServers: []recipe.MCPServerEntry{
 			{Name: "exa", Command: "npx @exa-ai/exa-mcp-server"},
 		},
-		ModelParams: recipe.ModelParamsConfig{
-			Temperature: &temp,
-			MaxTokens:   &maxTok,
-			Seed:        &seed,
-		},
 		Constraints: recipe.ConstraintsConfig{
 			Timeout:     10 * time.Minute,
 			BashTimeout: 30 * time.Second,
@@ -984,11 +776,6 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 			Strategy:         "auto_compact",
 			MaxHistoryTurns:  30,
 			CompactThreshold: 0.75,
-		},
-		SubAgent: recipe.SubAgentConfig{
-			Model:    "gpt-4o",
-			MaxDepth: 2,
-			Tools:    "inherit",
 		},
 		Sandbox: recipe.SandboxConfig{
 			Filesystem:      "project_only",
@@ -1015,18 +802,12 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 	assert.Equal(t, orig.Tools.BashPrefixes, parsed.Tools.BashPrefixes)
 	assert.Len(t, parsed.MCPServers, 1)
 	assert.Equal(t, "exa", parsed.MCPServers[0].Name)
-	assert.Equal(t, *orig.ModelParams.Seed, *parsed.ModelParams.Seed)
-	assert.InDelta(t, *orig.ModelParams.Temperature, *parsed.ModelParams.Temperature, 1e-9)
-	assert.Equal(t, *orig.ModelParams.MaxTokens, *parsed.ModelParams.MaxTokens)
 	assert.Equal(t, orig.Constraints.Timeout, parsed.Constraints.Timeout)
 	assert.Equal(t, orig.Constraints.BashTimeout, parsed.Constraints.BashTimeout)
 	assert.Equal(t, orig.Constraints.MaxSteps, parsed.Constraints.MaxSteps)
 	assert.Equal(t, orig.Context.Strategy, parsed.Context.Strategy)
 	assert.Equal(t, orig.Context.MaxHistoryTurns, parsed.Context.MaxHistoryTurns)
 	assert.InDelta(t, orig.Context.CompactThreshold, parsed.Context.CompactThreshold, 1e-9)
-	assert.Equal(t, orig.SubAgent.Model, parsed.SubAgent.Model)
-	assert.Equal(t, orig.SubAgent.MaxDepth, parsed.SubAgent.MaxDepth)
-	assert.Equal(t, orig.SubAgent.Tools, parsed.SubAgent.Tools)
 	assert.Equal(t, orig.Sandbox.Filesystem, parsed.Sandbox.Filesystem)
 	assert.Equal(t, orig.Sandbox.Network, parsed.Sandbox.Network)
 	assert.Equal(t, orig.Sandbox.AllowLocalFetch, parsed.Sandbox.AllowLocalFetch)

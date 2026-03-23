@@ -29,7 +29,6 @@ import (
 	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/internal/runner"
 	"github.com/errata-app/errata-cli/internal/sandbox"
-	"github.com/errata-app/errata-cli/internal/subagent"
 	"github.com/errata-app/errata-cli/internal/tools"
 )
 
@@ -339,20 +338,6 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		CheckpointPath:   opts.CheckpointPath,
 		WorkDirs:         workDirs,
 	})
-	if tools.SubagentEnabled {
-		ctx = tools.WithSubagentDispatcher(ctx, subagent.NewDispatcher(
-			opts.Adapters, opts.Cfg, opts.MCPDispatchers,
-			func(modelID string, e models.AgentEvent) {
-				if opts.Verbose {
-					fmt.Fprintf(opts.stderr(), "    [sub-agent %s] %s: %s\n", modelID, e.Type, truncate(e.Data, 80))
-				}
-			},
-		))
-		ctx = tools.WithSubagentDepth(ctx, 0)
-	}
-	if opts.Cfg.Seed != nil {
-		ctx = tools.WithSeed(ctx, *opts.Cfg.Seed)
-	}
 	return ctx
 }
 

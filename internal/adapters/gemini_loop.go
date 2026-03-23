@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"time"
 
 	"google.golang.org/genai"
@@ -40,11 +39,6 @@ func runGeminiAgentLoop(
 	if systemMsg != "" {
 		config.SystemInstruction = genai.NewContentFromText(systemMsg, "")
 	}
-	if seed, ok := tools.SeedFromContext(ctx); ok {
-		s := int32(min(max(seed, math.MinInt32), math.MaxInt32)) //nolint:gosec // G115: overflow prevented by min/max clamping
-		config.Seed = &s
-	}
-
 	contents := make([]*genai.Content, 0, len(history)+1)
 	for _, turn := range history {
 		switch turn.Role {

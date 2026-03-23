@@ -32,8 +32,6 @@ func defaultCfg() config.Config {
 		ActiveModels:      nil,
 		SystemPromptExtra: "",
 		MCPServers:        "",
-		SubagentModel:     "",
-		SubagentMaxDepth:  1,
 		MaxHistoryTurns:   20,
 		AgentTimeout:      0,
 		CompactThreshold:  0,
@@ -72,22 +70,6 @@ func TestApplyRecipe_MCPServers(t *testing.T) {
 	assert.Contains(t, cfg.MCPServers, "npx @exa-ai/exa-mcp-server")
 }
 
-func TestApplyRecipe_SubagentDepthExplicitZero(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Sub-Agent\nmax_depth: 0\n")))
-	cfg := defaultCfg()
-	cfg.SubagentMaxDepth = 1
-	config.ApplyRecipe(r, &cfg)
-	assert.Equal(t, 0, cfg.SubagentMaxDepth, "max_depth: 0 must disable spawn_agent")
-}
-
-func TestApplyRecipe_SubagentDepthNotSet_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
-	cfg := defaultCfg()
-	cfg.SubagentMaxDepth = 3
-	config.ApplyRecipe(r, &cfg)
-	assert.Equal(t, 3, cfg.SubagentMaxDepth, "absent max_depth must not override existing value")
-}
-
 func TestApplyRecipe_Timeout(t *testing.T) {
 	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\ntimeout: 3m\n")))
 	cfg := defaultCfg()
@@ -109,24 +91,6 @@ func TestApplyRecipe_CompactThreshold(t *testing.T) {
 	assert.InDelta(t, 0.60, cfg.CompactThreshold, 0.001)
 }
 
-func TestApplyRecipe_Seed(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Model Parameters\nseed: 42\n")))
-	cfg := defaultCfg()
-	config.ApplyRecipe(r, &cfg)
-	require.NotNil(t, cfg.Seed)
-	assert.Equal(t, int64(42), *cfg.Seed)
-}
-
-func TestApplyRecipe_SeedNil_DoesNotOverwrite(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- claude-sonnet-4-6\n")))
-	cfg := defaultCfg()
-	existing := int64(99)
-	cfg.Seed = &existing
-	config.ApplyRecipe(r, &cfg)
-	require.NotNil(t, cfg.Seed)
-	assert.Equal(t, int64(99), *cfg.Seed, "absent seed must not clear existing config")
-}
-
 func TestApplyRecipe_MaxSteps(t *testing.T) {
 	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\nmax_steps: 25\n")))
 	cfg := defaultCfg()
@@ -145,18 +109,11 @@ func TestApplyRecipe_MaxStepsZero_DoesNotOverwrite(t *testing.T) {
 // ─── ApplyRecipe regression tests ────────────────────────────────────────────
 
 func TestApplyRecipe_AllFields_Simultaneous(t *testing.T) {
-	// Construct a recipe with ALL ApplyRecipe-mapped fields set simultaneously.
-	// Pins field-interaction behavior — setting all at once must not interfere.
-	seed := int64(42)
 	r := &recipe.Recipe{
 		Models:       []string{"m1", "m2"},
 		SystemPrompt: "Custom system prompt",
 		MCPServers: []recipe.MCPServerEntry{
 			{Name: "exa", Command: "npx exa-server"},
-		},
-		SubAgent: recipe.SubAgentConfig{
-			Model:    "gpt-4o",
-			MaxDepth: 3,
 		},
 		Context: recipe.ContextConfig{
 			MaxHistoryTurns:  30,
@@ -166,9 +123,6 @@ func TestApplyRecipe_AllFields_Simultaneous(t *testing.T) {
 			Timeout:  10 * time.Minute,
 			MaxSteps: 50,
 		},
-		ModelParams: recipe.ModelParamsConfig{
-			Seed: &seed,
-		},
 	}
 
 	cfg := defaultCfg()
@@ -177,24 +131,18 @@ func TestApplyRecipe_AllFields_Simultaneous(t *testing.T) {
 	assert.Equal(t, []string{"m1", "m2"}, cfg.ActiveModels)
 	assert.Equal(t, "Custom system prompt", cfg.SystemPromptExtra)
 	assert.Contains(t, cfg.MCPServers, "exa")
-	assert.Contains(t, cfg.MCPServers, "npx exa-server")
-	assert.Equal(t, "gpt-4o", cfg.SubagentModel)
-	assert.Equal(t, 3, cfg.SubagentMaxDepth)
 	assert.Equal(t, 30, cfg.MaxHistoryTurns)
 	assert.Equal(t, 10*time.Minute, cfg.AgentTimeout)
 	assert.Equal(t, 50, cfg.MaxSteps)
 	assert.InDelta(t, 0.65, cfg.CompactThreshold, 1e-9)
-	require.NotNil(t, cfg.Seed)
-	assert.Equal(t, int64(42), *cfg.Seed)
 }
 
 // ─── Atomic section tests ─────────────────────────────────────────────────────
 
 func TestApplyRecipe_AtomicConstraints(t *testing.T) {
-	// User sets max_steps only in ## Constraints → timeout must zero out.
 	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\nmax_steps: 50\n")))
 	cfg := defaultCfg()
-	cfg.AgentTimeout = 5 * time.Minute // pre-existing default
+	cfg.AgentTimeout = 5 * time.Minute
 	cfg.MaxSteps = 100
 	config.ApplyRecipe(r, &cfg)
 	assert.Equal(t, 50, cfg.MaxSteps)
@@ -202,7 +150,6 @@ func TestApplyRecipe_AtomicConstraints(t *testing.T) {
 }
 
 func TestApplyRecipe_AtomicContext(t *testing.T) {
-	// User sets max_history_turns only → compact_threshold must zero out.
 	r, _ := recipe.Parse(writeRecipe(t, v1("## Context\nmax_history_turns: 10\n")))
 	cfg := defaultCfg()
 	cfg.CompactThreshold = 0.8
@@ -212,29 +159,7 @@ func TestApplyRecipe_AtomicContext(t *testing.T) {
 	assert.InDelta(t, 0.0, cfg.CompactThreshold, 1e-9, "compact_threshold must be zeroed when section present but field not declared")
 }
 
-func TestApplyRecipe_AtomicModelParams(t *testing.T) {
-	// User sets temperature only → seed must nil out.
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Model Parameters\ntemperature: 0.5\n")))
-	cfg := defaultCfg()
-	existing := int64(42)
-	cfg.Seed = &existing
-	config.ApplyRecipe(r, &cfg)
-	assert.Nil(t, cfg.Seed, "seed must be nil when section present but seed not declared")
-}
-
-func TestApplyRecipe_AtomicSubAgent(t *testing.T) {
-	// User sets model only → max_depth must zero out (disabled).
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Sub-Agent\nmodel: claude-haiku-3\n")))
-	cfg := defaultCfg()
-	cfg.SubagentMaxDepth = 3
-	cfg.SubagentModel = "old-model"
-	config.ApplyRecipe(r, &cfg)
-	assert.Equal(t, "claude-haiku-3", cfg.SubagentModel)
-	assert.Equal(t, 0, cfg.SubagentMaxDepth, "max_depth must be 0 (disabled) when section present but max_depth not mentioned")
-}
-
 func TestApplyRecipe_AbsentSection_PreservesDefaults(t *testing.T) {
-	// No ## Constraints in recipe → existing timeout preserved.
 	r, _ := recipe.Parse(writeRecipe(t, v1("## Models\n- m1\n")))
 	cfg := defaultCfg()
 	cfg.AgentTimeout = 5 * time.Minute
@@ -245,43 +170,27 @@ func TestApplyRecipe_AbsentSection_PreservesDefaults(t *testing.T) {
 }
 
 func TestApplyRecipe_UnsetFields_PreserveAll(t *testing.T) {
-	// Pre-populate Config with non-default values for all non-Models fields.
-	// Parse a recipe with only ## Models set.
-	// Assert cfg.ActiveModels changed, all others retained pre-populated values.
-	existingSeed := int64(99)
 	cfg := config.Config{
 		ActiveModels:      []string{"old-model"},
 		SystemPromptExtra: "existing prompt",
 		MCPServers:        "existing:server",
-		SubagentModel:     "existing-subagent",
-		SubagentMaxDepth:  5,
 		MaxSteps:          15,
 		MaxHistoryTurns:   40,
 		AgentTimeout:      7 * time.Minute,
 		CompactThreshold:  0.90,
-		Seed:              &existingSeed,
 	}
 
-	// Recipe with only Models set; all other fields at zero values.
 	r := &recipe.Recipe{
-		Models:   []string{"new-model-1", "new-model-2"},
-		SubAgent: recipe.SubAgentConfig{MaxDepth: -1}, // sentinel: not set
+		Models: []string{"new-model-1", "new-model-2"},
 	}
 
 	config.ApplyRecipe(r, &cfg)
 
-	// Models should have changed.
 	assert.Equal(t, []string{"new-model-1", "new-model-2"}, cfg.ActiveModels)
-
-	// All other fields should be preserved.
 	assert.Equal(t, "existing prompt", cfg.SystemPromptExtra)
 	assert.Equal(t, "existing:server", cfg.MCPServers)
-	assert.Equal(t, "existing-subagent", cfg.SubagentModel)
-	assert.Equal(t, 5, cfg.SubagentMaxDepth)
 	assert.Equal(t, 40, cfg.MaxHistoryTurns)
 	assert.Equal(t, 7*time.Minute, cfg.AgentTimeout)
 	assert.InDelta(t, 0.90, cfg.CompactThreshold, 1e-9)
-	require.NotNil(t, cfg.Seed)
-	assert.Equal(t, int64(99), *cfg.Seed)
 	assert.Equal(t, 15, cfg.MaxSteps)
 }

@@ -220,9 +220,6 @@ func TestBuildReport_NilRecipeNilCollector(t *testing.T) {
 	if report.Recipe.Constraints != nil {
 		t.Error("nil recipe should leave Constraints nil")
 	}
-	if report.Recipe.ModelParams != nil {
-		t.Error("nil recipe should leave ModelParams nil")
-	}
 	if len(report.Models) != 1 {
 		t.Fatalf("Models len = %d, want 1", len(report.Models))
 	}
@@ -239,30 +236,6 @@ func TestBuildReport_ZeroConstraints(t *testing.T) {
 	report := BuildReport("sess", rec, "hello", nil, nil, nil)
 	if report.Recipe.Constraints != nil {
 		t.Error("zero constraints should leave Constraints nil")
-	}
-	if report.Recipe.ModelParams != nil {
-		t.Error("zero model params should leave ModelParams nil")
-	}
-}
-
-func TestBuildReport_PartialModelParams(t *testing.T) {
-	temp := 0.5
-	rec := &recipe.Recipe{
-		Name:        "test",
-		ModelParams: recipe.ModelParamsConfig{Temperature: &temp},
-	}
-	report := BuildReport("sess", rec, "hello", nil, nil, nil)
-	if report.Recipe.ModelParams == nil {
-		t.Fatal("ModelParams should not be nil when Temperature is set")
-	}
-	if report.Recipe.ModelParams.Temperature == nil || *report.Recipe.ModelParams.Temperature != 0.5 {
-		t.Errorf("Temperature = %v, want 0.5", report.Recipe.ModelParams.Temperature)
-	}
-	if report.Recipe.ModelParams.MaxTokens != nil {
-		t.Errorf("MaxTokens should be nil, got %v", report.Recipe.ModelParams.MaxTokens)
-	}
-	if report.Recipe.ModelParams.Seed != nil {
-		t.Errorf("Seed should be nil, got %v", report.Recipe.ModelParams.Seed)
 	}
 }
 

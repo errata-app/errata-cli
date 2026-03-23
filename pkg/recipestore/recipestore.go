@@ -29,11 +29,9 @@ type RecipeSnapshot struct {
 	Tools               []string                      `json:"tools,omitempty"`
 	BashPrefixes        []string                      `json:"bash_prefixes,omitempty"`
 	ToolDescriptions    map[string]string             `json:"tool_descriptions,omitempty"`
-	Constraints         *ConstraintsConfig            `json:"constraints,omitempty"`
-	ModelParams         *ModelParamsConfig             `json:"model_params,omitempty"`
-	Context             *ContextConfig                `json:"context,omitempty"`
-	SystemReminders     []SystemReminderConfig        `json:"system_reminders,omitempty"`
-	OutputProcessing    map[string]OutputRuleConfig   `json:"output_processing,omitempty"`
+	Constraints      *ConstraintsConfig            `json:"constraints,omitempty"`
+	Context          *ContextConfig                `json:"context,omitempty"`
+	OutputProcessing map[string]OutputRuleConfig   `json:"output_processing,omitempty"`
 	SummarizationPrompt string                        `json:"summarization_prompt,omitempty"`
 	ModelProfiles       map[string]ModelProfileConfig `json:"model_profiles,omitempty"`
 }
@@ -44,26 +42,12 @@ type ConstraintsConfig struct {
 	Timeout  string `json:"timeout,omitempty"`
 }
 
-// ModelParamsConfig captures sampling parameters relevant to preference comparison.
-type ModelParamsConfig struct {
-	Temperature *float64 `json:"temperature,omitempty"`
-	MaxTokens   *int     `json:"max_tokens,omitempty"`
-	Seed        *int64   `json:"seed,omitempty"`
-}
-
 // ContextConfig captures conversation history management settings.
 type ContextConfig struct {
 	MaxHistoryTurns  int     `json:"max_history_turns,omitempty"`
 	Strategy         string  `json:"strategy,omitempty"`
 	CompactThreshold float64 `json:"compact_threshold,omitempty"`
 	TaskMode         string  `json:"task_mode,omitempty"`
-}
-
-// SystemReminderConfig captures a conditional mid-conversation injection.
-type SystemReminderConfig struct {
-	Name    string `json:"name"`
-	Trigger string `json:"trigger,omitempty"`
-	Content string `json:"content,omitempty"`
 }
 
 // OutputRuleConfig captures deterministic output processing for a tool.

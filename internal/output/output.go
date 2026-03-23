@@ -44,21 +44,13 @@ type RecipeSnapshot struct {
 	Models       []string             `json:"models,omitempty"`
 	SystemPrompt string               `json:"system_prompt,omitempty"`
 	Tools        []string             `json:"tools,omitempty"`
-	Constraints  *ConstraintsSnapshot `json:"constraints,omitempty"`
-	ModelParams  *ModelParamsSnapshot  `json:"model_params,omitempty"`
+	Constraints *ConstraintsSnapshot `json:"constraints,omitempty"`
 }
 
 // ConstraintsSnapshot captures constraint settings.
 type ConstraintsSnapshot struct {
 	MaxSteps int    `json:"max_steps,omitempty"`
 	Timeout  string `json:"timeout,omitempty"`
-}
-
-// ModelParamsSnapshot captures sampling parameters.
-type ModelParamsSnapshot struct {
-	Temperature *float64 `json:"temperature,omitempty"`
-	MaxTokens   *int     `json:"max_tokens,omitempty"`
-	Seed        *int64   `json:"seed,omitempty"`
 }
 
 // ModelResult is the per-model execution result.
@@ -267,13 +259,6 @@ func BuildReport(
 			}
 			if rec.Constraints.Timeout > 0 {
 				snap.Constraints.Timeout = rec.Constraints.Timeout.String()
-			}
-		}
-		if rec.ModelParams.Temperature != nil || rec.ModelParams.MaxTokens != nil || rec.ModelParams.Seed != nil {
-			snap.ModelParams = &ModelParamsSnapshot{
-				Temperature: rec.ModelParams.Temperature,
-				MaxTokens:   rec.ModelParams.MaxTokens,
-				Seed:        rec.ModelParams.Seed,
 			}
 		}
 	}

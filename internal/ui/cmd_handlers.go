@@ -26,7 +26,6 @@ import (
 	"github.com/errata-app/errata-cli/internal/runner"
 	"github.com/errata-app/errata-cli/internal/sandbox"
 	"github.com/errata-app/errata-cli/internal/session"
-	"github.com/errata-app/errata-cli/internal/subagent"
 	"github.com/errata-app/errata-cli/internal/tools"
 )
 
@@ -319,7 +318,6 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	sandboxNetwork := a.sandboxNetwork
 	projectRoot := a.projectRoot
 	cfg := a.cfg
-	seed := a.seed
 	cpPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
@@ -370,18 +368,6 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, recSystemPrompt)
 		runCtx = tools.WithToolGuidanceMap(runCtx, recToolGuidanceMap)
-		if tools.SubagentEnabled {
-			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
-				ads, cfg, mcpDispatchers,
-				func(modelID string, e models.AgentEvent) {
-					prog.Send(agentEventMsg{modelID: modelID, event: e})
-				},
-			))
-			runCtx = tools.WithSubagentDepth(runCtx, 0)
-		}
-		if seed != nil {
-			runCtx = tools.WithSeed(runCtx, *seed)
-		}
 		collector := output.NewCollector()
 		responses := runner.RunAll(
 			runCtx, ads, effectiveHistories, trimmed,
@@ -560,7 +546,6 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	sandboxNetwork := a.sandboxNetwork
 	projectRoot := a.projectRoot
 	cfg := a.cfg
-	seed := a.seed
 	resumeCPPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
@@ -610,18 +595,6 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, resumeSystemPrompt)
 		runCtx = tools.WithToolGuidanceMap(runCtx, resumeToolGuidanceMap)
-		if tools.SubagentEnabled {
-			runCtx = tools.WithSubagentDispatcher(runCtx, subagent.NewDispatcher(
-				ads, cfg, mcpDispatchers,
-				func(modelID string, e models.AgentEvent) {
-					prog.Send(agentEventMsg{modelID: modelID, event: e})
-				},
-			))
-			runCtx = tools.WithSubagentDepth(runCtx, 0)
-		}
-		if seed != nil {
-			runCtx = tools.WithSeed(runCtx, *seed)
-		}
 		collector := output.NewCollector()
 		completedCount := len(completedResponses)
 		responses := runner.RunAll(

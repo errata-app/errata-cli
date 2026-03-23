@@ -43,27 +43,16 @@ type Recipe struct {
 	Models       []string        // nil = not set
 	SystemPrompt string          // "" = not set
 	Tools        *ToolsConfig    // nil = all tools enabled
-	MCPServers   []MCPServerEntry
-	ModelParams  ModelParamsConfig
-	Constraints  ConstraintsConfig
-	Context      ContextConfig
-	SubAgent     SubAgentConfig
-	Sandbox      SandboxConfig
+	MCPServers  []MCPServerEntry
+	Constraints ConstraintsConfig
+	Context     ContextConfig
+	Sandbox     SandboxConfig
 	Tasks           []string
 	SuccessCriteria []string
 	Metadata        MetadataConfig
 
 	// Uniform per-tool description overrides (applied to all models).
 	ToolDescriptions map[string]string // tool_name → description
-
-	// Sub-agent mode prompts (applied to all models).
-	SubAgentModes map[string]string // mode_name → prompt
-
-	// Gap 4: conditional mid-conversation injections
-	SystemReminders []SystemReminderConfig
-
-	// Gap 5: lifecycle event hooks
-	Hooks []HookConfig
 
 	// Context summarization prompt (applied to all models).
 	SummarizationPrompt string
@@ -102,14 +91,6 @@ type MCPServerEntry struct {
 	Command string // full command string including arguments
 }
 
-// ModelParamsConfig carries API sampling parameters.
-// Pointer fields distinguish "not set" (nil) from "set to zero".
-type ModelParamsConfig struct {
-	Temperature *float64
-	MaxTokens   *int
-	Seed        *int64
-}
-
 // ConstraintsConfig limits agentic loop execution.
 type ConstraintsConfig struct {
 	MaxSteps    int           // 0 = not set (unlimited)
@@ -123,13 +104,6 @@ type ContextConfig struct {
 	Strategy         string  // "" | "auto_compact" | "manual" | "off"
 	CompactThreshold float64 // 0 = not set
 	TaskMode         string  // "" | "independent" | "sequential"
-}
-
-// SubAgentConfig configures spawn_agent sub-agent behaviour.
-type SubAgentConfig struct {
-	Model    string // "" = not set (inherit parent)
-	MaxDepth int    // -1 = not set; 0 = disable; ≥1 = limit
-	Tools    string // "inherit" or comma-separated tool names
 }
 
 // SandboxConfig restricts the execution environment.
@@ -149,24 +123,6 @@ type MetadataConfig struct {
 	Extends     string
 	Contribute  bool
 	ProjectRoot string
-}
-
-// SystemReminderConfig is one conditional mid-conversation injection (Gap 4).
-type SystemReminderConfig struct {
-	Name    string // unique name for this reminder
-	Trigger string // trigger expression, e.g. "context_usage > 0.75"
-	Content string // prompt text to inject when trigger fires
-}
-
-// HookConfig is one lifecycle event hook (Gap 5).
-type HookConfig struct {
-	Name         string // unique name for this hook
-	Event        string // "session_start", "pre_tool_use", "post_tool_use", etc.
-	Matcher      string // tool name or glob; "" = all events of type
-	Action       string // "command" (Phase 1 only)
-	Command      string // shell command to execute
-	Timeout      string // duration string, e.g. "30s"
-	InjectOutput bool   // feed command stdout back as model context
 }
 
 // OutputRuleConfig is a deterministic output processing rule (Gap 7).
@@ -239,12 +195,9 @@ func (r *Recipe) HasSection(name string) bool {
 
 // ─── Constructor ──────────────────────────────────────────────────────────────
 
-// newRecipe returns a Recipe with sentinel values for fields that distinguish
-// "not set" from "explicitly set to zero".
+// newRecipe returns a fresh Recipe with zero values.
 func newRecipe() *Recipe {
-	return &Recipe{
-		SubAgent: SubAgentConfig{MaxDepth: -1},
-	}
+	return &Recipe{}
 }
 
 // ─── Parse ────────────────────────────────────────────────────────────────────
@@ -374,14 +327,10 @@ func parseV1(data []byte) (*Recipe, error) {
 			r.Tools = parseTools(body)
 		case "mcp servers":
 			r.MCPServers = parseMCPServers(body)
-		case "model parameters":
-			r.ModelParams = parseModelParams(body)
 		case "constraints":
 			r.Constraints = parseConstraints(body)
 		case "context":
 			r.Context = parseContext(body)
-		case "sub-agent":
-			r.SubAgent = parseSubAgent(body)
 		case "sandbox":
 			r.Sandbox = parseSandbox(body)
 		case "tasks":
@@ -390,33 +339,16 @@ func parseV1(data []byte) (*Recipe, error) {
 			r.SuccessCriteria = parseList(body)
 		case "metadata":
 			r.Metadata = parseMetadata(body)
-		// ── Tool Descriptions ──
 		case "tool descriptions":
 			r.ToolDescriptions = parseSubSectionMap(body)
-
-		// ── Sub-Agent Modes ──
-		case "sub-agent modes":
-			r.SubAgentModes = parseSubSectionMap(body)
-
-		// ── System Reminders ──
-		case "system reminders":
-			r.SystemReminders = parseSystemReminders(body)
-
-		// ── Hooks ──
-		case "hooks":
-			r.Hooks = parseHooks(body)
-
-		// ── Summarization ──
 		case "context summarization prompt":
 			r.SummarizationPrompt = parseProse(body)
-
-		// ── Output Processing ──
 		case "output processing":
 			r.OutputProcessing = parseOutputRules(body)
-
-		// ── Model Profiles ──
 		case "model profiles":
 			r.ModelProfiles = parseModelProfiles(body)
+		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks":
+			// Removed sections — silently ignored for backward compatibility.
 
 		default:
 			fmt.Fprintf(os.Stderr, "recipe: unknown section %q, skipping\n", s.header)
@@ -509,49 +441,6 @@ func splitOnPrefix(body, prefix string) []subSection {
 }
 
 // parseMapProse extracts leading key: value lines from body, returning them as a map
-// and any remaining prose text that follows. Blank lines separate the key-value
-// block from the prose. Used for reminders (metadata + content).
-func parseMapProse(body string) (map[string]string, string) {
-	m := make(map[string]string)
-	lines := strings.Split(body, "\n")
-	var proseStart int
-	inKV := true
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		if inKV {
-			if trimmed == "" {
-				// Blank line while still in KV block — check if remaining is prose.
-				inKV = false
-				proseStart = i + 1
-				continue
-			}
-			key, val, ok := strings.Cut(trimmed, ":")
-			if !ok {
-				// Not a key-value line — start of prose.
-				proseStart = i
-				break
-			}
-			key = strings.TrimSpace(strings.ToLower(key))
-			val = strings.TrimSpace(val)
-			if key != "" {
-				m[key] = val
-			}
-		} else {
-			// After blank line — everything is prose.
-			proseStart = i
-			break
-		}
-	}
-
-	prose := ""
-	if proseStart < len(lines) {
-		prose = strings.TrimSpace(strings.Join(lines[proseStart:], "\n"))
-	}
-	return m, prose
-}
-
 // parseSubSectionMap parses a section body into a map[name]content using ### sub-headers.
 func parseSubSectionMap(body string) map[string]string {
 	subs := splitSubSections(body)
@@ -563,46 +452,6 @@ func parseSubSectionMap(body string) map[string]string {
 		m[s.name] = s.body
 	}
 	return m
-}
-
-// parseSystemReminders parses ### sub-sections into SystemReminderConfig entries.
-func parseSystemReminders(body string) []SystemReminderConfig {
-	subs := splitSubSections(body)
-	out := make([]SystemReminderConfig, 0, len(subs))
-	for _, s := range subs {
-		kv, prose := parseMapProse(s.body)
-		out = append(out, SystemReminderConfig{
-			Name:    s.name,
-			Trigger: kv["trigger"],
-			Content: prose,
-		})
-	}
-	return out
-}
-
-// parseHooks parses ### sub-sections into HookConfig entries.
-func parseHooks(body string) []HookConfig {
-	subs := splitSubSections(body)
-	out := make([]HookConfig, 0, len(subs))
-	for _, s := range subs {
-		m := parseMap(s.body)
-		h := HookConfig{
-			Name:    s.name,
-			Event:   m["event"],
-			Matcher: m["matcher"],
-			Action:  m["action"],
-			Command: m["command"],
-			Timeout: m["timeout"],
-		}
-		if h.Action == "" && h.Command != "" {
-			h.Action = "command" // default action
-		}
-		if v := m["inject_output"]; strings.EqualFold(v, "true") {
-			h.InjectOutput = true
-		}
-		out = append(out, h)
-	}
-	return out
 }
 
 // parseOutputRules parses ### sub-sections into OutputRuleConfig entries.
@@ -746,30 +595,6 @@ func parseMCPServers(body string) []MCPServerEntry {
 	return out
 }
 
-// parseModelParams parses the ## Model Parameters section.
-// ### subsections (per-model overrides) are noted but not yet applied by this parser;
-// they are deferred to Part 9 when per-model adapter config is threaded through.
-func parseModelParams(body string) ModelParamsConfig {
-	m := parseMap(body)
-	var cfg ModelParamsConfig
-	if v, ok := m["temperature"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.Temperature = &f
-		}
-	}
-	if v, ok := m["max_tokens"]; ok {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.MaxTokens = &n
-		}
-	}
-	if v, ok := m["seed"]; ok {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Seed = &n
-		}
-	}
-	return cfg
-}
-
 // parseConstraints parses the ## Constraints section.
 func parseConstraints(body string) ConstraintsConfig {
 	m := parseMap(body)
@@ -825,24 +650,6 @@ func parseContext(body string) ContextConfig {
 		default:
 			fmt.Fprintf(os.Stderr, "recipe: unknown task_mode %q, ignoring\n", v)
 		}
-	}
-	return cfg
-}
-
-// parseSubAgent parses the ## Sub-Agent section.
-func parseSubAgent(body string) SubAgentConfig {
-	m := parseMap(body)
-	cfg := SubAgentConfig{MaxDepth: -1} // -1 = not set
-	if v, ok := m["model"]; ok {
-		cfg.Model = v
-	}
-	if v, ok := m["max_depth"]; ok {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			cfg.MaxDepth = n
-		}
-	}
-	if v, ok := m["tools"]; ok {
-		cfg.Tools = v
 	}
 	return cfg
 }
@@ -974,20 +781,6 @@ func (r *Recipe) MarshalMarkdown() string {
 		}
 	}
 
-	// Model Parameters
-	if r.ModelParams.Temperature != nil || r.ModelParams.MaxTokens != nil || r.ModelParams.Seed != nil {
-		sb.WriteString("\n## Model Parameters\n")
-		if r.ModelParams.Temperature != nil {
-			fmt.Fprintf(&sb, "temperature: %s\n", strconv.FormatFloat(*r.ModelParams.Temperature, 'f', -1, 64))
-		}
-		if r.ModelParams.MaxTokens != nil {
-			fmt.Fprintf(&sb, "max_tokens: %d\n", *r.ModelParams.MaxTokens)
-		}
-		if r.ModelParams.Seed != nil {
-			fmt.Fprintf(&sb, "seed: %d\n", *r.ModelParams.Seed)
-		}
-	}
-
 	// Constraints
 	if r.Constraints.Timeout > 0 || r.Constraints.MaxSteps > 0 || r.Constraints.BashTimeout > 0 {
 		sb.WriteString("\n## Constraints\n")
@@ -1013,20 +806,6 @@ func (r *Recipe) MarshalMarkdown() string {
 		}
 		if r.Context.CompactThreshold > 0 {
 			fmt.Fprintf(&sb, "compact_threshold: %s\n", strconv.FormatFloat(r.Context.CompactThreshold, 'f', -1, 64))
-		}
-	}
-
-	// Sub-Agent
-	if r.SubAgent.Model != "" || r.SubAgent.MaxDepth > 0 || r.SubAgent.Tools != "" {
-		sb.WriteString("\n## Sub-Agent\n")
-		if r.SubAgent.Model != "" {
-			fmt.Fprintf(&sb, "model: %s\n", r.SubAgent.Model)
-		}
-		if r.SubAgent.MaxDepth > 0 {
-			fmt.Fprintf(&sb, "max_depth: %d\n", r.SubAgent.MaxDepth)
-		}
-		if r.SubAgent.Tools != "" {
-			fmt.Fprintf(&sb, "tools: %s\n", r.SubAgent.Tools)
 		}
 	}
 
@@ -1065,34 +844,6 @@ func (r *Recipe) MarshalMarkdown() string {
 		sb.WriteString("\n## Context Summarization Prompt\n")
 		sb.WriteString(r.SummarizationPrompt)
 		sb.WriteByte('\n')
-	}
-
-	// System Reminders
-	if len(r.SystemReminders) > 0 {
-		sb.WriteString("\n## System Reminders\n")
-		for _, rem := range r.SystemReminders {
-			fmt.Fprintf(&sb, "### %s\n", rem.Name)
-			if rem.Trigger != "" {
-				fmt.Fprintf(&sb, "trigger: %s\n", rem.Trigger)
-			}
-			if rem.Content != "" {
-				sb.WriteString(rem.Content)
-				sb.WriteByte('\n')
-			}
-		}
-	}
-
-	// Hooks
-	if len(r.Hooks) > 0 {
-		sb.WriteString("\n## Hooks\n")
-		for _, h := range r.Hooks {
-			fmt.Fprintf(&sb, "### %s\n", h.Name)
-			fmt.Fprintf(&sb, "event: %s\n", h.Event)
-			if h.Matcher != "" {
-				fmt.Fprintf(&sb, "matcher: %s\n", h.Matcher)
-			}
-			fmt.Fprintf(&sb, "command: %s\n", h.Command)
-		}
 	}
 
 	// Metadata

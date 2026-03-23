@@ -74,16 +74,7 @@ type Config struct {
 	// Set via recipe ## System Prompt.
 	SystemPromptExtra string
 
-	// SubagentModel is the model ID used when spawning sub-agents via spawn_agent.
-	// Empty means use the same model as the parent. Set via recipe ## Sub-Agent model:.
-	SubagentModel string
-
-	// SubagentMaxDepth is the maximum spawn_agent recursion depth.
-	// 1 (default) means sub-agents cannot spawn further sub-agents.
-	// 0 disables spawn_agent entirely. Set via recipe ## Sub-Agent max_depth:.
-	SubagentMaxDepth int
-
-	// MaxSteps is the maximum number of agentic tool-use turns per adapter.
+// MaxSteps is the maximum number of agentic tool-use turns per adapter.
 	// 0 means unlimited. Set via recipe ## Constraints max_steps:.
 	MaxSteps int
 
@@ -100,11 +91,6 @@ type Config struct {
 	// MaxHistoryTurns is the maximum number of conversation turns kept per model.
 	// Default is 20. Set via recipe ## Context max_history_turns:.
 	MaxHistoryTurns int
-
-	// Seed is the pseudorandom seed passed to model APIs for reproducible sampling.
-	// nil means not set (provider default); non-nil is passed through even if 0.
-	// Set via recipe ## Model Parameters seed: or /seed command.
-	Seed *int64
 
 }
 

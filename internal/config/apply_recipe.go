@@ -30,24 +30,6 @@ func ApplyRecipe(r *recipe.Recipe, cfg *Config) {
 		cfg.MCPServers = strings.Join(parts, ",")
 	}
 
-	// ── Sub-Agent ──
-	if r.HasSection("sub-agent") {
-		cfg.SubagentModel = r.SubAgent.Model
-		if r.SubAgent.MaxDepth == -1 {
-			// Section present but max_depth not mentioned → disable (0).
-			cfg.SubagentMaxDepth = 0
-		} else {
-			cfg.SubagentMaxDepth = r.SubAgent.MaxDepth
-		}
-	} else {
-		if r.SubAgent.Model != "" {
-			cfg.SubagentModel = r.SubAgent.Model
-		}
-		if r.SubAgent.MaxDepth >= 0 {
-			cfg.SubagentMaxDepth = r.SubAgent.MaxDepth
-		}
-	}
-
 	// ── Context ──
 	if r.HasSection("context") {
 		cfg.MaxHistoryTurns = r.Context.MaxHistoryTurns
@@ -72,12 +54,5 @@ func ApplyRecipe(r *recipe.Recipe, cfg *Config) {
 		if r.Constraints.Timeout > 0 {
 			cfg.AgentTimeout = r.Constraints.Timeout
 		}
-	}
-
-	// ── Model Parameters ──
-	if r.HasSection("model parameters") {
-		cfg.Seed = r.ModelParams.Seed // nil if not mentioned → clears default
-	} else if r.ModelParams.Seed != nil {
-		cfg.Seed = r.ModelParams.Seed
 	}
 }

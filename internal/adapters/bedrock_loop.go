@@ -97,14 +97,6 @@ func runBedrockAgentLoop(
 			System:     systemBlocks,
 			ToolConfig: toolConfig,
 		}
-		// Approximate reproducibility via temperature=0 when seed is set.
-		if _, ok := tools.SeedFromContext(ctx); ok {
-			zero := float32(0)
-			input.InferenceConfig = &bedrocktypes.InferenceConfiguration{
-				Temperature: &zero,
-			}
-		}
-
 		EmitRequest(ctx, onEvent, input)
 		resp, err := cfg.client.Converse(ctx, input)
 		if err != nil {

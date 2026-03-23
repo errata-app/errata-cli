@@ -550,14 +550,6 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 			}
 		}
 
-		if rec.ModelParams.Temperature != nil || rec.ModelParams.MaxTokens != nil || rec.ModelParams.Seed != nil {
-			snap.ModelParams = &recipestore.ModelParamsConfig{
-				Temperature: rec.ModelParams.Temperature,
-				MaxTokens:   rec.ModelParams.MaxTokens,
-				Seed:        rec.ModelParams.Seed,
-			}
-		}
-
 		if rec.Context.MaxHistoryTurns > 0 || rec.Context.Strategy != "" ||
 			rec.Context.CompactThreshold > 0 || rec.Context.TaskMode != "" {
 			snap.Context = &recipestore.ContextConfig{
@@ -565,17 +557,6 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 				Strategy:         rec.Context.Strategy,
 				CompactThreshold: rec.Context.CompactThreshold,
 				TaskMode:         rec.Context.TaskMode,
-			}
-		}
-
-		if len(rec.SystemReminders) > 0 {
-			snap.SystemReminders = make([]recipestore.SystemReminderConfig, len(rec.SystemReminders))
-			for i, r := range rec.SystemReminders {
-				snap.SystemReminders[i] = recipestore.SystemReminderConfig{
-					Name:    r.Name,
-					Trigger: r.Trigger,
-					Content: r.Content,
-				}
 			}
 		}
 
