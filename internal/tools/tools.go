@@ -19,32 +19,15 @@ const (
 	SpawnAgentToolName = "spawn_agent"
 )
 
-// SubagentEnabled gates all user-facing sub-agent functionality.
-// When false, spawn_agent is excluded from Definitions, the config panel
-// omits the sub-agent section, and dispatcher wiring is skipped.
-// Set to true to re-enable the feature.
-const SubagentEnabled = false
-
-// HooksEnabled gates lifecycle event hooks.
-// When false, the config panel omits the hooks section and hook execution
-// is skipped. Recipe parsing is unaffected. Set to true to activate.
-const HooksEnabled = false
-
-// RemindersEnabled gates conditional mid-conversation system reminders.
-// When false, the config panel omits the reminders section and reminder
-// state is not initialised. Recipe parsing is unaffected. Set to true to activate.
-const RemindersEnabled = false
-
 func init() {
-	if !SubagentEnabled {
-		filtered := Definitions[:0]
-		for _, d := range Definitions {
-			if d.Name != SpawnAgentToolName {
-				filtered = append(filtered, d)
-			}
+	// Remove spawn_agent from Definitions (sub-agent feature not yet enabled).
+	filtered := Definitions[:0]
+	for _, d := range Definitions {
+		if d.Name != SpawnAgentToolName {
+			filtered = append(filtered, d)
 		}
-		Definitions = filtered
 	}
+	Definitions = filtered
 }
 
 // maxReadLines is the hard cap on lines returned by ExecuteRead.
@@ -328,24 +311,6 @@ func WithMaxSteps(ctx context.Context, n int) context.Context {
 func MaxStepsFromContext(ctx context.Context) int {
 	v, _ := ctx.Value(maxStepsKey{}).(int)
 	return v
-}
-
-// ─── Seed support ─────────────────────────────────────────────────────────────
-
-// seedKey is the context key for the pseudorandom seed.
-type seedKey struct{}
-
-// WithSeed returns a context carrying the given seed value.
-// Adapters call SeedFromContext to retrieve it for API calls.
-func WithSeed(ctx context.Context, seed int64) context.Context {
-	return context.WithValue(ctx, seedKey{}, seed)
-}
-
-// SeedFromContext returns the seed stored in ctx and true,
-// or (0, false) if no seed was set.
-func SeedFromContext(ctx context.Context) (int64, bool) {
-	v, ok := ctx.Value(seedKey{}).(int64)
-	return v, ok
 }
 
 // ─── Sub-agent support ────────────────────────────────────────────────────────

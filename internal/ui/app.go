@@ -23,7 +23,6 @@ import (
 	"github.com/errata-app/errata-cli/internal/datastore"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
-	"github.com/errata-app/errata-cli/internal/reminders"
 	"github.com/errata-app/errata-cli/internal/runner"
 	"github.com/errata-app/errata-cli/internal/session"
 	"github.com/errata-app/errata-cli/internal/tools"
@@ -174,13 +173,6 @@ type App struct {
 	pastedLineCount int    // line count for badge display
 
 
-	// seed for reproducible model sampling; nil = not set
-	seed *int64
-
-	// reminderState tracks conditional mid-conversation injection state.
-	// nil when no reminders are configured in the recipe.
-	reminderState *reminders.State
-
 	// apiClient is the errata.app API client, injected for testability.
 	apiClient *api.Client
 
@@ -245,7 +237,6 @@ func New(adapterList []models.ModelAdapter, cfg config.Config, mcpDefs []tools.T
 		mcpDefs: mcpDefs,
 		mcpDispatchers: mcpDispatchers,
 		providerModels: providerModels,
-		seed:           cfg.Seed,
 		apiClient:      api.NewClient(),
 		debugLog:       debugLog,
 		store:          store,
@@ -259,20 +250,6 @@ func New(adapterList []models.ModelAdapter, cfg config.Config, mcpDefs []tools.T
 		app.sandboxFilesystem = rec.Sandbox.Filesystem
 		app.sandboxNetwork = rec.Sandbox.Network
 		app.projectRoot = rec.Metadata.ProjectRoot
-		if tools.RemindersEnabled && len(rec.SystemReminders) > 0 {
-			var rs []reminders.Reminder
-			for _, cfg := range rec.SystemReminders {
-				tr, err := reminders.ParseTrigger(cfg.Trigger)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: skipping reminder %q: %v\n", cfg.Name, err)
-					continue
-				}
-				rs = append(rs, reminders.Reminder{Name: cfg.Name, Trigger: tr, Content: cfg.Content})
-			}
-			if len(rs) > 0 {
-				app.reminderState = reminders.NewState(rs)
-			}
-		}
 	}
 	return app
 }

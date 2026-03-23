@@ -50,14 +50,6 @@ func runAnthropicAgentLoop(
 	var totalInput, totalOutput int64
 	start := time.Now()
 
-	// Anthropic does not support a seed parameter. If a seed is set,
-	// use temperature 0 as a best-effort approximation for determinism.
-	var temperature *float64
-	if _, hasSeed := tools.SeedFromContext(ctx); hasSeed {
-		zero := 0.0
-		temperature = &zero
-	}
-
 	maxSteps := tools.MaxStepsFromContext(ctx)
 	step := 0
 	for {
@@ -75,9 +67,6 @@ func runAnthropicAgentLoop(
 		}
 		if systemMsg != "" {
 			params.System = []anthropic.TextBlockParam{{Text: systemMsg}}
-		}
-		if temperature != nil {
-			params.Temperature = anthropic.Float(*temperature)
 		}
 		EmitRequest(ctx, onEvent, params)
 		resp, err := client.Messages.New(ctx, params)

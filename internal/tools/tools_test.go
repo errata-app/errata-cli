@@ -220,25 +220,6 @@ func TestMCPDispatchersFromContext_NilWhenAbsent(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-func TestWithSeed_RoundTrip(t *testing.T) {
-	ctx := tools.WithSeed(context.Background(), 12345)
-	seed, ok := tools.SeedFromContext(ctx)
-	assert.True(t, ok)
-	assert.Equal(t, int64(12345), seed)
-}
-
-func TestSeedFromContext_FalseWhenAbsent(t *testing.T) {
-	_, ok := tools.SeedFromContext(context.Background())
-	assert.False(t, ok)
-}
-
-func TestWithSeed_ZeroValue(t *testing.T) {
-	ctx := tools.WithSeed(context.Background(), 0)
-	seed, ok := tools.SeedFromContext(ctx)
-	assert.True(t, ok, "zero seed should still be present")
-	assert.Equal(t, int64(0), seed)
-}
-
 // ─── MaxSteps context ──────────────────────────────────────────────────────
 
 func TestWithMaxSteps_RoundTrip(t *testing.T) {

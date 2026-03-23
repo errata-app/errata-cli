@@ -43,23 +43,10 @@ type scalarField struct {
 
 // interactiveSections lists the section names shown in /config for interactive
 // sessions. Tasks and SuccessCriteria are hidden.
-var interactiveSections = func() []string {
-	s := []string{
-		"models", "system-prompt", "tools", "mcp-servers",
-		"parameters", "constraints", "context",
-	}
-	if tools.SubagentEnabled {
-		s = append(s, "sub-agent")
-	}
-	s = append(s, "sandbox")
-	if tools.RemindersEnabled {
-		s = append(s, "reminders")
-	}
-	if tools.HooksEnabled {
-		s = append(s, "hooks")
-	}
-	return s
-}()
+var interactiveSections = []string{
+	"models", "system-prompt", "tools", "mcp-servers",
+	"constraints", "context", "sandbox",
+}
 
 // ── section descriptions ─────────────────────────────────────────────────────
 
@@ -127,21 +114,9 @@ func buildConfigSections(rec *recipe.Recipe, adapters []models.ModelAdapter, dis
 		{Name: "system-prompt", Summary: summarizeSystemPrompt(rec), Kind: "text", Path: "system_prompt"},
 		{Name: "tools", Summary: summarizeTools(rec, disabled), Kind: "list"},
 		{Name: "mcp-servers", Summary: summarizeMCPServers(rec), Kind: "list"},
-		{Name: "parameters", Summary: summarizeParameters(rec), Kind: "scalar"},
 		{Name: "constraints", Summary: summarizeConstraints(rec), Kind: "scalar"},
 		{Name: "context", Summary: summarizeContext(rec), Kind: "scalar"},
-	}
-	if tools.SubagentEnabled {
-		sections = append(sections, configSection{Name: "sub-agent", Summary: summarizeSubAgent(rec), Kind: "scalar"})
-	}
-	sections = append(sections,
-		configSection{Name: "sandbox", Summary: summarizeSandbox(rec), Kind: "scalar"},
-	)
-	if tools.RemindersEnabled {
-		sections = append(sections, configSection{Name: "reminders", Summary: summarizeReminders(rec), Kind: "list"})
-	}
-	if tools.HooksEnabled {
-		sections = append(sections, configSection{Name: "hooks", Summary: summarizeHooks(rec), Kind: "list"})
+		{Name: "sandbox", Summary: summarizeSandbox(rec), Kind: "scalar"},
 	}
 	for i := range sections {
 		if desc, ok := sectionDescriptions[sections[i].Name]; ok {
@@ -210,23 +185,6 @@ func summarizeMCPServers(rec *recipe.Recipe) string {
 	return fmt.Sprintf("%d configured (%s)", len(names), strings.Join(names, ", "))
 }
 
-func summarizeParameters(rec *recipe.Recipe) string {
-	var parts []string
-	if rec.ModelParams.Seed != nil {
-		parts = append(parts, fmt.Sprintf("seed: %d", *rec.ModelParams.Seed))
-	}
-	if rec.ModelParams.Temperature != nil {
-		parts = append(parts, fmt.Sprintf("temperature: %.1f", *rec.ModelParams.Temperature))
-	}
-	if rec.ModelParams.MaxTokens != nil {
-		parts = append(parts, fmt.Sprintf("max_tokens: %d", *rec.ModelParams.MaxTokens))
-	}
-	if len(parts) == 0 {
-		return "(defaults: seed=none, temperature/max_tokens=provider)"
-	}
-	return strings.Join(parts, ", ")
-}
-
 func summarizeConstraints(rec *recipe.Recipe) string {
 	var parts []string
 	if rec.Constraints.Timeout > 0 {
@@ -258,23 +216,6 @@ func summarizeContext(rec *recipe.Recipe) string {
 	return strings.Join(parts, ", ")
 }
 
-func summarizeSubAgent(rec *recipe.Recipe) string {
-	var parts []string
-	if rec.SubAgent.Model != "" {
-		parts = append(parts, rec.SubAgent.Model)
-	}
-	if rec.SubAgent.MaxDepth >= 0 {
-		parts = append(parts, fmt.Sprintf("depth: %d", rec.SubAgent.MaxDepth))
-	}
-	if rec.SubAgent.Tools != "" {
-		parts = append(parts, "tools: "+rec.SubAgent.Tools)
-	}
-	if len(parts) == 0 {
-		return "(defaults: model=parent, depth=1, tools=all)"
-	}
-	return strings.Join(parts, ", ")
-}
-
 func summarizeSandbox(rec *recipe.Recipe) string {
 	var parts []string
 	if rec.Sandbox.Filesystem != "" {
@@ -287,28 +228,6 @@ func summarizeSandbox(rec *recipe.Recipe) string {
 		return "(defaults: filesystem=unrestricted, network=full)"
 	}
 	return strings.Join(parts, ", ")
-}
-
-func summarizeReminders(rec *recipe.Recipe) string {
-	if len(rec.SystemReminders) == 0 {
-		return "(none)"
-	}
-	var names []string
-	for _, r := range rec.SystemReminders {
-		names = append(names, r.Name)
-	}
-	return fmt.Sprintf("%d configured (%s)", len(names), strings.Join(names, ", "))
-}
-
-func summarizeHooks(rec *recipe.Recipe) string {
-	if len(rec.Hooks) == 0 {
-		return "(none)"
-	}
-	var names []string
-	for _, h := range rec.Hooks {
-		names = append(names, h.Name)
-	}
-	return fmt.Sprintf("%d configured (%s)", len(names), strings.Join(names, ", "))
 }
 
 // ── list/scalar data builders ───────────────────────────────────────────────
@@ -420,38 +339,8 @@ func buildToolsList(allowlist []string, disabled map[string]bool) []listItem {
 	return items
 }
 
-func buildRemindersList(rec *recipe.Recipe) []listItem {
-	items := make([]listItem, 0, len(rec.SystemReminders))
-	for _, r := range rec.SystemReminders {
-		label := r.Name
-		if r.Trigger != "" {
-			label += " (" + r.Trigger + ")"
-		}
-		items = append(items, listItem{Label: label, Active: true})
-	}
-	return items
-}
-
-func buildHooksList(rec *recipe.Recipe) []listItem {
-	items := make([]listItem, 0, len(rec.Hooks))
-	for _, h := range rec.Hooks {
-		label := h.Name + " [" + h.Event + "]"
-		if h.Matcher != "" {
-			label += " matcher=" + h.Matcher
-		}
-		items = append(items, listItem{Label: label, Active: true})
-	}
-	return items
-}
-
 func buildScalarFields(sectionName string, rec *recipe.Recipe) []scalarField {
 	switch sectionName {
-	case "parameters":
-		return []scalarField{
-			{Key: "seed", Path: "parameters.seed", Value: configPathGet(rec, "parameters.seed")},
-			{Key: "temperature", Path: "parameters.temperature", Value: configPathGet(rec, "parameters.temperature")},
-			{Key: "max_tokens", Path: "parameters.max_tokens", Value: configPathGet(rec, "parameters.max_tokens")},
-		}
 	case "constraints":
 		return []scalarField{
 			{Key: "timeout", Path: "constraints.timeout", Value: configPathGet(rec, "constraints.timeout")},
@@ -462,15 +351,6 @@ func buildScalarFields(sectionName string, rec *recipe.Recipe) []scalarField {
 			{Key: "strategy", Path: "context.strategy", Value: configPathGet(rec, "context.strategy")},
 			{Key: "max_history_turns", Path: "context.max_history_turns", Value: configPathGet(rec, "context.max_history_turns")},
 			{Key: "compact_threshold", Path: "context.compact_threshold", Value: configPathGet(rec, "context.compact_threshold")},
-		}
-	case "sub-agent":
-		if !tools.SubagentEnabled {
-			return nil
-		}
-		return []scalarField{
-			{Key: "model", Path: "sub_agent.model", Value: configPathGet(rec, "sub_agent.model")},
-			{Key: "max_depth", Path: "sub_agent.max_depth", Value: configPathGet(rec, "sub_agent.max_depth")},
-			{Key: "tools", Path: "sub_agent.tools", Value: configPathGet(rec, "sub_agent.tools")},
 		}
 	case "sandbox":
 		return []scalarField{
@@ -608,66 +488,6 @@ var configPaths = map[string]configPathEntry{
 			return fmt.Errorf("unknown network %q (valid: full, none)", v)
 		},
 	},
-	"parameters.seed": {
-		Get: func(r *recipe.Recipe) string {
-			if r.ModelParams.Seed == nil {
-				return ""
-			}
-			return strconv.FormatInt(*r.ModelParams.Seed, 10)
-		},
-		Set: func(r *recipe.Recipe, v string) error {
-			if v == "" {
-				r.ModelParams.Seed = nil
-				return nil
-			}
-			n, err := strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				return fmt.Errorf("invalid integer %q", v)
-			}
-			r.ModelParams.Seed = &n
-			return nil
-		},
-	},
-	"parameters.temperature": {
-		Get: func(r *recipe.Recipe) string {
-			if r.ModelParams.Temperature == nil {
-				return ""
-			}
-			return strconv.FormatFloat(*r.ModelParams.Temperature, 'f', -1, 64)
-		},
-		Set: func(r *recipe.Recipe, v string) error {
-			if v == "" {
-				r.ModelParams.Temperature = nil
-				return nil
-			}
-			f, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				return fmt.Errorf("invalid float %q", v)
-			}
-			r.ModelParams.Temperature = &f
-			return nil
-		},
-	},
-	"parameters.max_tokens": {
-		Get: func(r *recipe.Recipe) string {
-			if r.ModelParams.MaxTokens == nil {
-				return ""
-			}
-			return strconv.Itoa(*r.ModelParams.MaxTokens)
-		},
-		Set: func(r *recipe.Recipe, v string) error {
-			if v == "" {
-				r.ModelParams.MaxTokens = nil
-				return nil
-			}
-			n, err := strconv.Atoi(v)
-			if err != nil || n <= 0 {
-				return fmt.Errorf("invalid positive integer %q", v)
-			}
-			r.ModelParams.MaxTokens = &n
-			return nil
-		},
-	},
 	"system_prompt": {
 		Get: func(r *recipe.Recipe) string { return r.SystemPrompt },
 		Set: func(r *recipe.Recipe, v string) error {
@@ -675,44 +495,6 @@ var configPaths = map[string]configPathEntry{
 			return nil
 		},
 	},
-}
-
-func init() {
-	if tools.SubagentEnabled {
-		configPaths["sub_agent.model"] = configPathEntry{
-			Get: func(r *recipe.Recipe) string { return r.SubAgent.Model },
-			Set: func(r *recipe.Recipe, v string) error {
-				r.SubAgent.Model = v
-				return nil
-			},
-		}
-		configPaths["sub_agent.max_depth"] = configPathEntry{
-			Get: func(r *recipe.Recipe) string {
-				if r.SubAgent.MaxDepth < 0 {
-					return ""
-				}
-				return strconv.Itoa(r.SubAgent.MaxDepth)
-			},
-			Set: func(r *recipe.Recipe, v string) error {
-				n, err := strconv.Atoi(v)
-				if err != nil || n < 0 {
-					return fmt.Errorf("invalid integer %q", v)
-				}
-				r.SubAgent.MaxDepth = n
-				return nil
-			},
-		}
-		configPaths["sub_agent.tools"] = configPathEntry{
-			Get: func(r *recipe.Recipe) string { return r.SubAgent.Tools },
-			Set: func(r *recipe.Recipe, v string) error {
-				r.SubAgent.Tools = v
-				return nil
-			},
-		}
-		configPathDefaults["sub_agent.model"] = "same as parent"
-		configPathDefaults["sub_agent.max_depth"] = "1"
-		configPathDefaults["sub_agent.tools"] = "all"
-	}
 }
 
 // configPathGet returns the current string value for a dot-path.
@@ -798,18 +580,6 @@ func cloneRecipe(r *recipe.Recipe) *recipe.Recipe {
 	if r.SuccessCriteria != nil {
 		clone.SuccessCriteria = append([]string(nil), r.SuccessCriteria...)
 	}
-	if r.ModelParams.Seed != nil {
-		v := *r.ModelParams.Seed
-		clone.ModelParams.Seed = &v
-	}
-	if r.ModelParams.Temperature != nil {
-		v := *r.ModelParams.Temperature
-		clone.ModelParams.Temperature = &v
-	}
-	if r.ModelParams.MaxTokens != nil {
-		v := *r.ModelParams.MaxTokens
-		clone.ModelParams.MaxTokens = &v
-	}
 	return &clone
 }
 
@@ -831,9 +601,6 @@ func (a *App) applySessionRecipe() {
 	a.sandboxNetwork = rec.Sandbox.Network
 	if rec.Metadata.ProjectRoot != "" {
 		a.projectRoot = rec.Metadata.ProjectRoot
-	}
-	if rec.ModelParams.Seed != nil {
-		a.seed = rec.ModelParams.Seed
 	}
 	if rec.Constraints.Timeout > 0 {
 		a.cfg.AgentTimeout = rec.Constraints.Timeout
@@ -1100,10 +867,6 @@ func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //no
 					items = append(items, listItem{Label: s.Name + ": " + s.Command, Active: true})
 				}
 				a.configListItems = items
-			case "reminders":
-				a.configListItems = buildRemindersList(sessRec)
-			case "hooks":
-				a.configListItems = buildHooksList(sessRec)
 			}
 			a.configListCursor = 0
 			a.configListOffset = 0

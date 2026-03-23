@@ -55,9 +55,6 @@ func init() {
 	}
 }
 
-// spawnAgentGuidance is appended to toolUseGuidance only when SubagentEnabled is true.
-const spawnAgentGuidance = `- Use spawn_agent to delegate a focused sub-task to another agent. Specify a role ('explorer' for read-only, 'planner' for read+bash, 'coder' for full tools). Sub-agent writes bubble up automatically.`
-
 // buildGuidance returns the guidance text filtered to only include lines whose
 // tagged tools overlap with activeNames. An empty map means "zero tools active"
 // and returns no guidance.
@@ -144,11 +141,6 @@ func effectiveGuidanceForCtx(ctx context.Context) string {
 		base = buildGuidance(nameSet)
 	}
 
-	if SubagentEnabled {
-		if nameSet[SpawnAgentToolName] {
-			return base + spawnAgentGuidance + "\n"
-		}
-	}
 	return base
 }
 
@@ -156,11 +148,7 @@ func effectiveGuidanceForCtx(ctx context.Context) string {
 // This is the same guidance as in SystemPromptSuffix but without the
 // user-authored extra. Returns full unfiltered guidance (no context).
 func SystemPromptGuidance() string {
-	base := toolUseGuidance
-	if SubagentEnabled {
-		return base + spawnAgentGuidance + "\n"
-	}
-	return base
+	return toolUseGuidance
 }
 
 // SystemPromptSuffix returns guidance text appended to each adapter's system prompt
