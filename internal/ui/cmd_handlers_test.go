@@ -310,7 +310,7 @@ func TestHandlePullCommand_NoArgs(t *testing.T) {
 func TestHandlePullCommand_Success(t *testing.T) {
 	recipeContent := "# Pulled Recipe\nversion: 1\n\n## Models\n- alpha\n"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/recipes/alice/cool-recipe/raw", r.URL.Path)
+		assert.Equal(t, "/api/v1/recipes/alice/cool-recipe/raw", r.URL.Path)
 		w.Header().Set("Content-Type", "text/markdown")
 		w.Write([]byte(recipeContent))
 	}))
@@ -353,7 +353,7 @@ func TestHandleSyncCommand_NotLoggedIn(t *testing.T) {
 func TestHandleSyncCommand_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "POST", r.Method)
-		assert.Equal(t, "/preferences", r.URL.Path)
+		assert.Equal(t, "/api/v1/preferences", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]int{"accepted": 3})
 	}))

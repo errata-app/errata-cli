@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	BaseURL      = "https://errata.app"
+	BaseURL       = "https://errata.app"
+	APIPrefix     = "/api/v1"
 	maxRecipeSize = 1 << 20 // 1 MB
 )
 
@@ -152,8 +153,9 @@ func (c *Client) IsLoggedIn() bool {
 }
 
 // do executes an HTTP request with auth and returns the response.
+// path should NOT include the /api/v1 prefix — it is added automatically.
 func (c *Client) do(method, path string, body io.Reader, contentType string) (*http.Response, error) {
-	u := c.baseURL + path
+	u := c.baseURL + APIPrefix + path
 	req, err := http.NewRequest(method, u, body)
 	if err != nil {
 		return nil, err
@@ -330,5 +332,5 @@ func (c *Client) DeleteRecipe(id string) error {
 
 // AuthLoginURL returns the URL to open in a browser to start the OAuth flow.
 func AuthLoginURL(cliPort int) string {
-	return fmt.Sprintf("%s/auth/github?cli_port=%d", BaseURL, cliPort)
+	return fmt.Sprintf("%s%s/auth/github?cli_port=%d", BaseURL, APIPrefix, cliPort)
 }
