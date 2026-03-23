@@ -15,7 +15,7 @@ import (
 func TestUploadPreferences_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "POST", r.Method)
-		assert.Equal(t, "/preferences", r.URL.Path)
+		assert.Equal(t, "/api/v1/preferences", r.URL.Path)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 

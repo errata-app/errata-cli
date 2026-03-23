@@ -98,7 +98,7 @@ func TestSlugFromRef(t *testing.T) {
 func TestMe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "GET", r.Method)
-		assert.Equal(t, "/auth/me", r.URL.Path)
+		assert.Equal(t, "/api/v1/auth/me", r.URL.Path)
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(User{
@@ -136,7 +136,7 @@ func TestMe_Unauthorized(t *testing.T) {
 
 func TestGetRecipeRaw_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/recipes/alice/my-recipe/raw", r.URL.Path)
+		assert.Equal(t, "/api/v1/recipes/alice/my-recipe/raw", r.URL.Path)
 		w.Header().Set("Content-Type", "text/markdown")
 		w.Write([]byte("# My Recipe\nversion: 1\n"))
 	}))
@@ -168,7 +168,7 @@ func TestGetRecipeRaw_NotFound(t *testing.T) {
 func TestCreateRecipe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "POST", r.Method)
-		assert.Equal(t, "/recipes", r.URL.Path)
+		assert.Equal(t, "/api/v1/recipes", r.URL.Path)
 		assert.Equal(t, "text/markdown", r.Header.Get("Content-Type"))
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(RecipeEntry{
@@ -195,7 +195,7 @@ func TestLogout_Success(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "POST", r.Method)
-		assert.Equal(t, "/auth/logout", r.URL.Path)
+		assert.Equal(t, "/api/v1/auth/logout", r.URL.Path)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
@@ -209,7 +209,7 @@ func TestLogout_Success(t *testing.T) {
 
 func TestGetRecipe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/recipes/alice/code-review", r.URL.Path)
+		assert.Equal(t, "/api/v1/recipes/alice/code-review", r.URL.Path)
 		json.NewEncoder(w).Encode(RecipeEntry{
 			ID:             "r2",
 			Name:           "Code Review",
@@ -231,7 +231,7 @@ func TestGetRecipe_Success(t *testing.T) {
 func TestDeleteRecipe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "DELETE", r.Method)
-		assert.Equal(t, "/recipes/r1", r.URL.Path)
+		assert.Equal(t, "/api/v1/recipes/r1", r.URL.Path)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
@@ -245,7 +245,7 @@ func TestDeleteRecipe_Success(t *testing.T) {
 func TestUpdateRecipe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "PUT", r.Method)
-		assert.Equal(t, "/recipes/r1", r.URL.Path)
+		assert.Equal(t, "/api/v1/recipes/r1", r.URL.Path)
 		assert.Equal(t, "text/markdown", r.Header.Get("Content-Type"))
 		json.NewEncoder(w).Encode(RecipeEntry{
 			ID:             "r1",
