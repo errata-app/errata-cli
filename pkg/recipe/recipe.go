@@ -118,47 +118,16 @@ type OutputRuleConfig struct {
 	TruncationMessage string // template with {line_count}, {token_count}
 }
 
-// ─── Runner (version-pinned execution) ──────────────────────────────────────
-
-// Runner encapsulates version-specific recipe execution behavior.
-// Each recipe version maps to its own Runner implementation, ensuring
-// that a recipe's runtime behavior is pinned to the version it was written for.
-type Runner interface {
-	// Version returns the recipe format version this runner implements.
-	Version() int
-	// Recipe returns the underlying recipe configuration.
-	Recipe() *Recipe
-}
-
-// v1Runner implements Runner for version 1 recipes.
-type v1Runner struct {
-	recipe *Recipe
-}
-
-// NewV1Runner creates a Runner for a version 1 recipe.
-func NewV1Runner(r *Recipe) (Runner, error) {
-	if r.Version != 1 {
-		return nil, fmt.Errorf("NewV1Runner: expected version 1, got %d", r.Version)
-	}
-	return &v1Runner{recipe: r}, nil
-}
-
-func (v *v1Runner) Version() int    { return 1 }
-func (v *v1Runner) Recipe() *Recipe { return v.recipe }
-
-// BuildRunner creates a version-specific Runner for this recipe.
-// Returns an error if the recipe version is unsupported.
-func (r *Recipe) BuildRunner() (Runner, error) {
-	switch r.Version {
-	case 1:
-		return NewV1Runner(r)
-	default:
-		return nil, fmt.Errorf("unsupported recipe version %d (max supported: %d)", r.Version, MaxVersion)
-	}
-}
-
 // MaxVersion is the highest recipe version supported by this binary.
 const MaxVersion = 1
+
+// ValidateVersion returns an error if the recipe version is unsupported.
+func (r *Recipe) ValidateVersion() error {
+	if r.Version < 1 || r.Version > MaxVersion {
+		return fmt.Errorf("unsupported recipe version %d (max supported: %d)", r.Version, MaxVersion)
+	}
+	return nil
+}
 
 // HasSection reports whether the named section (lowercase) was declared in the
 // parsed recipe file. Returns false when SectionsPresent is nil, which is the
