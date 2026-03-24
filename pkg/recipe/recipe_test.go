@@ -237,6 +237,30 @@ func TestMarshalMarkdown_ToolsEmpty(t *testing.T) {
 	assert.Empty(t, rt.Tools.Allowlist, "round-tripped empty tools should have zero entries")
 }
 
+func TestParse_Tools_ThreeStateColon(t *testing.T) {
+	r, err := recipe.Parse(writeRecipe(t, v1(`
+## Tools
+- bash: Only run tests.
+- read_file:
+- search_code
+`)))
+	require.NoError(t, err)
+	require.NotNil(t, r.Tools)
+	assert.Equal(t, []string{"bash", "read_file", "search_code"}, r.Tools.Allowlist)
+
+	// "bash: Only run tests." → guidance present with text
+	assert.Equal(t, "Only run tests.", r.Tools.Guidance["bash"])
+
+	// "read_file:" → guidance present but empty (suppress)
+	val, exists := r.Tools.Guidance["read_file"]
+	assert.True(t, exists, "read_file: should be in guidance map")
+	assert.Empty(t, val, "read_file: should have empty guidance (suppress)")
+
+	// "search_code" → no colon, not in guidance map at all
+	_, exists = r.Tools.Guidance["search_code"]
+	assert.False(t, exists, "search_code should not be in guidance map (no colon)")
+}
+
 func TestMarshalMarkdown_ToolsNil(t *testing.T) {
 	r := &recipe.Recipe{
 		Version: 1,
@@ -450,24 +474,6 @@ func TestHasSection_NilMap(t *testing.T) {
 	assert.False(t, r.HasSection("context"))
 }
 
-// ─── Gap 2: Tool Descriptions ────────────────────────────────────────────────
-
-func TestParse_ToolDescriptions(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Tool Descriptions
-### bash
-Use bash for tests and builds.
-Always check exit codes.
-
-### read_file
-Read files to understand code.
-`)))
-	require.NoError(t, err)
-	require.Len(t, r.ToolDescriptions, 2)
-	assert.Contains(t, r.ToolDescriptions["bash"], "Always check exit codes")
-	assert.Contains(t, r.ToolDescriptions["read_file"], "Read files")
-}
-
 // ─── Gap 3: Sub-Agent Modes ─────────────────────────────────────────────────
 
 // ─── Gap 6: Summarization Prompt ─────────────────────────────────────────────
@@ -618,7 +624,6 @@ seed: 42
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
 	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
 
-	assert.Len(t, r.ToolDescriptions, 1)
 	assert.Len(t, r.ModelProfiles, 1)
 	assert.NotEmpty(t, r.SummarizationPrompt)
 	assert.Len(t, r.OutputProcessing, 1)
@@ -638,13 +643,6 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Equal(t, 1, r.Version)
 	assert.Equal(t, "My Project Recipe", r.Name)
 	assert.Len(t, r.Models, 3)
-
-	// Tool Descriptions
-	require.NotNil(t, r.ToolDescriptions)
-	assert.Contains(t, r.ToolDescriptions, "bash")
-	assert.Contains(t, r.ToolDescriptions, "read_file")
-	assert.Contains(t, r.ToolDescriptions, "search_code")
-	assert.Contains(t, r.ToolDescriptions["bash"], "exit codes")
 
 	// Context Summarization Prompt
 	assert.Contains(t, r.SummarizationPrompt, "Summarize this conversation")
@@ -723,7 +721,6 @@ func TestParse_EmptyNewSections(t *testing.T) {
 ## Hooks
 `)))
 	require.NoError(t, err)
-	assert.Nil(t, r.ToolDescriptions)
 	assert.Nil(t, r.ModelProfiles)
 }
 

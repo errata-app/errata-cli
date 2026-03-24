@@ -534,7 +534,9 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 		if rec.Tools != nil {
 			snap.ToolGuidance = rec.Tools.Guidance
 		}
-		snap.ToolDescriptions = rec.ToolDescriptions
+		if rec.Tools != nil {
+			snap.ToolDescriptions = rec.Tools.Guidance
+		}
 		snap.SummarizationPrompt = rec.SummarizationPrompt
 
 		if rec.Tools != nil {

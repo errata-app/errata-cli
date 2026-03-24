@@ -111,6 +111,9 @@ func buildGuidanceWithOverrides(activeNames map[string]bool, overrides map[strin
 		seen[i] = true
 		// Check if the first tagged tool has an override.
 		if override, ok := overrides[g.tools[0]]; ok {
+			if override == "" {
+				continue // empty override = suppress this guidance line
+			}
 			lines = append(lines, "- "+override)
 		} else {
 			lines = append(lines, g.text)

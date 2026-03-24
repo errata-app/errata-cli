@@ -661,7 +661,6 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 			BashPrefixes: []string{"go test"},
 			Guidance:     map[string]string{"bash": "use tools wisely"},
 		},
-		ToolDescriptions:    map[string]string{"bash": "run commands"},
 		Constraints:         recipe.ConstraintsConfig{MaxSteps: 5, Timeout: 3 * time.Minute},
 		Context:             recipe.ContextConfig{MaxHistoryTurns: 10, Strategy: "auto_compact", CompactThreshold: 0.8, TaskMode: "sequential"},
 		OutputProcessing:    map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
@@ -677,7 +676,7 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 	assert.Equal(t, "be helpful", snap.SystemPrompt)
 	assert.Equal(t, map[string]string{"bash": "use tools wisely"}, snap.ToolGuidance)
 	assert.Equal(t, []string{"go test"}, snap.BashPrefixes)
-	assert.Equal(t, map[string]string{"bash": "run commands"}, snap.ToolDescriptions)
+	assert.Equal(t, map[string]string{"bash": "use tools wisely"}, snap.ToolDescriptions)
 	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
 	assert.Equal(t, "summarize it", snap.SummarizationPrompt)
 	require.NotNil(t, snap.Constraints)
