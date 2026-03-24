@@ -587,6 +587,7 @@ func cloneRecipe(r *recipe.Recipe) *recipe.Recipe {
 
 // applySessionRecipe syncs the session recipe overrides back to the App's
 // runtime fields so that subsequent runs use the updated configuration.
+// Also persists the session recipe to disk so changes survive a restart.
 func (a *App) applySessionRecipe() {
 	rec := a.store.SessionRecipe()
 	if rec == nil {
@@ -602,6 +603,7 @@ func (a *App) applySessionRecipe() {
 	if rec.Constraints.ProjectRoot != "" {
 		a.projectRoot = rec.Constraints.ProjectRoot
 	}
+	a.store.PersistSessionRecipe()
 }
 
 // syncToolAllowlist rebuilds the session recipe's tool allowlist from the
@@ -625,6 +627,7 @@ func (a *App) syncToolAllowlist() {
 	}
 	sessRec.Tools.Allowlist = allowlist
 	a.toolAllowlist = allowlist
+	a.store.PersistSessionRecipe()
 }
 
 // ── rendering ───────────────────────────────────────────────────────────────

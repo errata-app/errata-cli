@@ -326,6 +326,12 @@ func (s *Store) UpdateLastRunNote(note string) {
 	}
 }
 
+// PersistSessionRecipe writes the current session recipe to disk.
+// Safe to call when sessionRecipe is nil (no-op).
+func (s *Store) PersistSessionRecipe() {
+	s.persistSessionRecipe(s.sessionRecipe)
+}
+
 // persistSessionRecipe writes the recipe to the per-session recipe.md.
 func (s *Store) persistSessionRecipe(rec *recipe.Recipe) {
 	if s.sessionRecipePath == "" || rec == nil {

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -816,6 +817,48 @@ func TestApplySessionRecipe_NilRecipeIsNoop(t *testing.T) {
 
 	// Fields should be unchanged.
 	assert.Equal(t, "manual", a.contextStrategy)
+}
+
+func TestApplySessionRecipe_PersistsToDisk(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+
+	// Open /config (creates session recipe clone).
+	a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
+
+	// Edit timeout on the session recipe.
+	sessRec := a.store.SessionRecipe()
+	sessRec.Constraints.Timeout = 9 * time.Minute
+	a.applySessionRecipe()
+
+	// The session recipe should be persisted to disk.
+	path := a.store.SessionRecipePath()
+	require.NotEmpty(t, path)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "9m0s", "persisted recipe should contain the edited timeout")
+}
+
+func TestConfigEdit_ReachesRunContext(t *testing.T) {
+	// Verify that a /config edit to the session recipe is read by
+	// the run closure via ActiveRecipe().
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+
+	// Create session recipe and edit strategy.
+	a.store.SetSessionRecipe(cloneRecipe(a.store.BaseRecipe()))
+	sessRec := a.store.SessionRecipe()
+	sessRec.Context.Strategy = "manual"
+	sessRec.Constraints.Timeout = 7 * time.Minute
+	sessRec.Constraints.MaxSteps = 42
+	a.applySessionRecipe()
+
+	// ActiveRecipe should return the edited session recipe.
+	active := a.store.ActiveRecipe()
+	require.NotNil(t, active)
+	assert.Equal(t, "manual", active.Context.Strategy)
+	assert.Equal(t, 7*time.Minute, active.Constraints.Timeout)
+	assert.Equal(t, 42, active.Constraints.MaxSteps)
 }
 
 func TestRenderConfigOverlay_ListFitsHeight(t *testing.T) {
