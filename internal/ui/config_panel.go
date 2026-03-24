@@ -602,15 +602,6 @@ func (a *App) applySessionRecipe() {
 	if rec.Constraints.ProjectRoot != "" {
 		a.projectRoot = rec.Constraints.ProjectRoot
 	}
-	if rec.Constraints.Timeout > 0 {
-		a.cfg.AgentTimeout = rec.Constraints.Timeout
-	}
-	if rec.Context.MaxHistoryTurns > 0 {
-		a.cfg.MaxHistoryTurns = rec.Context.MaxHistoryTurns
-	}
-	if rec.Context.CompactThreshold > 0 {
-		a.cfg.CompactThreshold = rec.Context.CompactThreshold
-	}
 }
 
 // syncToolAllowlist rebuilds the session recipe's tool allowlist from the

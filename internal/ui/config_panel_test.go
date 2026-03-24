@@ -746,18 +746,13 @@ func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
 	a.store.SetSessionRecipe(sessionRec)
 	a.applySessionRecipe()
 
-	// App fields.
+	// App fields synced from session recipe.
 	assert.Equal(t, []string{"read_file", "bash"}, a.toolAllowlist)
 	assert.Equal(t, []string{"go test", "go vet"}, a.bashPrefixes)
 	assert.Equal(t, "manual", a.contextStrategy)
 	assert.Equal(t, "project_only", a.sandboxFilesystem)
 	assert.Equal(t, "none", a.sandboxNetwork)
 	assert.Equal(t, "/opt/project", a.projectRoot)
-
-	// Config fields.
-	assert.Equal(t, 10*time.Minute, a.cfg.AgentTimeout)
-	assert.Equal(t, 30, a.cfg.MaxHistoryTurns)
-	assert.InDelta(t, 0.75, a.cfg.CompactThreshold, 1e-9)
 }
 
 func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
@@ -767,35 +762,40 @@ func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
 	ads := []models.ModelAdapter{uiStub{"m1"}}
 	a := newAppForTest(t, ads)
 
-	// Pre-populate with non-default values.
-	a.contextStrategy = "auto_compact"
-	a.sandboxFilesystem = "read_only"
-	a.sandboxNetwork = "full"
-	a.projectRoot = "/existing/root"
-	a.cfg.AgentTimeout = 7 * time.Minute
-	a.cfg.MaxHistoryTurns = 40
-	a.cfg.CompactThreshold = 0.90
-
-	// Session recipe with only Tools set.
-	sessionRec := &recipe.Recipe{
+	// Start from a full base recipe clone (matches real /config flow).
+	base := &recipe.Recipe{
+		Version: 1,
 		Tools: &recipe.ToolsConfig{
-			Allowlist: []string{"write_file"},
+			Allowlist: []string{"read_file", "bash"},
+		},
+		Constraints: recipe.ConstraintsConfig{
+			Timeout:     7 * time.Minute,
+			ProjectRoot: "/existing/root",
+		},
+		Context: recipe.ContextConfig{
+			Strategy:        "auto_compact",
+			MaxHistoryTurns: 40,
+		},
+		Sandbox: recipe.SandboxConfig{
+			Filesystem: "read_only",
+			Network:    "full",
 		},
 	}
-	a.store.SetSessionRecipe(sessionRec)
+	a.store.SetSessionRecipe(cloneRecipe(base))
+
+	// Edit only Tools on the session recipe.
+	sessRec := a.store.SessionRecipe()
+	sessRec.Tools.Allowlist = []string{"write_file"}
 	a.applySessionRecipe()
 
 	// Tools should have changed.
 	assert.Equal(t, []string{"write_file"}, a.toolAllowlist)
 
-	// All other fields should be preserved (zero values in recipe don't overwrite).
-	// Note: contextStrategy is always synced (even when zero), so it becomes "".
-	// sandboxFilesystem and sandboxNetwork are always synced too.
-	// projectRoot is only synced when non-empty.
+	// All other fields should be preserved from the full clone.
 	assert.Equal(t, "/existing/root", a.projectRoot)
-	assert.Equal(t, 7*time.Minute, a.cfg.AgentTimeout)
-	assert.Equal(t, 40, a.cfg.MaxHistoryTurns)
-	assert.InDelta(t, 0.90, a.cfg.CompactThreshold, 1e-9)
+	assert.Equal(t, "auto_compact", a.contextStrategy)
+	assert.Equal(t, "read_only", a.sandboxFilesystem)
+	assert.Equal(t, "full", a.sandboxNetwork)
 }
 
 func TestApplySessionRecipe_NilRecipeIsNoop(t *testing.T) {
