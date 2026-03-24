@@ -504,7 +504,7 @@ func FilterDefs(defs []ToolDef, disabled map[string]bool) []ToolDef {
 }
 
 // ApplyDescriptions returns a copy of defs with descriptions replaced from descs.
-// Tool names not present in descs are left unchanged.
+// Tool names not present in descs, or with empty values, are left unchanged.
 func ApplyDescriptions(defs []ToolDef, descs map[string]string) []ToolDef {
 	if len(descs) == 0 {
 		return defs
@@ -512,7 +512,7 @@ func ApplyDescriptions(defs []ToolDef, descs map[string]string) []ToolDef {
 	out := make([]ToolDef, len(defs))
 	copy(out, defs)
 	for i := range out {
-		if d, ok := descs[out[i].Name]; ok {
+		if d, ok := descs[out[i].Name]; ok && d != "" {
 			out[i].Description = d
 		}
 	}

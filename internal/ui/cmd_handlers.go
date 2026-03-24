@@ -304,10 +304,10 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	var recSystemPrompt string
 	var recToolGuidanceMap map[string]string
 	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
-		activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.ToolDescriptions)
 		sumPrompt = activeRec.SummarizationPrompt
 		recSystemPrompt = activeRec.SystemPrompt
 		if activeRec.Tools != nil {
+			activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.Tools.Guidance)
 			recToolGuidanceMap = activeRec.Tools.Guidance
 		}
 	}
@@ -532,10 +532,10 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	var resumeSystemPrompt string
 	var resumeToolGuidanceMap map[string]string
 	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
-		activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.ToolDescriptions)
 		resumeSumPrompt = resumeRec.SummarizationPrompt
 		resumeSystemPrompt = resumeRec.SystemPrompt
 		if resumeRec.Tools != nil {
+			activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.Tools.Guidance)
 			resumeToolGuidanceMap = resumeRec.Tools.Guidance
 		}
 	}

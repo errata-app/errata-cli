@@ -289,7 +289,9 @@ func buildActiveDefs(rec *recipe.Recipe, mcpDefs []tools.ToolDef) []tools.ToolDe
 	activeDefs := tools.DefinitionsAllowed(toolAllowlist, nil)
 	activeDefs = append(activeDefs, tools.FilterDefs(mcpDefs, nil)...)
 	// Apply recipe-level tool description overrides (uniform for all models).
-	activeDefs = tools.ApplyDescriptions(activeDefs, rec.ToolDescriptions)
+	if rec.Tools != nil {
+		activeDefs = tools.ApplyDescriptions(activeDefs, rec.Tools.Guidance)
+	}
 	// Apply sandbox restrictions.
 	if rec.Sandbox.Filesystem == "read_only" {
 		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{

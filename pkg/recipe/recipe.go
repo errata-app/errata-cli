@@ -50,9 +50,6 @@ type Recipe struct {
 	Tasks           []string
 	SuccessCriteria []string
 
-	// Uniform per-tool description overrides (applied to all models).
-	ToolDescriptions map[string]string // tool_name → description
-
 	// Context summarization prompt (applied to all models).
 	SummarizationPrompt string
 
@@ -79,8 +76,11 @@ type ToolsConfig struct {
 	// trimmed text starts with one of the listed prefix patterns.
 	// nil (with bash in Allowlist) means all bash commands are allowed.
 	BashPrefixes []string
-	// Guidance maps tool names to per-tool guidance text from "- name: guidance" format.
-	// nil means no per-tool guidance overrides (use code defaults).
+	// Guidance maps tool names to per-tool guidance/description text.
+	// Three states per tool:
+	//   - key absent: use code defaults for guidance and schema description
+	//   - key present, value "": suppress guidance from system prompt, keep default schema description
+	//   - key present, value non-empty: use as both system prompt guidance and schema description override
 	Guidance map[string]string
 }
 
@@ -322,15 +322,13 @@ func parseV1(data []byte) (*Recipe, error) {
 			r.Tasks = parseList(body)
 		case "success criteria":
 			r.SuccessCriteria = parseList(body)
-		case "tool descriptions":
-			r.ToolDescriptions = parseSubSectionMap(body)
 		case "context summarization prompt":
 			r.SummarizationPrompt = parseProse(body)
 		case "output processing":
 			r.OutputProcessing = parseOutputRules(body)
 		case "model profiles":
 			r.ModelProfiles = parseModelProfiles(body)
-		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata":
+		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata", "tool descriptions":
 			// Removed sections — silently ignored for backward compatibility.
 
 		default:
@@ -423,20 +421,6 @@ func splitOnPrefix(body, prefix string) []subSection {
 	return out
 }
 
-// parseMapProse extracts leading key: value lines from body, returning them as a map
-// parseSubSectionMap parses a section body into a map[name]content using ### sub-headers.
-func parseSubSectionMap(body string) map[string]string {
-	subs := splitSubSections(body)
-	if len(subs) == 0 {
-		return nil
-	}
-	m := make(map[string]string, len(subs))
-	for _, s := range subs {
-		m[s.name] = s.body
-	}
-	return m
-}
-
 // parseOutputRules parses ### sub-sections into OutputRuleConfig entries.
 func parseOutputRules(body string) map[string]OutputRuleConfig {
 	subs := splitSubSections(body)
@@ -509,6 +493,7 @@ func parseTools(body string) *ToolsConfig {
 	tc := &ToolsConfig{Allowlist: []string{}}
 	for _, item := range parseList(body) {
 		var name, guidance string
+		hasColon := false
 
 		if strings.HasPrefix(item, "bash(") {
 			// bash(prefix1, prefix2, ...): optional guidance
@@ -530,9 +515,11 @@ func parseTools(body string) *ToolsConfig {
 			// Check for guidance after ")"
 			rest := item[closeIdx+1:]
 			if after, ok := strings.CutPrefix(rest, ":"); ok {
+				hasColon = true
 				guidance = strings.TrimSpace(after)
 			}
 		} else if toolName, guidanceText, ok := strings.Cut(item, ":"); ok {
+			hasColon = true
 			name = strings.TrimSpace(toolName)
 			guidance = strings.TrimSpace(guidanceText)
 		} else {
@@ -540,11 +527,11 @@ func parseTools(body string) *ToolsConfig {
 		}
 
 		tc.Allowlist = append(tc.Allowlist, name)
-		if guidance != "" {
+		if hasColon {
 			if tc.Guidance == nil {
 				tc.Guidance = make(map[string]string)
 			}
-			tc.Guidance[name] = guidance
+			tc.Guidance[name] = guidance // "" = suppress, non-empty = override
 		}
 	}
 	return tc
