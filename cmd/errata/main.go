@@ -385,7 +385,6 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 		Recipe:         rec,
 		Adapters:       ads,
 		SessionID:      sessionID,
-		Cfg:            cfg,
 		OutputDir:      outputDir,
 		CheckpointPath: layout.Checkpoint,
 		Verbose:        verbose,

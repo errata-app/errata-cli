@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/errata-app/errata-cli/internal/adapters"
-	"github.com/errata-app/errata-cli/internal/config"
 	"github.com/errata-app/errata-cli/internal/headless"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/pkg/recipe"
@@ -108,6 +107,7 @@ func testRecipe(tasks []string, criteriaItems []string) *recipe.Recipe {
 		Models:          []string{"model-a", "model-b"},
 		Tasks:           tasks,
 		SuccessCriteria: criteriaItems,
+		Context:         recipe.ContextConfig{MaxHistoryTurns: 20},
 	}
 }
 
@@ -116,7 +116,6 @@ func testOpts(rec *recipe.Recipe, adapters []models.ModelAdapter, outputDir stri
 		Recipe:         rec,
 		Adapters:       adapters,
 		SessionID:      "test-session",
-		Cfg:            config.Config{MaxHistoryTurns: 20},
 		OutputDir:      outputDir,
 		CheckpointPath: filepath.Join(outputDir, "checkpoint.json"),
 		Stderr:         &bytes.Buffer{},
