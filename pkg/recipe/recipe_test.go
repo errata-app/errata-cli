@@ -474,19 +474,6 @@ func TestHasSection_NilMap(t *testing.T) {
 	assert.False(t, r.HasSection("context"))
 }
 
-// ─── Tool Descriptions (now silently ignored) ───────────────────────────────
-
-func TestParse_ToolDescriptions_Ignored(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Tool Descriptions
-### bash
-Use bash for tests and builds.
-`)))
-	require.NoError(t, err)
-	// ## Tool Descriptions is now silently ignored; guidance lives in ## Tools.
-	assert.Nil(t, r.Tools)
-}
-
 // ─── Gap 3: Sub-Agent Modes ─────────────────────────────────────────────────
 
 // ─── Gap 6: Summarization Prompt ─────────────────────────────────────────────

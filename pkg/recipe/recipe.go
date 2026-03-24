@@ -328,7 +328,7 @@ func parseV1(data []byte) (*Recipe, error) {
 			r.OutputProcessing = parseOutputRules(body)
 		case "model profiles":
 			r.ModelProfiles = parseModelProfiles(body)
-		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata", "tool descriptions":
+		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata":
 			// Removed sections — silently ignored for backward compatibility.
 
 		default:
