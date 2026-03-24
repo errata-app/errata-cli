@@ -194,10 +194,26 @@ func applyProjectRoot(rec *recipe.Recipe) {
 	}
 }
 
+// mcpConfigsFromRecipe converts recipe MCP server entries to mcp.ServerConfig.
+func mcpConfigsFromRecipe(rec *recipe.Recipe) []mcp.ServerConfig {
+	if rec == nil || len(rec.MCPServers) == 0 {
+		return nil
+	}
+	out := make([]mcp.ServerConfig, 0, len(rec.MCPServers))
+	for _, entry := range rec.MCPServers {
+		args := strings.Fields(entry.Command)
+		if len(args) == 0 {
+			continue
+		}
+		out = append(out, mcp.ServerConfig{Name: entry.Name, Args: args})
+	}
+	return out
+}
+
 // setupAdapters loads pricing, adapters, and MCP servers.
 // Returns adapters, warnings, MCP state (defs + dispatchers),
 // and a cleanup function the caller must defer.
-func setupAdapters(cfg config.Config, pricingCachePath, debugLog, sessionID string) (
+func setupAdapters(cfg config.Config, rec *recipe.Recipe, pricingCachePath, debugLog, sessionID string) (
 	ads []models.ModelAdapter,
 	warnings []string,
 	mcpDefs []tools.ToolDef,
@@ -220,7 +236,7 @@ func setupAdapters(cfg config.Config, pricingCachePath, debugLog, sessionID stri
 	}
 
 	// Start MCP servers (non-fatal — missing/broken servers are skipped with a warning).
-	if serverConfigs := mcp.ParseServerConfigs(cfg.MCPServers); len(serverConfigs) > 0 {
+	if serverConfigs := mcpConfigsFromRecipe(rec); len(serverConfigs) > 0 {
 		var mgr *mcp.Manager
 		var mcpWarnings []string
 		mcpDefs, mcpDispatchers, mcpWarnings, mgr = mcp.StartServers(serverConfigs, os.Environ())
@@ -294,7 +310,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Session: %s\n", sessionID)
 
-	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, layout.PricingCache, debugLogPath, sessionID)
+	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, rec, layout.PricingCache, debugLogPath, sessionID)
 	defer cleanup()
 
 	// Fetch available models from all configured providers (best-effort).
@@ -352,7 +368,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	// BashTimeout and AllowLocalFetch are wired through context at run sites.
 
 	sessionID := uid.New("ses_")
-	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, layout.PricingCache, debugLogPath, sessionID)
+	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, rec, layout.PricingCache, debugLogPath, sessionID)
 	defer cleanup()
 
 	if len(ads) == 0 {

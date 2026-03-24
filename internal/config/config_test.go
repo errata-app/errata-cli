@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,18 +22,6 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "gpt-4o", cfg.DefaultOpenAIModel)
 	assert.Equal(t, "gemini-2.5-flash", cfg.DefaultGeminiModel)
 	assert.Equal(t, "data", cfg.DataDir)
-	assert.Equal(t, 20, cfg.MaxHistoryTurns)
-	assert.Empty(t, cfg.MCPServers)
-	assert.Empty(t, cfg.SystemPromptExtra)
-}
-
-func TestLoad_DefaultsFromRecipe(t *testing.T) {
-	// Verify that behavioral defaults are sourced from the embedded default
-	// recipe (pkg/recipe/default.recipe.md), not hardcoded in Load().
-	cfg := config.Load()
-	assert.Equal(t, 20, cfg.MaxHistoryTurns, "should come from default recipe ## Context")
-	assert.Equal(t, 5*time.Minute, cfg.AgentTimeout, "should come from default recipe ## Constraints")
-	assert.InDelta(t, 0.80, cfg.CompactThreshold, 1e-9, "should come from default recipe ## Context")
 }
 
 func TestDefaultRecipe_HasToolsAndGuidance(t *testing.T) {

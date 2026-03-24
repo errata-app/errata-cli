@@ -805,7 +805,6 @@ func TestApplySessionRecipe_NilRecipeIsNoop(t *testing.T) {
 
 	// Pre-populate.
 	a.contextStrategy = "manual"
-	a.cfg.MaxHistoryTurns = 25
 
 	// Ensure no session recipe is set.
 	assert.Nil(t, a.store.SessionRecipe())
@@ -817,7 +816,6 @@ func TestApplySessionRecipe_NilRecipeIsNoop(t *testing.T) {
 
 	// Fields should be unchanged.
 	assert.Equal(t, "manual", a.contextStrategy)
-	assert.Equal(t, 25, a.cfg.MaxHistoryTurns)
 }
 
 func TestRenderConfigOverlay_ListFitsHeight(t *testing.T) {
