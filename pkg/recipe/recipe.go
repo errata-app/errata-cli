@@ -100,10 +100,9 @@ type ConstraintsConfig struct {
 
 // ContextConfig controls conversation history management.
 type ContextConfig struct {
-	MaxHistoryTurns  int     // 0 = not set
-	Strategy         string  // "" | "auto_compact" | "manual" | "off"
-	CompactThreshold float64 // 0 = not set
-	TaskMode         string  // "" | "independent" | "sequential"
+	MaxHistoryTurns int    // 0 = not set
+	Strategy        string // "" | "auto_compact" | "manual" | "off"
+	TaskMode        string // "" | "independent" | "sequential"
 }
 
 // SandboxConfig restricts the execution environment.
@@ -613,11 +612,7 @@ func parseContext(body string) ContextConfig {
 			fmt.Fprintf(os.Stderr, "recipe: unknown context strategy %q, ignoring\n", v)
 		}
 	}
-	if v, ok := m["compact_threshold"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 1 {
-			cfg.CompactThreshold = f
-		}
-	}
+	// compact_threshold: silently ignored (compaction is now reactive, not threshold-based).
 	if v, ok := m["task_mode"]; ok {
 		switch v {
 		case "independent", "sequential":
@@ -753,16 +748,13 @@ func (r *Recipe) MarshalMarkdown() string {
 	}
 
 	// Context
-	if r.Context.Strategy != "" || r.Context.MaxHistoryTurns > 0 || r.Context.CompactThreshold > 0 {
+	if r.Context.Strategy != "" || r.Context.MaxHistoryTurns > 0 {
 		sb.WriteString("\n## Context\n")
 		if r.Context.MaxHistoryTurns > 0 {
 			fmt.Fprintf(&sb, "max_history_turns: %d\n", r.Context.MaxHistoryTurns)
 		}
 		if r.Context.Strategy != "" {
 			fmt.Fprintf(&sb, "strategy: %s\n", r.Context.Strategy)
-		}
-		if r.Context.CompactThreshold > 0 {
-			fmt.Fprintf(&sb, "compact_threshold: %s\n", strconv.FormatFloat(r.Context.CompactThreshold, 'f', -1, 64))
 		}
 	}
 

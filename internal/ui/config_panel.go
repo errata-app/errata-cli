@@ -207,11 +207,8 @@ func summarizeContext(rec *recipe.Recipe) string {
 	if rec.Context.MaxHistoryTurns > 0 {
 		parts = append(parts, fmt.Sprintf("%d turns", rec.Context.MaxHistoryTurns))
 	}
-	if rec.Context.CompactThreshold > 0 {
-		parts = append(parts, fmt.Sprintf("threshold: %.2f", rec.Context.CompactThreshold))
-	}
 	if len(parts) == 0 {
-		return "(defaults: auto_compact, 20 turns, threshold=0.80)"
+		return "(defaults: auto_compact, 20 turns)"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -450,22 +447,6 @@ var configPaths = map[string]configPathEntry{
 			return nil
 		},
 	},
-	"context.compact_threshold": {
-		Get: func(r *recipe.Recipe) string {
-			if r.Context.CompactThreshold == 0 {
-				return ""
-			}
-			return strconv.FormatFloat(r.Context.CompactThreshold, 'f', -1, 64)
-		},
-		Set: func(r *recipe.Recipe, v string) error {
-			f, err := strconv.ParseFloat(v, 64)
-			if err != nil || f < 0 || f > 1 {
-				return fmt.Errorf("invalid threshold %q (must be 0-1)", v)
-			}
-			r.Context.CompactThreshold = f
-			return nil
-		},
-	},
 	"sandbox.filesystem": {
 		Get: func(r *recipe.Recipe) string { return r.Sandbox.Filesystem },
 		Set: func(r *recipe.Recipe, v string) error {
@@ -607,9 +588,6 @@ func (a *App) applySessionRecipe() {
 	}
 	if rec.Context.MaxHistoryTurns > 0 {
 		a.cfg.MaxHistoryTurns = rec.Context.MaxHistoryTurns
-	}
-	if rec.Context.CompactThreshold > 0 {
-		a.cfg.CompactThreshold = rec.Context.CompactThreshold
 	}
 }
 

@@ -84,7 +84,7 @@ func TestRunAll_Order(t *testing.T) {
 	a1 := &stubAdapter{id: "m1", response: models.ModelResponse{ModelID: "m1", Text: "r1"}}
 	a2 := &stubAdapter{id: "m2", response: models.ModelResponse{ModelID: "m2", Text: "r2"}}
 
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a1, a2}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
+	results, _ := runner.RunAll(context.Background(), []models.ModelAdapter{a1, a2}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results, 2)
 	assert.Equal(t, "m1", results[0].ModelID)
 	assert.Equal(t, "m2", results[1].ModelID)
@@ -123,7 +123,7 @@ func TestRunAll_ProposedWritesPreserved(t *testing.T) {
 			},
 		},
 	}
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
+	results, _ := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results[0].ProposedWrites, 1)
 	assert.Equal(t, "x.txt", results[0].ProposedWrites[0].Path)
 }
@@ -132,7 +132,7 @@ func TestRunAll_ErrorAdapterDoesNotAffectOthers(t *testing.T) {
 	good := &stubAdapter{id: "good", response: models.ModelResponse{ModelID: "good", Text: "ok"}}
 	bad := &errorAdapter{id: "bad", msg: "bad failed"}
 
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{good, bad}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
+	results, _ := runner.RunAll(context.Background(), []models.ModelAdapter{good, bad}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results, 2)
 
 	var goodRes, badRes models.ModelResponse
@@ -181,7 +181,7 @@ func TestRunAll_ErrorEventSuppressedNonVerbose(t *testing.T) {
 
 func TestRunAll_LatencyRecorded(t *testing.T) {
 	a := &stubAdapter{id: "m", response: models.ModelResponse{ModelID: "m"}}
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
+	results, _ := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.GreaterOrEqual(t, results[0].LatencyMS, int64(0))
 }
 
@@ -192,12 +192,12 @@ func TestRunAll_NormalizesModelID(t *testing.T) {
 		id:       "gpt-4o",
 		response: models.ModelResponse{ModelID: "gpt-4o-2024-08-06", Text: "done"},
 	}
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
+	results, _ := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Equal(t, "gpt-4o", results[0].ModelID)
 }
 
 func TestRunAll_EmptyAdapters(t *testing.T) {
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
+	results, _ := runner.RunAll(context.Background(), []models.ModelAdapter{}, nil, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Empty(t, results)
 }
 
@@ -235,7 +235,7 @@ func TestRunAll_OnModelDoneCalledPerAdapter(t *testing.T) {
 
 func TestRunAll_OnModelDoneNilDoesNotPanic(t *testing.T) {
 	a := &stubAdapter{id: "m", response: models.ModelResponse{ModelID: "m", Text: "ok"}}
-	results := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p",
+	results, _ := runner.RunAll(context.Background(), []models.ModelAdapter{a}, nil, "p",
 		func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results, 1)
 }
@@ -469,7 +469,75 @@ func TestIsContextOverflowError_DoesNotMatchGenericError(t *testing.T) {
 	assert.False(t, runner.IsContextOverflowError(""))
 }
 
-// ─── ShouldAutoCompact ────────────────────────────────────────────────────────
+// ─── Compact-on-error ─────────────────────────────────────────────────────────
+
+// overflowThenSucceedAdapter fails with a context overflow on the first call,
+// then succeeds on the second call (after compaction).
+type overflowThenSucceedAdapter struct {
+	id    string
+	calls int
+}
+
+func (a *overflowThenSucceedAdapter) ID() string { return a.id }
+func (a *overflowThenSucceedAdapter) Capabilities(_ context.Context) models.ModelCapabilities {
+	return models.ModelCapabilities{}
+}
+func (a *overflowThenSucceedAdapter) RunAgent(
+	_ context.Context,
+	history []models.ConversationTurn,
+	promptStr string,
+	onEvent func(models.AgentEvent),
+) (models.ModelResponse, error) {
+	a.calls++
+	if a.calls == 1 {
+		return models.ModelResponse{}, fmt.Errorf("context_length_exceeded: too many tokens")
+	}
+	// Second call (compaction) returns summary.
+	if a.calls == 2 {
+		return models.ModelResponse{ModelID: a.id, Text: "compacted summary"}, nil
+	}
+	// Third call (retry) succeeds.
+	return models.ModelResponse{ModelID: a.id, Text: "success after compact"}, nil
+}
+
+func TestRunAll_CompactOnOverflow_RetriesAndSucceeds(t *testing.T) {
+	a := &overflowThenSucceedAdapter{id: "m"}
+	histories := map[string][]models.ConversationTurn{
+		"m": {
+			{Role: "user", Content: "old question 1"},
+			{Role: "assistant", Content: "old answer 1"},
+			{Role: "user", Content: "old question 2"},
+			{Role: "assistant", Content: "old answer 2"},
+		},
+	}
+
+	ctx := prompt.WithSummarizationPrompt(context.Background(), "summarize")
+	results, compacted := runner.RunAll(ctx, []models.ModelAdapter{a}, histories, "new prompt",
+		func(string, models.AgentEvent) {}, nil, true)
+
+	require.Len(t, results, 1)
+	assert.True(t, results[0].OK(), "retry after compact should succeed")
+	assert.Equal(t, "success after compact", results[0].Text)
+
+	// Compacted histories should be returned for the caller to persist.
+	require.NotNil(t, compacted)
+	require.Len(t, compacted["m"], 2)
+	assert.Contains(t, compacted["m"][0].Content, "compacted")
+}
+
+func TestRunAll_CompactOnOverflow_NoHistoryNoRetry(t *testing.T) {
+	// No history → nothing to compact → overflow error is returned directly.
+	bad := &errorAdapter{id: "bad", msg: "context_length_exceeded"}
+	results, compacted := runner.RunAll(context.Background(), []models.ModelAdapter{bad}, nil, "p",
+		func(string, models.AgentEvent) {}, nil, false)
+
+	require.Len(t, results, 1)
+	assert.False(t, results[0].OK())
+	assert.Equal(t, models.StopReasonContextOverflow, results[0].StopReason)
+	assert.Nil(t, compacted)
+}
+
+// ─── CompactHistories ─────────────────────────────────────────────────────────
 
 // makeTurns builds a ConversationTurn slice from alternating role/content pairs.
 // e.g. makeTurns("user", "hello", "assistant", "hi") → two turns.
@@ -480,48 +548,6 @@ func makeTurns(args ...string) []models.ConversationTurn {
 	}
 	return out
 }
-
-func TestShouldAutoCompact_NoHistoryReturnsFalse(t *testing.T) {
-	if runner.ShouldAutoCompact(nil, "claude-sonnet-4-6", 0) {
-		t.Error("nil histories should not trigger compact")
-	}
-	if runner.ShouldAutoCompact(map[string][]models.ConversationTurn{}, "claude-sonnet-4-6", 0) {
-		t.Error("empty histories should not trigger compact")
-	}
-}
-
-func TestShouldAutoCompact_UnknownModelReturnsFalse(t *testing.T) {
-	// Unknown model → context window = 0 → fraction undefined → no compact.
-	h := map[string][]models.ConversationTurn{
-		"no-such-model": makeTurns("user", strings.Repeat("x", 1_000_000), "assistant", "y"),
-	}
-	if runner.ShouldAutoCompact(h, "no-such-model", 0) {
-		t.Error("unknown model should never trigger auto-compact")
-	}
-}
-
-func TestShouldAutoCompact_BelowThresholdReturnsFalse(t *testing.T) {
-	// gemini-2.0-flash context = 1,048,576 tokens; 80% = 838,860 tokens ≈ 3.36M chars.
-	h := map[string][]models.ConversationTurn{
-		"gemini-2.0-flash": makeTurns("user", "short", "assistant", "reply"),
-	}
-	if runner.ShouldAutoCompact(h, "gemini-2.0-flash", 0) {
-		t.Error("well-below-threshold history should not trigger compact")
-	}
-}
-
-func TestShouldAutoCompact_AboveThresholdReturnsTrue(t *testing.T) {
-	// claude-sonnet-4-6 context = 200,000 tokens; 80% = 160,000 tokens ≈ 640,000 chars.
-	bigText := strings.Repeat("x", 700_000) // ~175,000 tokens, above 80%
-	h := map[string][]models.ConversationTurn{
-		"claude-sonnet-4-6": {{Role: "user", Content: bigText}},
-	}
-	if !runner.ShouldAutoCompact(h, "claude-sonnet-4-6", 0) {
-		t.Error("above-threshold history should trigger auto-compact")
-	}
-}
-
-// ─── CompactHistories ─────────────────────────────────────────────────────────
 
 // compactStub is an adapter whose RunAgent always returns a fixed summary string.
 type compactStub struct {
@@ -749,7 +775,7 @@ func TestWithRunOptions_OverridesDefaults(t *testing.T) {
 	bigHistory := map[string][]models.ConversationTurn{
 		"m": turns(20), // 20 turns, but max is 5 → should be trimmed
 	}
-	results := runner.RunAll(ctx, []models.ModelAdapter{a}, bigHistory, "p", func(string, models.AgentEvent) {}, nil, false)
+	results, _ := runner.RunAll(ctx, []models.ModelAdapter{a}, bigHistory, "p", func(string, models.AgentEvent) {}, nil, false)
 	assert.Len(t, results, 1)
 	// The adapter should have received a trimmed history (4 turns: 5 rounded down to even).
 	assert.LessOrEqual(t, len(*a.capture), 5)
@@ -799,7 +825,7 @@ func TestRunAll_CheckpointCreatedAndCleanedUp(t *testing.T) {
 		CheckpointPath: cpPath,
 	})
 
-	results := runner.RunAll(ctx, []models.ModelAdapter{a}, nil, "test prompt",
+	results, _ := runner.RunAll(ctx, []models.ModelAdapter{a}, nil, "test prompt",
 		func(string, models.AgentEvent) {}, nil, false)
 
 	// Adapter completed successfully → checkpoint should be cleaned up.
@@ -826,7 +852,7 @@ func TestRunAll_CheckpointPreservedOnInterrupt(t *testing.T) {
 		CheckpointPath: cpPath,
 	})
 
-	results := runner.RunAll(ctx, []models.ModelAdapter{interrupted}, nil, "test prompt",
+	results, _ := runner.RunAll(ctx, []models.ModelAdapter{interrupted}, nil, "test prompt",
 		func(string, models.AgentEvent) {}, nil, false)
 
 	assert.Len(t, results, 1)
@@ -872,7 +898,7 @@ func TestWithRunOptions_TimeoutEnforcedOnSlowAdapter(t *testing.T) {
 		Timeout: 200 * time.Millisecond,
 	})
 
-	results := runner.RunAll(ctx, []models.ModelAdapter{slow}, nil, "test",
+	results, _ := runner.RunAll(ctx, []models.ModelAdapter{slow}, nil, "test",
 		func(string, models.AgentEvent) {}, nil, false)
 
 	require.Len(t, results, 1)

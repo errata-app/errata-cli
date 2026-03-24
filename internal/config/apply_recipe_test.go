@@ -34,7 +34,6 @@ func defaultCfg() config.Config {
 		MCPServers:        "",
 		MaxHistoryTurns:   20,
 		AgentTimeout:      0,
-		CompactThreshold:  0,
 	}
 }
 
@@ -84,13 +83,6 @@ func TestApplyRecipe_MaxHistoryTurns(t *testing.T) {
 	assert.Equal(t, 5, cfg.MaxHistoryTurns)
 }
 
-func TestApplyRecipe_CompactThreshold(t *testing.T) {
-	r, _ := recipe.Parse(writeRecipe(t, v1("## Context\ncompact_threshold: 0.60\n")))
-	cfg := defaultCfg()
-	config.ApplyRecipe(r, &cfg)
-	assert.InDelta(t, 0.60, cfg.CompactThreshold, 0.001)
-}
-
 func TestApplyRecipe_MaxSteps(t *testing.T) {
 	r, _ := recipe.Parse(writeRecipe(t, v1("## Constraints\nmax_steps: 25\n")))
 	cfg := defaultCfg()
@@ -116,8 +108,7 @@ func TestApplyRecipe_AllFields_Simultaneous(t *testing.T) {
 			{Name: "exa", Command: "npx exa-server"},
 		},
 		Context: recipe.ContextConfig{
-			MaxHistoryTurns:  30,
-			CompactThreshold: 0.65,
+			MaxHistoryTurns: 30,
 		},
 		Constraints: recipe.ConstraintsConfig{
 			Timeout:  10 * time.Minute,
@@ -134,7 +125,6 @@ func TestApplyRecipe_AllFields_Simultaneous(t *testing.T) {
 	assert.Equal(t, 30, cfg.MaxHistoryTurns)
 	assert.Equal(t, 10*time.Minute, cfg.AgentTimeout)
 	assert.Equal(t, 50, cfg.MaxSteps)
-	assert.InDelta(t, 0.65, cfg.CompactThreshold, 1e-9)
 }
 
 // ─── Atomic section tests ─────────────────────────────────────────────────────
@@ -152,11 +142,9 @@ func TestApplyRecipe_AtomicConstraints(t *testing.T) {
 func TestApplyRecipe_AtomicContext(t *testing.T) {
 	r, _ := recipe.Parse(writeRecipe(t, v1("## Context\nmax_history_turns: 10\n")))
 	cfg := defaultCfg()
-	cfg.CompactThreshold = 0.8
 	cfg.MaxHistoryTurns = 20
 	config.ApplyRecipe(r, &cfg)
 	assert.Equal(t, 10, cfg.MaxHistoryTurns)
-	assert.InDelta(t, 0.0, cfg.CompactThreshold, 1e-9, "compact_threshold must be zeroed when section present but field not declared")
 }
 
 func TestApplyRecipe_AbsentSection_PreservesDefaults(t *testing.T) {
@@ -177,7 +165,6 @@ func TestApplyRecipe_UnsetFields_PreserveAll(t *testing.T) {
 		MaxSteps:          15,
 		MaxHistoryTurns:   40,
 		AgentTimeout:      7 * time.Minute,
-		CompactThreshold:  0.90,
 	}
 
 	r := &recipe.Recipe{
@@ -191,6 +178,5 @@ func TestApplyRecipe_UnsetFields_PreserveAll(t *testing.T) {
 	assert.Equal(t, "existing:server", cfg.MCPServers)
 	assert.Equal(t, 40, cfg.MaxHistoryTurns)
 	assert.Equal(t, 7*time.Minute, cfg.AgentTimeout)
-	assert.InDelta(t, 0.90, cfg.CompactThreshold, 1e-9)
 	assert.Equal(t, 15, cfg.MaxSteps)
 }

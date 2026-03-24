@@ -134,15 +134,13 @@ func TestSummarizeTools_WithAllowlist(t *testing.T) {
 func TestSummarizeContext_AllSet(t *testing.T) {
 	rec := &recipe.Recipe{
 		Context: recipe.ContextConfig{
-			Strategy:         "auto_compact",
-			MaxHistoryTurns:  30,
-			CompactThreshold: 0.75,
+			Strategy:        "auto_compact",
+			MaxHistoryTurns: 30,
 		},
 	}
 	s := summarizeContext(rec)
 	assert.Contains(t, s, "auto_compact")
 	assert.Contains(t, s, "30 turns")
-	assert.Contains(t, s, "threshold: 0.75")
 }
 
 func TestSummarizeContext_Defaults(t *testing.T) {
@@ -150,7 +148,6 @@ func TestSummarizeContext_Defaults(t *testing.T) {
 	s := summarizeContext(rec)
 	assert.Contains(t, s, "auto_compact")
 	assert.Contains(t, s, "20 turns")
-	assert.Contains(t, s, "threshold=0.80")
 }
 
 func TestSummarizeMCPServers_None(t *testing.T) {
@@ -199,7 +196,6 @@ func TestSetConfigValue_RoundTrip(t *testing.T) {
 		{"constraints.max_steps", "42", "42"},
 		{"context.strategy", "manual", "manual"},
 		{"context.max_history_turns", "30", "30"},
-		{"context.compact_threshold", "0.75", "0.75"},
 		{"sandbox.filesystem", "read_only", "read_only"},
 		{"sandbox.network", "none", "none"},
 		{"system_prompt", "You are helpful.", "You are helpful."},
@@ -730,9 +726,8 @@ func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
 			BashPrefixes: []string{"go test", "go vet"},
 		},
 		Context: recipe.ContextConfig{
-			Strategy:         "manual",
-			MaxHistoryTurns:  30,
-			CompactThreshold: 0.75,
+			Strategy:        "manual",
+			MaxHistoryTurns: 30,
 		},
 		Sandbox: recipe.SandboxConfig{
 			Filesystem: "project_only",
@@ -757,7 +752,6 @@ func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
 	// Config fields.
 	assert.Equal(t, 10*time.Minute, a.cfg.AgentTimeout)
 	assert.Equal(t, 30, a.cfg.MaxHistoryTurns)
-	assert.InDelta(t, 0.75, a.cfg.CompactThreshold, 1e-9)
 }
 
 func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
@@ -774,7 +768,6 @@ func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
 	a.projectRoot = "/existing/root"
 	a.cfg.AgentTimeout = 7 * time.Minute
 	a.cfg.MaxHistoryTurns = 40
-	a.cfg.CompactThreshold = 0.90
 
 	// Session recipe with only Tools set.
 	sessionRec := &recipe.Recipe{
@@ -795,7 +788,6 @@ func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
 	assert.Equal(t, "/existing/root", a.projectRoot)
 	assert.Equal(t, 7*time.Minute, a.cfg.AgentTimeout)
 	assert.Equal(t, 40, a.cfg.MaxHistoryTurns)
-	assert.InDelta(t, 0.90, a.cfg.CompactThreshold, 1e-9)
 }
 
 func TestApplySessionRecipe_NilRecipeIsNoop(t *testing.T) {

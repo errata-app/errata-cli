@@ -44,10 +44,9 @@ type ConstraintsConfig struct {
 
 // ContextConfig captures conversation history management settings.
 type ContextConfig struct {
-	MaxHistoryTurns  int     `json:"max_history_turns,omitempty"`
-	Strategy         string  `json:"strategy,omitempty"`
-	CompactThreshold float64 `json:"compact_threshold,omitempty"`
-	TaskMode         string  `json:"task_mode,omitempty"`
+	MaxHistoryTurns int    `json:"max_history_turns,omitempty"`
+	Strategy        string `json:"strategy,omitempty"`
+	TaskMode        string `json:"task_mode,omitempty"`
 }
 
 // OutputRuleConfig captures deterministic output processing for a tool.

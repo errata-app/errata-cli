@@ -33,14 +33,8 @@ func ApplyRecipe(r *recipe.Recipe, cfg *Config) {
 	// ── Context ──
 	if r.HasSection("context") {
 		cfg.MaxHistoryTurns = r.Context.MaxHistoryTurns
-		cfg.CompactThreshold = r.Context.CompactThreshold
-	} else {
-		if r.Context.MaxHistoryTurns > 0 {
-			cfg.MaxHistoryTurns = r.Context.MaxHistoryTurns
-		}
-		if r.Context.CompactThreshold > 0 {
-			cfg.CompactThreshold = r.Context.CompactThreshold
-		}
+	} else if r.Context.MaxHistoryTurns > 0 {
+		cfg.MaxHistoryTurns = r.Context.MaxHistoryTurns
 	}
 
 	// ── Constraints ──

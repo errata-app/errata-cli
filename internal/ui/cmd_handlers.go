@@ -313,7 +313,6 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
-	contextStrategy := a.contextStrategy
 	sandboxFilesystem := a.sandboxFilesystem
 	sandboxNetwork := a.sandboxNetwork
 	projectRoot := a.projectRoot
@@ -331,26 +330,6 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		batchCmds = append(batchCmds, flushCmd)
 	}
 	batchCmds = append(batchCmds, promptPrintCmd, panelTick(), func() tea.Msg {
-		effectiveHistories := histories
-		var compacted map[string][]models.ConversationTurn
-		// Skip auto-compact when context strategy is "manual" or "off".
-		if contextStrategy != "manual" && contextStrategy != "off" {
-			compactCtx := prompt.WithSummarizationPrompt(baseCtx, sumPrompt)
-			for _, ad := range ads {
-				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
-					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
-						Type: models.EventText, Data: "[auto-compacting history…]",
-					}})
-					effectiveHistories = runner.CompactHistories(
-						compactCtx, []models.ModelAdapter{ad},
-						effectiveHistories, func(id string, e models.AgentEvent) {
-							prog.Send(agentEventMsg{modelID: id, event: e})
-						},
-					)
-					compacted = effectiveHistories
-				}
-			}
-		}
 		runCtx := tools.WithActiveTools(baseCtx, activeDefs)
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
@@ -360,17 +339,17 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 			ProjectRoot: projectRoot,
 		})
 		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
-			Timeout:          cfg.AgentTimeout,
-			CompactThreshold: cfg.CompactThreshold,
-			MaxHistoryTurns:  cfg.MaxHistoryTurns,
-			MaxSteps:         cfg.MaxSteps,
-			CheckpointPath:   cpPath,
+			Timeout:         cfg.AgentTimeout,
+			MaxHistoryTurns: cfg.MaxHistoryTurns,
+			MaxSteps:        cfg.MaxSteps,
+			CheckpointPath:  cpPath,
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, recSystemPrompt)
 		runCtx = tools.WithToolGuidanceMap(runCtx, recToolGuidanceMap)
+		runCtx = prompt.WithSummarizationPrompt(runCtx, sumPrompt)
 		collector := output.NewCollector()
-		responses := runner.RunAll(
-			runCtx, ads, effectiveHistories, trimmed,
+		responses, compacted := runner.RunAll(
+			runCtx, ads, histories, trimmed,
 			collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
 			}),
@@ -541,7 +520,6 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	}
 	mcpDispatchers := a.mcpDispatchers
 	bashPrefixes := a.bashPrefixes
-	contextStrategy := a.contextStrategy
 	sandboxFilesystem := a.sandboxFilesystem
 	sandboxNetwork := a.sandboxNetwork
 	projectRoot := a.projectRoot
@@ -559,25 +537,6 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		resumeBatchCmds = append(resumeBatchCmds, flushCmd)
 	}
 	resumeBatchCmds = append(resumeBatchCmds, promptPrintCmd, panelTick(), func() tea.Msg {
-		effectiveHistories := histories
-		var compacted map[string][]models.ConversationTurn
-		if contextStrategy != "manual" && contextStrategy != "off" {
-			compactCtx := prompt.WithSummarizationPrompt(baseCtx, resumeSumPrompt)
-			for _, ad := range ads {
-				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
-					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
-						Type: models.EventText, Data: "[auto-compacting history…]",
-					}})
-					effectiveHistories = runner.CompactHistories(
-						compactCtx, []models.ModelAdapter{ad},
-						effectiveHistories, func(id string, e models.AgentEvent) {
-							prog.Send(agentEventMsg{modelID: id, event: e})
-						},
-					)
-					compacted = effectiveHistories
-				}
-			}
-		}
 		runCtx := tools.WithActiveTools(baseCtx, activeDefs)
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
@@ -587,18 +546,18 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 			ProjectRoot: projectRoot,
 		})
 		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
-			Timeout:          cfg.AgentTimeout,
-			CompactThreshold: cfg.CompactThreshold,
-			MaxHistoryTurns:  cfg.MaxHistoryTurns,
-			MaxSteps:         cfg.MaxSteps,
-			CheckpointPath:   resumeCPPath,
+			Timeout:         cfg.AgentTimeout,
+			MaxHistoryTurns: cfg.MaxHistoryTurns,
+			MaxSteps:        cfg.MaxSteps,
+			CheckpointPath:  resumeCPPath,
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, resumeSystemPrompt)
 		runCtx = tools.WithToolGuidanceMap(runCtx, resumeToolGuidanceMap)
+		runCtx = prompt.WithSummarizationPrompt(runCtx, resumeSumPrompt)
 		collector := output.NewCollector()
 		completedCount := len(completedResponses)
-		responses := runner.RunAll(
-			runCtx, ads, effectiveHistories, userPrompt,
+		responses, compacted := runner.RunAll(
+			runCtx, ads, histories, userPrompt,
 			collector.WrapOnEvent(func(modelID string, event models.AgentEvent) {
 				prog.Send(agentEventMsg{modelID: modelID, event: event})
 			}),

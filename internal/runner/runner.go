@@ -11,7 +11,6 @@ import (
 
 	"github.com/errata-app/errata-cli/internal/checkpoint"
 	"github.com/errata-app/errata-cli/internal/models"
-	"github.com/errata-app/errata-cli/internal/pricing"
 	"github.com/errata-app/errata-cli/internal/prompt"
 	"github.com/errata-app/errata-cli/internal/tools"
 )
@@ -20,7 +19,6 @@ import (
 // config.Load() applies the default recipe (pkg/recipe/default.recipe.md)
 // which populates all fields before they reach RunOptions.
 const defaultMaxHistoryTurns = 20
-const autoCompactThreshold = 0.80
 
 // ─── Run options (context-based) ─────────────────────────────────────────────
 
@@ -28,12 +26,11 @@ type runOptsKey struct{}
 
 // RunOptions controls per-run behavior. Zero values fall back to package defaults.
 type RunOptions struct {
-	Timeout          time.Duration // 0 → no timeout
-	CompactThreshold float64       // 0 → autoCompactThreshold (0.80)
-	MaxHistoryTurns  int           // 0 → defaultMaxHistoryTurns (20)
-	MaxSteps         int           // 0 → unlimited agentic loop turns
-	CheckpointPath   string        // "" disables incremental checkpointing
-	WorkDirs         map[string]string // per-adapter working directory (adapter ID → dir path)
+	Timeout         time.Duration // 0 → no timeout
+	MaxHistoryTurns int           // 0 → defaultMaxHistoryTurns (20)
+	MaxSteps        int           // 0 → unlimited agentic loop turns
+	CheckpointPath  string        // "" disables incremental checkpointing
+	WorkDirs        map[string]string // per-adapter working directory (adapter ID → dir path)
 }
 
 // WithRunOptions returns a context carrying the given RunOptions.
@@ -45,9 +42,6 @@ func WithRunOptions(ctx context.Context, opts RunOptions) context.Context {
 // for any zero values.
 func runOptsFromContext(ctx context.Context) RunOptions {
 	v, _ := ctx.Value(runOptsKey{}).(RunOptions)
-	if v.CompactThreshold == 0 {
-		v.CompactThreshold = autoCompactThreshold
-	}
 	if v.MaxHistoryTurns == 0 {
 		v.MaxHistoryTurns = defaultMaxHistoryTurns
 	}
@@ -61,6 +55,11 @@ func runOptsFromContext(ctx context.Context) RunOptions {
 // onModelDone, if non-nil, is called from the adapter's goroutine as soon as it
 // finishes (before RunAll returns). This lets callers render incremental completion
 // (e.g. marking a TUI panel as "done") without waiting for the slowest adapter.
+//
+// The second return value is non-nil when one or more adapters hit a context overflow
+// error and had their history compacted before a successful retry. Callers should
+// persist these compacted histories (keyed by adapter ID) to avoid re-overflowing
+// on subsequent runs.
 func RunAll(
 	ctx      context.Context,
 	adapters []models.ModelAdapter,
@@ -69,10 +68,14 @@ func RunAll(
 	onEvent  func(modelID string, event models.AgentEvent),
 	onModelDone func(idx int, resp models.ModelResponse),
 	verbose  bool,
-) []models.ModelResponse {
+) ([]models.ModelResponse, map[string][]models.ConversationTurn) {
 	opts := runOptsFromContext(ctx)
 	results := make([]models.ModelResponse, len(adapters))
 	var wg sync.WaitGroup
+
+	// compactedHistories collects per-adapter compacted histories from overflow retries.
+	var compactedMu sync.Mutex
+	var compactedHistories map[string][]models.ConversationTurn
 
 	// Set up incremental checkpointing (survives SIGKILL/OOM/power loss).
 	var saver *checkpoint.IncrementalSaver
@@ -128,6 +131,31 @@ func RunAll(
 			resp, err := a.RunAgent(tctx, h, userPrompt, filtered)
 			resp.ModelID = a.ID() // enforce: ModelID always matches the configured adapter ID
 
+			// Compact-on-error: if the first attempt hits a context overflow and
+			// we have history to compact, summarize the history and retry once.
+			if err != nil && IsContextOverflowError(errMsg(err, resp)) && len(h) > 0 {
+				onEvent(a.ID(), models.AgentEvent{
+					Type: models.EventText, Data: "[context overflow — compacting history and retrying…]",
+				})
+				sumPrompt := prompt.ResolveSummarizationPrompt(ctx)
+				compacted := compactSingle(tctx, a, h, sumPrompt, func(e models.AgentEvent) {
+					onEvent(a.ID(), e)
+				})
+				if len(compacted) < len(h) {
+					start = time.Now()
+					resp, err = a.RunAgent(tctx, compacted, userPrompt, filtered)
+					resp.ModelID = a.ID()
+					if err == nil {
+						compactedMu.Lock()
+						if compactedHistories == nil {
+							compactedHistories = make(map[string][]models.ConversationTurn)
+						}
+						compactedHistories[a.ID()] = compacted
+						compactedMu.Unlock()
+					}
+				}
+			}
+
 			if err != nil {
 				resp.ModelID = a.ID()
 				if resp.LatencyMS == 0 {
@@ -170,7 +198,7 @@ func RunAll(
 		}
 	}
 
-	return results
+	return results, compactedHistories
 }
 
 // AppendHistory updates histories with the results of a completed run.
@@ -245,19 +273,34 @@ func IsContextOverflowError(errStr string) bool {
 	return false
 }
 
-// ShouldAutoCompact reports whether the history for adapterID has grown past threshold
-// relative to the model's known context window. threshold=0 uses the package default (0.80).
-// Returns false when the context window is unknown.
-func ShouldAutoCompact(histories map[string][]models.ConversationTurn, adapterID string, threshold float64) bool {
-	cw := pricing.ContextWindowTokens(adapterID)
-	if cw == 0 {
-		return false
+// errMsg returns the best error string from an error and/or a ModelResponse.
+func errMsg(err error, resp models.ModelResponse) string {
+	if resp.Error != "" {
+		return resp.Error
 	}
-	if threshold <= 0 {
-		threshold = autoCompactThreshold
+	if err != nil {
+		return err.Error()
 	}
-	est := EstimateHistoryTokens(histories[adapterID])
-	return float64(est)/float64(cw) >= threshold
+	return ""
+}
+
+// compactSingle summarizes a single adapter's history into a two-turn pair.
+// Returns the original history unchanged if compaction fails.
+func compactSingle(
+	ctx context.Context,
+	adapter models.ModelAdapter,
+	history []models.ConversationTurn,
+	sumPrompt string,
+	onEvent func(models.AgentEvent),
+) []models.ConversationTurn {
+	resp, err := adapter.RunAgent(ctx, history, sumPrompt, onEvent)
+	if err != nil || resp.Text == "" {
+		return history
+	}
+	return []models.ConversationTurn{
+		{Role: "user", Content: "[Previous conversation — compacted]"},
+		{Role: "assistant", Content: resp.Text},
+	}
 }
 
 // CompactHistories calls each adapter to summarise its own conversation history.

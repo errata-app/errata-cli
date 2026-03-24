@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,19 +137,6 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			histories = make(map[string][]models.ConversationTurn)
 		}
 
-		// Auto-compact in sequential mode when threshold exceeded.
-		if taskMode == "sequential" && rec.Context.Strategy != "manual" && rec.Context.Strategy != "off" {
-			for _, ad := range opts.Adapters {
-				if runner.ShouldAutoCompact(histories, ad.ID(), opts.Cfg.CompactThreshold) {
-					fmt.Fprintf(w, "  [auto-compacting history for %s…]\n", ad.ID())
-					histories = runner.CompactHistories(
-						ctx, []models.ModelAdapter{ad},
-						histories, func(id string, e models.AgentEvent) {},
-					)
-				}
-			}
-		}
-
 		runCtx := buildRunContext(ctx, opts, rec, activeDefs, workDirs)
 
 		collector := output.NewCollector()
@@ -158,7 +146,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			}
 		})
 
-		responses := runner.RunAll(runCtx, opts.Adapters, histories, taskPrompt, onEvent, nil, opts.Verbose)
+		responses, compacted := runner.RunAll(runCtx, opts.Adapters, histories, taskPrompt, onEvent, nil, opts.Verbose)
 
 		// Check for context cancellation (SIGINT/SIGTERM).
 		if ctx.Err() != nil {
@@ -224,7 +212,8 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 			CriteriaResults: criteriaResults,
 		}
 
-		// Update conversation histories.
+		// Apply compacted histories from overflow retries before appending new turns.
+		maps.Copy(histories, compacted)
 		histories = runner.AppendHistory(histories, adapterIDs(opts.Adapters), responses, taskPrompt)
 
 		for _, resp := range responses {
@@ -331,12 +320,11 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 		ProjectRoot: rec.Constraints.ProjectRoot,
 	})
 	ctx = runner.WithRunOptions(ctx, runner.RunOptions{
-		Timeout:          opts.Cfg.AgentTimeout,
-		CompactThreshold: opts.Cfg.CompactThreshold,
-		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
-		MaxSteps:         opts.Cfg.MaxSteps,
-		CheckpointPath:   opts.CheckpointPath,
-		WorkDirs:         workDirs,
+		Timeout:         opts.Cfg.AgentTimeout,
+		MaxHistoryTurns: opts.Cfg.MaxHistoryTurns,
+		MaxSteps:        opts.Cfg.MaxSteps,
+		CheckpointPath:  opts.CheckpointPath,
+		WorkDirs:        workDirs,
 	})
 	return ctx
 }

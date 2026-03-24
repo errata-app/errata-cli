@@ -34,7 +34,6 @@ func TestLoad_DefaultsFromRecipe(t *testing.T) {
 	cfg := config.Load()
 	assert.Equal(t, 20, cfg.MaxHistoryTurns, "should come from default recipe ## Context")
 	assert.Equal(t, 5*time.Minute, cfg.AgentTimeout, "should come from default recipe ## Constraints")
-	assert.InDelta(t, 0.80, cfg.CompactThreshold, 1e-9, "should come from default recipe ## Context")
 }
 
 func TestDefaultRecipe_HasToolsAndGuidance(t *testing.T) {

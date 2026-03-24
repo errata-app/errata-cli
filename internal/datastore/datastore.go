@@ -551,12 +551,11 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 		}
 
 		if rec.Context.MaxHistoryTurns > 0 || rec.Context.Strategy != "" ||
-			rec.Context.CompactThreshold > 0 || rec.Context.TaskMode != "" {
+			rec.Context.TaskMode != "" {
 			snap.Context = &recipestore.ContextConfig{
-				MaxHistoryTurns:  rec.Context.MaxHistoryTurns,
-				Strategy:         rec.Context.Strategy,
-				CompactThreshold: rec.Context.CompactThreshold,
-				TaskMode:         rec.Context.TaskMode,
+				MaxHistoryTurns: rec.Context.MaxHistoryTurns,
+				Strategy:        rec.Context.Strategy,
+				TaskMode:        rec.Context.TaskMode,
 			}
 		}
 

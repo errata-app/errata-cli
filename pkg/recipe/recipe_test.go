@@ -287,7 +287,6 @@ compact_threshold: 0.75
 	require.NoError(t, err)
 	assert.Equal(t, 10, r.Context.MaxHistoryTurns)
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
-	assert.InDelta(t, 0.75, r.Context.CompactThreshold, 0.001)
 }
 
 func TestParse_ContextManual(t *testing.T) {
@@ -748,9 +747,8 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 			MaxSteps:    50,
 		},
 		Context: recipe.ContextConfig{
-			Strategy:         "auto_compact",
-			MaxHistoryTurns:  30,
-			CompactThreshold: 0.75,
+			Strategy:        "auto_compact",
+			MaxHistoryTurns: 30,
 		},
 		Sandbox: recipe.SandboxConfig{
 			Filesystem:      "project_only",
@@ -782,7 +780,6 @@ func TestMarshalMarkdown_RoundTrip(t *testing.T) {
 	assert.Equal(t, orig.Constraints.MaxSteps, parsed.Constraints.MaxSteps)
 	assert.Equal(t, orig.Context.Strategy, parsed.Context.Strategy)
 	assert.Equal(t, orig.Context.MaxHistoryTurns, parsed.Context.MaxHistoryTurns)
-	assert.InDelta(t, orig.Context.CompactThreshold, parsed.Context.CompactThreshold, 1e-9)
 	assert.Equal(t, orig.Sandbox.Filesystem, parsed.Sandbox.Filesystem)
 	assert.Equal(t, orig.Sandbox.Network, parsed.Sandbox.Network)
 	assert.Equal(t, orig.Sandbox.AllowLocalFetch, parsed.Sandbox.AllowLocalFetch)

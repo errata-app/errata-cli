@@ -143,10 +143,9 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 			Timeout:  "5m0s",
 		},
 		Context: &recipestore.ContextConfig{
-			MaxHistoryTurns:  20,
-			Strategy:         "auto_compact",
-			CompactThreshold: 0.8,
-			TaskMode:         "sequential",
+			MaxHistoryTurns: 20,
+			Strategy:        "auto_compact",
+			TaskMode:        "sequential",
 		},
 		OutputProcessing: map[string]recipestore.OutputRuleConfig{
 			"bash": {MaxLines: 50, Truncation: "tail", TruncationMessage: "truncated"},
@@ -180,7 +179,6 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 	require.NotNil(t, got.Context)
 	assert.Equal(t, 20, got.Context.MaxHistoryTurns)
 	assert.Equal(t, "auto_compact", got.Context.Strategy)
-	assert.InDelta(t, 0.8, got.Context.CompactThreshold, 1e-9)
 	assert.Equal(t, "sequential", got.Context.TaskMode)
 
 	require.Contains(t, got.OutputProcessing, "bash")

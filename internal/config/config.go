@@ -83,11 +83,6 @@ type Config struct {
 	// Set via recipe ## Constraints timeout:.
 	AgentTimeout time.Duration
 
-	// CompactThreshold is the context fill fraction that triggers auto-compact.
-	// 0 means use the runner's built-in default (0.80).
-	// Set via recipe ## Context compact_threshold:.
-	CompactThreshold float64
-
 	// MaxHistoryTurns is the maximum number of conversation turns kept per model.
 	// Default is 20. Set via recipe ## Context max_history_turns:.
 	MaxHistoryTurns int
