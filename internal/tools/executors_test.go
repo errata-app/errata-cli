@@ -521,9 +521,8 @@ func TestExecuteBash_OutputCapped(t *testing.T) {
 }
 
 func TestExecuteBash_Timeout(t *testing.T) {
-	tools.SetBashTimeout(2 * time.Second)
-	defer tools.SetBashTimeout(0)
-	out := tools.ExecuteBash(context.Background(), "sleep 60")
+	ctx := tools.WithBashTimeout(context.Background(), 2*time.Second)
+	out := tools.ExecuteBash(ctx, "sleep 60")
 	assert.Contains(t, out, "[error:")
 	assert.Contains(t, out, "timed out")
 }

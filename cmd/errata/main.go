@@ -194,20 +194,6 @@ func applyProjectRoot(rec *recipe.Recipe) {
 	}
 }
 
-// applyRecipeToolSettings applies recipe-level tool package settings
-// that are not represented in config.Config (they configure the tools package directly).
-func applyRecipeToolSettings(rec *recipe.Recipe) {
-	if rec == nil {
-		return
-	}
-	if rec.Constraints.BashTimeout > 0 {
-		tools.SetBashTimeout(rec.Constraints.BashTimeout)
-	}
-	if rec.Sandbox.AllowLocalFetch {
-		tools.SetAllowLocalFetch(true)
-	}
-}
-
 // setupAdapters loads pricing, adapters, and MCP servers.
 // Returns adapters, warnings, MCP state (defs + dispatchers),
 // and a cleanup function the caller must defer.
@@ -251,7 +237,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	config.ApplyRecipe(rec, &cfg)
 	layout := paths.New(cfg.DataDir)
 	applyProjectRoot(rec)
-	applyRecipeToolSettings(rec)
+	// BashTimeout and AllowLocalFetch are wired through context at run sites.
 
 	// Resolve session: fresh, --continue, or --resume <id>.
 	resuming := false
@@ -301,7 +287,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 				cfg = config.Load()
 				config.ApplyRecipe(rec, &cfg)
 				layout = paths.New(cfg.DataDir)
-				applyRecipeToolSettings(rec)
+				// BashTimeout and AllowLocalFetch are wired through context at run sites.
 			}
 		}
 	}
@@ -363,7 +349,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	config.ApplyRecipe(rec, &cfg)
 	layout := paths.New(cfg.DataDir)
 	applyProjectRoot(rec)
-	applyRecipeToolSettings(rec)
+	// BashTimeout and AllowLocalFetch are wired through context at run sites.
 
 	sessionID := uid.New("ses_")
 	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, layout.PricingCache, debugLogPath, sessionID)

@@ -34,6 +34,9 @@ type Config struct {
 	// ProjectRoot is the absolute path models may write to in project_only mode.
 	// "" means use os.Getwd() at exec time.
 	ProjectRoot string
+
+	// AllowLocalFetch permits web_fetch to target localhost URLs.
+	AllowLocalFetch bool
 }
 
 // Active reports whether cfg requires any OS-level restriction.

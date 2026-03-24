@@ -328,10 +328,14 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	}
 	ctx = prompt.WithSummarizationPrompt(ctx, rec.Context.SummarizationPrompt)
 	ctx = sandbox.WithConfig(ctx, sandbox.Config{
-		Filesystem:  rec.Sandbox.Filesystem,
-		Network:     rec.Sandbox.Network,
-		ProjectRoot: rec.Constraints.ProjectRoot,
+		Filesystem:      rec.Sandbox.Filesystem,
+		Network:         rec.Sandbox.Network,
+		ProjectRoot:     rec.Constraints.ProjectRoot,
+		AllowLocalFetch: rec.Sandbox.AllowLocalFetch,
 	})
+	if rec.Constraints.BashTimeout > 0 {
+		ctx = tools.WithBashTimeout(ctx, rec.Constraints.BashTimeout)
+	}
 	ctx = runner.WithRunOptions(ctx, runner.RunOptions{
 		Timeout:          opts.Cfg.AgentTimeout,
 		CompactThreshold: opts.Cfg.CompactThreshold,

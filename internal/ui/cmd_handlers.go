@@ -303,9 +303,13 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	var sumPrompt string
 	var recSystemPrompt string
 	var recToolGuidanceMap map[string]string
+	var bashTimeout time.Duration
+	var allowLocalFetch bool
 	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
 		sumPrompt = activeRec.Context.SummarizationPrompt
 		recSystemPrompt = activeRec.SystemPrompt
+		bashTimeout = activeRec.Constraints.BashTimeout
+		allowLocalFetch = activeRec.Sandbox.AllowLocalFetch
 		if activeRec.Tools != nil {
 			activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.Tools.Guidance)
 			recToolGuidanceMap = activeRec.Tools.Guidance
@@ -355,10 +359,14 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
 		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
-			Filesystem:  sandboxFilesystem,
-			Network:     sandboxNetwork,
-			ProjectRoot: projectRoot,
+			Filesystem:      sandboxFilesystem,
+			Network:         sandboxNetwork,
+			ProjectRoot:     projectRoot,
+			AllowLocalFetch: allowLocalFetch,
 		})
+		if bashTimeout > 0 {
+			runCtx = tools.WithBashTimeout(runCtx, bashTimeout)
+		}
 		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
@@ -531,9 +539,13 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	var resumeSumPrompt string
 	var resumeSystemPrompt string
 	var resumeToolGuidanceMap map[string]string
+	var resumeBashTimeout time.Duration
+	var resumeAllowLocalFetch bool
 	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
 		resumeSumPrompt = resumeRec.Context.SummarizationPrompt
 		resumeSystemPrompt = resumeRec.SystemPrompt
+		resumeBashTimeout = resumeRec.Constraints.BashTimeout
+		resumeAllowLocalFetch = resumeRec.Sandbox.AllowLocalFetch
 		if resumeRec.Tools != nil {
 			activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.Tools.Guidance)
 			resumeToolGuidanceMap = resumeRec.Tools.Guidance
@@ -582,10 +594,14 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
 		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
-			Filesystem:  sandboxFilesystem,
-			Network:     sandboxNetwork,
-			ProjectRoot: projectRoot,
+			Filesystem:      sandboxFilesystem,
+			Network:         sandboxNetwork,
+			ProjectRoot:     projectRoot,
+			AllowLocalFetch: resumeAllowLocalFetch,
 		})
+		if resumeBashTimeout > 0 {
+			runCtx = tools.WithBashTimeout(runCtx, resumeBashTimeout)
+		}
 		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
 			Timeout:          cfg.AgentTimeout,
 			CompactThreshold: cfg.CompactThreshold,
