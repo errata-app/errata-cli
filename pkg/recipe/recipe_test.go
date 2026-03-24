@@ -95,38 +95,26 @@ func TestParse_VersionBeforeTitle(t *testing.T) {
 	assert.Equal(t, "My Recipe", r.Name)
 }
 
-// ─── BuildRunner tests ──────────────────────────────────────────────────────
+// ─── ValidateVersion tests ──────────────────────────────────────────────────
 
-func TestBuildRunner_V1(t *testing.T) {
+func TestValidateVersion_V1(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- m\n")))
 	require.NoError(t, err)
-
-	runner, err := r.BuildRunner()
-	require.NoError(t, err)
-	assert.Equal(t, 1, runner.Version())
-	assert.Equal(t, r, runner.Recipe())
+	require.NoError(t, r.ValidateVersion())
 }
 
-func TestBuildRunner_UnsupportedVersion(t *testing.T) {
-	// Construct a recipe directly with an unsupported version.
+func TestValidateVersion_Unsupported(t *testing.T) {
 	r := &recipe.Recipe{Version: 99}
-	_, err := r.BuildRunner()
+	err := r.ValidateVersion()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported recipe version 99")
 }
 
-func TestBuildRunner_ZeroVersion(t *testing.T) {
+func TestValidateVersion_Zero(t *testing.T) {
 	r := &recipe.Recipe{}
-	_, err := r.BuildRunner()
+	err := r.ValidateVersion()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported recipe version 0")
-}
-
-func TestNewV1Runner_WrongVersion(t *testing.T) {
-	r := &recipe.Recipe{Version: 2}
-	_, err := recipe.NewV1Runner(r)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected version 1")
 }
 
 func TestMaxVersion(t *testing.T) {
@@ -484,7 +472,7 @@ func TestParse_SummarizationPrompt(t *testing.T) {
 Summarize for context continuity. Preserve: file paths, decisions.
 `)))
 	require.NoError(t, err)
-	assert.Contains(t, r.SummarizationPrompt, "context continuity")
+	assert.Contains(t, r.Context.SummarizationPrompt, "context continuity")
 }
 
 // ─── Gap 7: Output Processing ────────────────────────────────────────────────
@@ -512,29 +500,6 @@ truncation: head
 	wf := r.OutputProcessing["web_fetch"]
 	assert.Equal(t, 5000, wf.MaxTokens)
 	assert.Equal(t, "head", wf.Truncation)
-}
-
-// ─── Model Profiles ──────────────────────────────────────────────────────────
-
-func TestParse_ModelProfiles(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Model Profiles
-### gpt-4o
-context_budget: 32000
-tool_format: function_calling
-mid_convo_system: false
-
-### gemini-2.0-flash
-context_budget: 1000000
-`)))
-	require.NoError(t, err)
-	require.Len(t, r.ModelProfiles, 2)
-
-	gpt := r.ModelProfiles["gpt-4o"]
-	assert.Equal(t, 32000, gpt.ContextBudget)
-
-	gemini := r.ModelProfiles["gemini-2.0-flash"]
-	assert.Equal(t, 1000000, gemini.ContextBudget)
 }
 
 // ─── Backward Compatibility ──────────────────────────────────────────────────
@@ -624,8 +589,7 @@ seed: 42
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
 	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
 
-	assert.Len(t, r.ModelProfiles, 1)
-	assert.NotEmpty(t, r.SummarizationPrompt)
+	assert.NotEmpty(t, r.Context.SummarizationPrompt)
 	assert.Len(t, r.OutputProcessing, 1)
 }
 
@@ -645,7 +609,7 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Len(t, r.Models, 3)
 
 	// Context Summarization Prompt
-	assert.Contains(t, r.SummarizationPrompt, "Summarize this conversation")
+	assert.Contains(t, r.Context.SummarizationPrompt, "Summarize this conversation")
 
 	// Output Processing
 	require.NotNil(t, r.OutputProcessing)
@@ -656,16 +620,6 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Equal(t, "head_tail", r.OutputProcessing["search_code"].Truncation)
 	assert.Equal(t, 500, r.OutputProcessing["read_file"].MaxLines)
 
-	// Model Profiles
-	require.NotNil(t, r.ModelProfiles)
-	gpt := r.ModelProfiles["gpt-4o"]
-	assert.Equal(t, 128000, gpt.ContextBudget)
-
-	gemini := r.ModelProfiles["gemini-2.0-flash"]
-	assert.Equal(t, 1000000, gemini.ContextBudget)
-
-	llama := r.ModelProfiles["local-llama"]
-	assert.Equal(t, 8192, llama.ContextBudget)
 }
 
 // ─── Parse edge cases ───────────────────────────────────────────────────────
@@ -714,14 +668,13 @@ func TestParse_Constraints_InvalidMaxSteps(t *testing.T) {
 // ─── Empty new sections ─────────────────────────────────────────────────────
 
 func TestParse_EmptyNewSections(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
+	_, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tool Descriptions
 ## Model Profiles
 ## System Reminders
 ## Hooks
 `)))
 	require.NoError(t, err)
-	assert.Nil(t, r.ModelProfiles)
 }
 
 // ─── MarshalMarkdown tests ───────────────────────────────────────────────────

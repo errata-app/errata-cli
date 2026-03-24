@@ -662,10 +662,8 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 			Guidance:     map[string]string{"bash": "use tools wisely"},
 		},
 		Constraints:         recipe.ConstraintsConfig{MaxSteps: 5, Timeout: 3 * time.Minute},
-		Context:             recipe.ContextConfig{MaxHistoryTurns: 10, Strategy: "auto_compact", CompactThreshold: 0.8, TaskMode: "sequential"},
+		Context:             recipe.ContextConfig{MaxHistoryTurns: 10, Strategy: "auto_compact", CompactThreshold: 0.8, TaskMode: "sequential", SummarizationPrompt: "summarize it"},
 		OutputProcessing:    map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
-		ModelProfiles:       map[string]recipe.ModelProfileConfig{"claude": {ContextBudget: 100000}},
-		SummarizationPrompt: "summarize it",
 	}
 	s.lastActiveTools = []string{"bash", "read_file"}
 

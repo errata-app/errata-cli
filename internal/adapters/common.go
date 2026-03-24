@@ -154,7 +154,7 @@ func DispatchTool(
 	case tools.WebFetchToolName:
 		rawURL := args["url"]
 		onEvent(models.AgentEvent{Type: models.EventReading, Data: rawURL})
-		return applyOutputProcessing(ctx, name, tools.ExecuteWebFetch(rawURL)), true
+		return applyOutputProcessing(ctx, name, tools.ExecuteWebFetch(ctx, rawURL)), true
 
 	case tools.WebSearchToolName:
 		query := args["query"]

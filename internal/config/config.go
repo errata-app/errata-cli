@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/errata-app/errata-cli/pkg/recipe"
@@ -62,35 +61,6 @@ type Config struct {
 	// DataDir is the root directory for all persistent data files.
 	// Default is "data"; override via ERRATA_DATA_DIR env var.
 	DataDir string
-
-	// MCPServers is the serialised MCP server config (set via recipe ## MCP Servers).
-	// Format: "name:command arg1 arg2,name2:command2"
-	// Empty disables MCP entirely.
-	MCPServers string
-
-	// SystemPromptExtra is appended after the built-in tool guidance in every
-	// adapter's system prompt. Use for project-specific context, coding conventions,
-	// or domain knowledge that should influence all models.
-	// Set via recipe ## System Prompt.
-	SystemPromptExtra string
-
-// MaxSteps is the maximum number of agentic tool-use turns per adapter.
-	// 0 means unlimited. Set via recipe ## Constraints max_steps:.
-	MaxSteps int
-
-	// AgentTimeout is the per-adapter wall-clock timeout for a single RunAgent call.
-	// 0 means use the runner's built-in default (5 minutes).
-	// Set via recipe ## Constraints timeout:.
-	AgentTimeout time.Duration
-
-	// CompactThreshold is the context fill fraction that triggers auto-compact.
-	// 0 means use the runner's built-in default (0.80).
-	// Set via recipe ## Context compact_threshold:.
-	CompactThreshold float64
-
-	// MaxHistoryTurns is the maximum number of conversation turns kept per model.
-	// Default is 20. Set via recipe ## Context max_history_turns:.
-	MaxHistoryTurns int
 
 }
 

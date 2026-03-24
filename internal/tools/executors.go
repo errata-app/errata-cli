@@ -15,18 +15,20 @@ import (
 	"github.com/errata-app/errata-cli/internal/sandbox"
 )
 
-// bashTimeoutOverride, when > 0, overrides the default bash timeout.
-// Set via SetBashTimeout (recipe ## Constraints bash_timeout:).
-var bashTimeoutOverride time.Duration
+// bashTimeoutKey is the context key for the bash tool timeout override.
+type bashTimeoutKey struct{}
 
-// SetBashTimeout overrides the default bash tool timeout.
-// Pass 0 to reset to the default.
-func SetBashTimeout(d time.Duration) { bashTimeoutOverride = d }
+// WithBashTimeout returns a context carrying the given bash timeout.
+// When set, ExecuteBash uses this instead of the default 2-minute timeout.
+func WithBashTimeout(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, bashTimeoutKey{}, d)
+}
 
-// bashTimeout returns the effective bash timeout.
-func bashTimeout() time.Duration {
-	if bashTimeoutOverride > 0 {
-		return bashTimeoutOverride
+// bashTimeoutFromContext returns the bash timeout from ctx,
+// falling back to defaultBashTimeout when none is set.
+func bashTimeoutFromContext(ctx context.Context) time.Duration {
+	if d, ok := ctx.Value(bashTimeoutKey{}).(time.Duration); ok && d > 0 {
+		return d
 	}
 	return defaultBashTimeout
 }
@@ -399,7 +401,7 @@ func ExecuteBash(ctx context.Context, command string) string {
 		}
 	}
 
-	timeout := bashTimeout()
+	timeout := bashTimeoutFromContext(ctx)
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 

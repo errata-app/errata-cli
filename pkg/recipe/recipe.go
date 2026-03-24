@@ -50,14 +50,8 @@ type Recipe struct {
 	Tasks           []string
 	SuccessCriteria []string
 
-	// Context summarization prompt (applied to all models).
-	SummarizationPrompt string
-
 	// Deterministic output processing rules (applied to all models).
 	OutputProcessing map[string]OutputRuleConfig // tool → rule
-
-	// Model profiles for capability overrides
-	ModelProfiles map[string]ModelProfileConfig // model_id → profile
 
 	// SectionsPresent tracks which ## sections were declared in the parsed recipe.
 	// nil for programmatic recipes; populated by parseV1(). Used by ApplyRecipe
@@ -100,10 +94,11 @@ type ConstraintsConfig struct {
 
 // ContextConfig controls conversation history management.
 type ContextConfig struct {
-	MaxHistoryTurns  int     // 0 = not set
-	Strategy         string  // "" | "auto_compact" | "manual" | "off"
-	CompactThreshold float64 // 0 = not set
-	TaskMode         string  // "" | "independent" | "sequential"
+	MaxHistoryTurns     int     // 0 = not set
+	Strategy            string  // "" | "auto_compact" | "manual" | "off"
+	CompactThreshold    float64 // 0 = not set
+	TaskMode            string  // "" | "independent" | "sequential"
+	SummarizationPrompt string  // "" = use default
 }
 
 // SandboxConfig restricts the execution environment.
@@ -121,52 +116,16 @@ type OutputRuleConfig struct {
 	TruncationMessage string // template with {line_count}, {token_count}
 }
 
-// ModelProfileConfig overrides auto-discovered model capabilities.
-type ModelProfileConfig struct {
-	ContextBudget int // override context window budget (0 = not set)
-}
-
-// ─── Runner (version-pinned execution) ──────────────────────────────────────
-
-// Runner encapsulates version-specific recipe execution behavior.
-// Each recipe version maps to its own Runner implementation, ensuring
-// that a recipe's runtime behavior is pinned to the version it was written for.
-type Runner interface {
-	// Version returns the recipe format version this runner implements.
-	Version() int
-	// Recipe returns the underlying recipe configuration.
-	Recipe() *Recipe
-}
-
-// v1Runner implements Runner for version 1 recipes.
-type v1Runner struct {
-	recipe *Recipe
-}
-
-// NewV1Runner creates a Runner for a version 1 recipe.
-func NewV1Runner(r *Recipe) (Runner, error) {
-	if r.Version != 1 {
-		return nil, fmt.Errorf("NewV1Runner: expected version 1, got %d", r.Version)
-	}
-	return &v1Runner{recipe: r}, nil
-}
-
-func (v *v1Runner) Version() int    { return 1 }
-func (v *v1Runner) Recipe() *Recipe { return v.recipe }
-
-// BuildRunner creates a version-specific Runner for this recipe.
-// Returns an error if the recipe version is unsupported.
-func (r *Recipe) BuildRunner() (Runner, error) {
-	switch r.Version {
-	case 1:
-		return NewV1Runner(r)
-	default:
-		return nil, fmt.Errorf("unsupported recipe version %d (max supported: %d)", r.Version, MaxVersion)
-	}
-}
-
 // MaxVersion is the highest recipe version supported by this binary.
 const MaxVersion = 1
+
+// ValidateVersion returns an error if the recipe version is unsupported.
+func (r *Recipe) ValidateVersion() error {
+	if r.Version < 1 || r.Version > MaxVersion {
+		return fmt.Errorf("unsupported recipe version %d (max supported: %d)", r.Version, MaxVersion)
+	}
+	return nil
+}
 
 // HasSection reports whether the named section (lowercase) was declared in the
 // parsed recipe file. Returns false when SectionsPresent is nil, which is the
@@ -323,14 +282,9 @@ func parseV1(data []byte) (*Recipe, error) {
 		case "success criteria":
 			r.SuccessCriteria = parseList(body)
 		case "context summarization prompt":
-			r.SummarizationPrompt = parseProse(body)
+			r.Context.SummarizationPrompt = parseProse(body)
 		case "output processing":
 			r.OutputProcessing = parseOutputRules(body)
-		case "model profiles":
-			r.ModelProfiles = parseModelProfiles(body)
-		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata":
-			// Removed sections — silently ignored for backward compatibility.
-
 		default:
 			fmt.Fprintf(os.Stderr, "recipe: unknown section %q, skipping\n", s.header)
 		}
@@ -458,26 +412,6 @@ func parseOneOutputRule(body string) OutputRuleConfig {
 		rule.TruncationMessage = v
 	}
 	return rule
-}
-
-// parseModelProfiles parses ### sub-sections into ModelProfileConfig entries.
-func parseModelProfiles(body string) map[string]ModelProfileConfig {
-	subs := splitSubSections(body)
-	if len(subs) == 0 {
-		return nil
-	}
-	m := make(map[string]ModelProfileConfig, len(subs))
-	for _, s := range subs {
-		kv := parseMap(s.body)
-		var p ModelProfileConfig
-		if v, ok := kv["context_budget"]; ok {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				p.ContextBudget = n
-			}
-		}
-		m[s.name] = p
-	}
-	return m
 }
 
 // parseTools parses the ## Tools section into a ToolsConfig.
@@ -784,9 +718,9 @@ func (r *Recipe) MarshalMarkdown() string {
 	}
 
 	// Context Summarization Prompt
-	if r.SummarizationPrompt != "" {
+	if r.Context.SummarizationPrompt != "" {
 		sb.WriteString("\n## Context Summarization Prompt\n")
-		sb.WriteString(r.SummarizationPrompt)
+		sb.WriteString(r.Context.SummarizationPrompt)
 		sb.WriteByte('\n')
 	}
 

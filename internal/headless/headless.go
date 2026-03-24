@@ -21,7 +21,6 @@ import (
 
 	"github.com/errata-app/errata-cli/internal/adapters"
 	"github.com/errata-app/errata-cli/internal/checkpoint"
-	"github.com/errata-app/errata-cli/internal/config"
 	"github.com/errata-app/errata-cli/internal/criteria"
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
@@ -37,7 +36,6 @@ type Options struct {
 	Recipe         *recipe.Recipe
 	Adapters       []models.ModelAdapter
 	SessionID      string
-	Cfg            config.Config
 	OutputDir      string // directory for output reports (required)
 	CheckpointPath string // path for checkpoint file (required)
 	Verbose        bool
@@ -66,7 +64,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	rec := opts.Recipe
 
 	// Validate recipe version before execution.
-	if _, err := rec.BuildRunner(); err != nil {
+	if err := rec.ValidateVersion(); err != nil {
 		return nil, err
 	}
 
@@ -134,19 +132,6 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		// Independent mode: reset histories each task.
 		if taskMode == "independent" {
 			histories = make(map[string][]models.ConversationTurn)
-		}
-
-		// Auto-compact in sequential mode when threshold exceeded.
-		if taskMode == "sequential" && rec.Context.Strategy != "manual" && rec.Context.Strategy != "off" {
-			for _, ad := range opts.Adapters {
-				if runner.ShouldAutoCompact(histories, ad.ID(), opts.Cfg.CompactThreshold) {
-					fmt.Fprintf(w, "  [auto-compacting history for %s…]\n", ad.ID())
-					histories = runner.CompactHistories(
-						ctx, []models.ModelAdapter{ad},
-						histories, func(id string, e models.AgentEvent) {},
-					)
-				}
-			}
 		}
 
 		runCtx := buildRunContext(ctx, opts, rec, activeDefs, workDirs)
@@ -326,17 +311,21 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	if rec.Tools != nil {
 		ctx = tools.WithToolGuidanceMap(ctx, rec.Tools.Guidance)
 	}
-	ctx = prompt.WithSummarizationPrompt(ctx, rec.SummarizationPrompt)
+	ctx = prompt.WithSummarizationPrompt(ctx, rec.Context.SummarizationPrompt)
 	ctx = sandbox.WithConfig(ctx, sandbox.Config{
-		Filesystem:  rec.Sandbox.Filesystem,
-		Network:     rec.Sandbox.Network,
-		ProjectRoot: rec.Constraints.ProjectRoot,
+		Filesystem:      rec.Sandbox.Filesystem,
+		Network:         rec.Sandbox.Network,
+		ProjectRoot:     rec.Constraints.ProjectRoot,
+		AllowLocalFetch: rec.Sandbox.AllowLocalFetch,
 	})
+	if rec.Constraints.BashTimeout > 0 {
+		ctx = tools.WithBashTimeout(ctx, rec.Constraints.BashTimeout)
+	}
 	ctx = runner.WithRunOptions(ctx, runner.RunOptions{
-		Timeout:          opts.Cfg.AgentTimeout,
-		CompactThreshold: opts.Cfg.CompactThreshold,
-		MaxHistoryTurns:  opts.Cfg.MaxHistoryTurns,
-		MaxSteps:         opts.Cfg.MaxSteps,
+		Timeout:          rec.Constraints.Timeout,
+		CompactThreshold: rec.Context.CompactThreshold,
+		MaxHistoryTurns:  rec.Context.MaxHistoryTurns,
+		MaxSteps:         rec.Constraints.MaxSteps,
 		CheckpointPath:   opts.CheckpointPath,
 		WorkDirs:         workDirs,
 	})

@@ -159,7 +159,7 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	prog := a.prog
 	var compactSumPrompt string
 	if compactRec := a.store.ActiveRecipe(); compactRec != nil {
-		compactSumPrompt = compactRec.SummarizationPrompt
+		compactSumPrompt = compactRec.Context.SummarizationPrompt
 	}
 	app, printCmd := a.withMessage("Compacting conversation history…")
 	return app, tea.Batch(printCmd, func() tea.Msg {
@@ -300,12 +300,21 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		})
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
-	var sumPrompt string
-	var recSystemPrompt string
+	var sumPrompt, recSystemPrompt string
 	var recToolGuidanceMap map[string]string
+	var bashTimeout, agentTimeout time.Duration
+	var allowLocalFetch bool
+	var compactThreshold float64
+	var maxHistoryTurns, maxSteps int
 	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
-		sumPrompt = activeRec.SummarizationPrompt
+		sumPrompt = activeRec.Context.SummarizationPrompt
 		recSystemPrompt = activeRec.SystemPrompt
+		bashTimeout = activeRec.Constraints.BashTimeout
+		allowLocalFetch = activeRec.Sandbox.AllowLocalFetch
+		agentTimeout = activeRec.Constraints.Timeout
+		compactThreshold = activeRec.Context.CompactThreshold
+		maxHistoryTurns = activeRec.Context.MaxHistoryTurns
+		maxSteps = activeRec.Constraints.MaxSteps
 		if activeRec.Tools != nil {
 			activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.Tools.Guidance)
 			recToolGuidanceMap = activeRec.Tools.Guidance
@@ -317,7 +326,6 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	sandboxFilesystem := a.sandboxFilesystem
 	sandboxNetwork := a.sandboxNetwork
 	projectRoot := a.projectRoot
-	cfg := a.cfg
 	cpPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
@@ -337,7 +345,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		if contextStrategy != "manual" && contextStrategy != "off" {
 			compactCtx := prompt.WithSummarizationPrompt(baseCtx, sumPrompt)
 			for _, ad := range ads {
-				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
+				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), compactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
 						Type: models.EventText, Data: "[auto-compacting history…]",
 					}})
@@ -355,15 +363,19 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
 		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
-			Filesystem:  sandboxFilesystem,
-			Network:     sandboxNetwork,
-			ProjectRoot: projectRoot,
+			Filesystem:      sandboxFilesystem,
+			Network:         sandboxNetwork,
+			ProjectRoot:     projectRoot,
+			AllowLocalFetch: allowLocalFetch,
 		})
+		if bashTimeout > 0 {
+			runCtx = tools.WithBashTimeout(runCtx, bashTimeout)
+		}
 		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
-			Timeout:          cfg.AgentTimeout,
-			CompactThreshold: cfg.CompactThreshold,
-			MaxHistoryTurns:  cfg.MaxHistoryTurns,
-			MaxSteps:         cfg.MaxSteps,
+			Timeout:          agentTimeout,
+			CompactThreshold: compactThreshold,
+			MaxHistoryTurns:  maxHistoryTurns,
+			MaxSteps:         maxSteps,
 			CheckpointPath:   cpPath,
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, recSystemPrompt)
@@ -528,12 +540,21 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		})
 	}
 	// Apply recipe-level tool description overrides (uniform for all models).
-	var resumeSumPrompt string
-	var resumeSystemPrompt string
+	var resumeSumPrompt, resumeSystemPrompt string
 	var resumeToolGuidanceMap map[string]string
+	var resumeBashTimeout, resumeAgentTimeout time.Duration
+	var resumeAllowLocalFetch bool
+	var resumeCompactThreshold float64
+	var resumeMaxHistoryTurns, resumeMaxSteps int
 	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
-		resumeSumPrompt = resumeRec.SummarizationPrompt
+		resumeSumPrompt = resumeRec.Context.SummarizationPrompt
 		resumeSystemPrompt = resumeRec.SystemPrompt
+		resumeBashTimeout = resumeRec.Constraints.BashTimeout
+		resumeAllowLocalFetch = resumeRec.Sandbox.AllowLocalFetch
+		resumeAgentTimeout = resumeRec.Constraints.Timeout
+		resumeCompactThreshold = resumeRec.Context.CompactThreshold
+		resumeMaxHistoryTurns = resumeRec.Context.MaxHistoryTurns
+		resumeMaxSteps = resumeRec.Constraints.MaxSteps
 		if resumeRec.Tools != nil {
 			activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.Tools.Guidance)
 			resumeToolGuidanceMap = resumeRec.Tools.Guidance
@@ -545,7 +566,6 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	sandboxFilesystem := a.sandboxFilesystem
 	sandboxNetwork := a.sandboxNetwork
 	projectRoot := a.projectRoot
-	cfg := a.cfg
 	resumeCPPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
@@ -564,7 +584,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		if contextStrategy != "manual" && contextStrategy != "off" {
 			compactCtx := prompt.WithSummarizationPrompt(baseCtx, resumeSumPrompt)
 			for _, ad := range ads {
-				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), cfg.CompactThreshold) {
+				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), resumeCompactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
 						Type: models.EventText, Data: "[auto-compacting history…]",
 					}})
@@ -582,15 +602,19 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
 		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
 		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
-			Filesystem:  sandboxFilesystem,
-			Network:     sandboxNetwork,
-			ProjectRoot: projectRoot,
+			Filesystem:      sandboxFilesystem,
+			Network:         sandboxNetwork,
+			ProjectRoot:     projectRoot,
+			AllowLocalFetch: resumeAllowLocalFetch,
 		})
+		if resumeBashTimeout > 0 {
+			runCtx = tools.WithBashTimeout(runCtx, resumeBashTimeout)
+		}
 		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
-			Timeout:          cfg.AgentTimeout,
-			CompactThreshold: cfg.CompactThreshold,
-			MaxHistoryTurns:  cfg.MaxHistoryTurns,
-			MaxSteps:         cfg.MaxSteps,
+			Timeout:          resumeAgentTimeout,
+			CompactThreshold: resumeCompactThreshold,
+			MaxHistoryTurns:  resumeMaxHistoryTurns,
+			MaxSteps:         resumeMaxSteps,
 			CheckpointPath:   resumeCPPath,
 		})
 		runCtx = tools.WithSystemPromptExtra(runCtx, resumeSystemPrompt)
@@ -775,7 +799,7 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 					case "system-prompt":
 						content = sessRec.SystemPrompt
 					case "context-summarization":
-						content = sessRec.SummarizationPrompt
+						content = sessRec.Context.SummarizationPrompt
 					}
 					a.configTextArea.SetValue(content)
 					a.configTextArea.Focus()

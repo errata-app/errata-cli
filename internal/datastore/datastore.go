@@ -326,6 +326,12 @@ func (s *Store) UpdateLastRunNote(note string) {
 	}
 }
 
+// PersistSessionRecipe writes the current session recipe to disk.
+// Safe to call when sessionRecipe is nil (no-op).
+func (s *Store) PersistSessionRecipe() {
+	s.persistSessionRecipe(s.sessionRecipe)
+}
+
 // persistSessionRecipe writes the recipe to the per-session recipe.md.
 func (s *Store) persistSessionRecipe(rec *recipe.Recipe) {
 	if s.sessionRecipePath == "" || rec == nil {
@@ -537,7 +543,7 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 		if rec.Tools != nil {
 			snap.ToolDescriptions = rec.Tools.Guidance
 		}
-		snap.SummarizationPrompt = rec.SummarizationPrompt
+		snap.SummarizationPrompt = rec.Context.SummarizationPrompt
 
 		if rec.Tools != nil {
 			snap.BashPrefixes = rec.Tools.BashPrefixes
@@ -574,14 +580,6 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 			}
 		}
 
-		if len(rec.ModelProfiles) > 0 {
-			snap.ModelProfiles = make(map[string]recipestore.ModelProfileConfig, len(rec.ModelProfiles))
-			for name, p := range rec.ModelProfiles {
-				snap.ModelProfiles[name] = recipestore.ModelProfileConfig{
-					ContextBudget: p.ContextBudget,
-				}
-			}
-		}
 	}
 
 	// Populate tools from the last run's active tool list.

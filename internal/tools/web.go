@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/errata-app/errata-cli/internal/sandbox"
 	"golang.org/x/net/html"
 	"golang.org/x/sync/singleflight"
 )
@@ -18,13 +20,6 @@ import (
 // is made and both receive the identical result, preventing rate-limiting and
 // ensuring consistent content across models.
 var webFetchGroup singleflight.Group
-
-// allowLocalFetch controls whether web_fetch may target localhost URLs.
-// Set via SetAllowLocalFetch (recipe ## Sandbox allow_local_fetch:).
-var allowLocalFetch bool
-
-// SetAllowLocalFetch enables or disables web_fetch for localhost URLs.
-func SetAllowLocalFetch(b bool) { allowLocalFetch = b }
 
 // webFetchOutputLimit is the maximum bytes returned from a web_fetch call.
 const webFetchOutputLimit = 50_000
@@ -40,7 +35,7 @@ const webFetchUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Apple
 // HTML pages are stripped to plain text. Output is capped at webFetchOutputLimit bytes.
 // Concurrent calls for the same URL are deduplicated via singleflight — only one
 // HTTP request goes out, and all callers receive the identical result.
-func ExecuteWebFetch(rawURL string) string {
+func ExecuteWebFetch(ctx context.Context, rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Sprintf("[error: invalid URL: %v]", err)
@@ -50,7 +45,8 @@ func ExecuteWebFetch(rawURL string) string {
 	}
 	host := u.Hostname()
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		if !allowLocalFetch {
+		sbCfg, _ := sandbox.ConfigFromContext(ctx)
+		if !sbCfg.AllowLocalFetch {
 			return "[error: fetching localhost URLs is disabled; set allow_local_fetch: true in recipe ## Sandbox to enable]"
 		}
 	}

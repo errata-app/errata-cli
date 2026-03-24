@@ -32,8 +32,7 @@ type RecipeSnapshot struct {
 	Constraints      *ConstraintsConfig            `json:"constraints,omitempty"`
 	Context          *ContextConfig                `json:"context,omitempty"`
 	OutputProcessing map[string]OutputRuleConfig   `json:"output_processing,omitempty"`
-	SummarizationPrompt string                        `json:"summarization_prompt,omitempty"`
-	ModelProfiles       map[string]ModelProfileConfig `json:"model_profiles,omitempty"`
+	SummarizationPrompt string `json:"summarization_prompt,omitempty"`
 }
 
 // ConstraintsConfig captures constraint settings relevant to preference comparison.
@@ -56,11 +55,6 @@ type OutputRuleConfig struct {
 	MaxTokens         int    `json:"max_tokens,omitempty"`
 	Truncation        string `json:"truncation,omitempty"`
 	TruncationMessage string `json:"truncation_message,omitempty"`
-}
-
-// ModelProfileConfig captures capability overrides for a model.
-type ModelProfileConfig struct {
-	ContextBudget int `json:"context_budget,omitempty"`
 }
 
 // Hash returns the content-addressed key for a RecipeSnapshot.
