@@ -139,7 +139,6 @@ func queryGeminiCapabilities(ctx context.Context, client *genai.Client, apiModel
 
 	if info.InputTokenLimit > 0 {
 		baseCaps.ContextWindow = int(info.InputTokenLimit)
-		baseCaps.ContextWindowSource = models.SourceAPI
 	}
 	if info.OutputTokenLimit > 0 {
 		baseCaps.MaxOutputTokens = int(info.OutputTokenLimit)

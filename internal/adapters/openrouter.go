@@ -47,7 +47,6 @@ func (a *OpenRouterAdapter) Capabilities(_ context.Context) models.ModelCapabili
 	// Use context window from pricing data if available (sourced from OpenRouter API).
 	if cw := pricing.ContextWindowTokens(a.modelID); cw > 0 {
 		caps.ContextWindow = int(cw)
-		caps.ContextWindowSource = models.SourceAPI
 	}
 
 	return caps

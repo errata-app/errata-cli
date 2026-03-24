@@ -302,17 +302,6 @@ func fetchOpenRouterPricing() (map[string]modelPricing, error) {
 	return table, nil
 }
 
-// PricingFor returns the per-million-token USD rates for a model. qualifiedID
-// follows the same "provider/model" convention as CostUSD (e.g.
-// "anthropic/claude-sonnet-4-6"). Returns ok=false for unknown models.
-func PricingFor(qualifiedID string) (inputPMT, outputPMT float64, ok bool) {
-	p, found := resolvePricing(qualifiedID)
-	if !found {
-		return 0, 0, false
-	}
-	return p.InputPMT, p.OutputPMT, true
-}
-
 // ContextWindowTokens returns the known context window size in tokens for modelID, or 0
 // if the model is unknown. Uses the same qualified→bare lookup chain as CostUSD.
 func ContextWindowTokens(modelID string) int64 {

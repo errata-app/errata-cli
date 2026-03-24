@@ -185,32 +185,6 @@ func TestProviderQualifiedID_LiteLLM_PassThrough(t *testing.T) {
 	assert.Equal(t, "litellm/claude-sonnet-4-6", ProviderQualifiedID("LiteLLM", "litellm/claude-sonnet-4-6"))
 }
 
-// ─── PricingFor ───────────────────────────────────────────────────────────────
-
-func TestPricingFor_KnownModel(t *testing.T) {
-	resetDynamicPricing(t)
-	in, out, ok := PricingFor("claude-sonnet-4-6")
-	assert.True(t, ok)
-	assert.Greater(t, in, 0.0)
-	assert.Greater(t, out, 0.0)
-}
-
-func TestPricingFor_QualifiedIDFallback(t *testing.T) {
-	resetDynamicPricing(t)
-	in1, out1, ok1 := PricingFor("claude-sonnet-4-6")
-	in2, out2, ok2 := PricingFor("anthropic/claude-sonnet-4-6")
-	assert.True(t, ok1)
-	assert.True(t, ok2)
-	assert.InDelta(t, in1, in2, 0.0001)
-	assert.InDelta(t, out1, out2, 0.0001)
-}
-
-func TestPricingFor_UnknownModel_ReturnsFalse(t *testing.T) {
-	resetDynamicPricing(t)
-	_, _, ok := PricingFor("no-such-model-xyz")
-	assert.False(t, ok)
-}
-
 // TestLoadPricing_MissingCache_FallsBackToHardcoded verifies that when no
 // cache file exists and the OpenRouter fetch fails, the hardcoded table is used.
 func TestLoadPricing_MissingCache_FallsBackToHardcoded(t *testing.T) {
@@ -318,24 +292,6 @@ func TestCostUSD_NonDateSuffix_NotStripped(t *testing.T) {
 	resetDynamicPricing(t)
 	cost := CostUSD("gpt-4o-mini", 1_000_000, 1_000_000)
 	assert.InDelta(t, 0.75, cost, 0.001) // $0.15 in + $0.60 out
-}
-
-// ─── Date-suffix fallback: PricingFor ───────────────────────────────────────
-
-func TestPricingFor_DateSuffix_YYYYMMDD(t *testing.T) {
-	resetDynamicPricing(t)
-	in, out, ok := PricingFor("anthropic/claude-sonnet-4-6-20250714")
-	assert.True(t, ok)
-	assert.InDelta(t, 3.0, in, 0.001)
-	assert.InDelta(t, 15.0, out, 0.001)
-}
-
-func TestPricingFor_DateSuffix_ISO(t *testing.T) {
-	resetDynamicPricing(t)
-	in, out, ok := PricingFor("openai/gpt-4o-2024-08-06")
-	assert.True(t, ok)
-	assert.InDelta(t, 2.50, in, 0.001)
-	assert.InDelta(t, 10.0, out, 0.001)
 }
 
 // ─── Date-suffix fallback: ContextWindowTokens ──────────────────────────────

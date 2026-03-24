@@ -67,7 +67,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	rec := opts.Recipe
 
 	// Validate recipe version before execution.
-	if _, err := rec.BuildRunner(); err != nil {
+	if err := rec.ValidateVersion(); err != nil {
 		return nil, err
 	}
 

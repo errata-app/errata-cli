@@ -124,14 +124,12 @@ func DefaultCapabilities(provider, modelID string) models.ModelCapabilities {
 	// Try exact model match first.
 	if caps, ok := modelDefaults[qualifiedID]; ok {
 		caps.ModelID = modelID
-		caps.ContextWindowSource = models.SourceDefault
 		return caps
 	}
 
 	// Fall back to provider-level defaults.
 	if caps, ok := providerDefaults[provider]; ok {
 		caps.ModelID = modelID
-		caps.ContextWindowSource = models.SourceDefault
 		log.Printf("capabilities: using provider-level defaults for %s (no model-specific entry)", qualifiedID)
 		return caps
 	}

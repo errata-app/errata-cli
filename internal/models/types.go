@@ -80,21 +80,12 @@ type ModelResponse struct {
 // OK returns true when the response carries no error.
 func (r ModelResponse) OK() bool { return r.Error == "" }
 
-// CapabilitySource indicates where a capability value was determined.
-type CapabilitySource int
-
-const (
-	SourceDefault CapabilitySource = iota // hardcoded fallback
-	SourceAPI                             // discovered from provider API
-)
-
 // ModelCapabilities describes a model's known capabilities.
 type ModelCapabilities struct {
-	ModelID             string
-	Provider            string
-	ContextWindow       int
-	MaxOutputTokens     int
-	ContextWindowSource CapabilitySource
+	ModelID         string
+	Provider        string
+	ContextWindow   int
+	MaxOutputTokens int
 }
 
 // ModelAdapter is the interface every provider adapter must implement.

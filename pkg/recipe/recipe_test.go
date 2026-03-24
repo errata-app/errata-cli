@@ -95,38 +95,26 @@ func TestParse_VersionBeforeTitle(t *testing.T) {
 	assert.Equal(t, "My Recipe", r.Name)
 }
 
-// ─── BuildRunner tests ──────────────────────────────────────────────────────
+// ─── ValidateVersion tests ──────────────────────────────────────────────────
 
-func TestBuildRunner_V1(t *testing.T) {
+func TestValidateVersion_V1(t *testing.T) {
 	r, err := recipe.Parse(writeRecipe(t, v1("## Models\n- m\n")))
 	require.NoError(t, err)
-
-	runner, err := r.BuildRunner()
-	require.NoError(t, err)
-	assert.Equal(t, 1, runner.Version())
-	assert.Equal(t, r, runner.Recipe())
+	require.NoError(t, r.ValidateVersion())
 }
 
-func TestBuildRunner_UnsupportedVersion(t *testing.T) {
-	// Construct a recipe directly with an unsupported version.
+func TestValidateVersion_UnsupportedVersion(t *testing.T) {
 	r := &recipe.Recipe{Version: 99}
-	_, err := r.BuildRunner()
+	err := r.ValidateVersion()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported recipe version 99")
 }
 
-func TestBuildRunner_ZeroVersion(t *testing.T) {
+func TestValidateVersion_ZeroVersion(t *testing.T) {
 	r := &recipe.Recipe{}
-	_, err := r.BuildRunner()
+	err := r.ValidateVersion()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported recipe version 0")
-}
-
-func TestNewV1Runner_WrongVersion(t *testing.T) {
-	r := &recipe.Recipe{Version: 2}
-	_, err := recipe.NewV1Runner(r)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected version 1")
 }
 
 func TestMaxVersion(t *testing.T) {

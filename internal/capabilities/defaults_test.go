@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/errata-app/errata-cli/internal/capabilities"
-	"github.com/errata-app/errata-cli/internal/models"
 )
 
 func TestDefaultCapabilities_Anthropic(t *testing.T) {
@@ -14,7 +13,6 @@ func TestDefaultCapabilities_Anthropic(t *testing.T) {
 	assert.Equal(t, "anthropic", caps.Provider)
 	assert.Equal(t, 200_000, caps.ContextWindow)
 	assert.Equal(t, 16_000, caps.MaxOutputTokens)
-	assert.Equal(t, models.SourceDefault, caps.ContextWindowSource)
 }
 
 func TestDefaultCapabilities_OpenAI(t *testing.T) {
