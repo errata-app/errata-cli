@@ -514,29 +514,6 @@ truncation: head
 	assert.Equal(t, "head", wf.Truncation)
 }
 
-// ─── Model Profiles ──────────────────────────────────────────────────────────
-
-func TestParse_ModelProfiles(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
-## Model Profiles
-### gpt-4o
-context_budget: 32000
-tool_format: function_calling
-mid_convo_system: false
-
-### gemini-2.0-flash
-context_budget: 1000000
-`)))
-	require.NoError(t, err)
-	require.Len(t, r.ModelProfiles, 2)
-
-	gpt := r.ModelProfiles["gpt-4o"]
-	assert.Equal(t, 32000, gpt.ContextBudget)
-
-	gemini := r.ModelProfiles["gemini-2.0-flash"]
-	assert.Equal(t, 1000000, gemini.ContextBudget)
-}
-
 // ─── Backward Compatibility ──────────────────────────────────────────────────
 
 func TestParse_FullRecipe_BackwardCompat(t *testing.T) {
@@ -624,7 +601,6 @@ seed: 42
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
 	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
 
-	assert.Len(t, r.ModelProfiles, 1)
 	assert.NotEmpty(t, r.SummarizationPrompt)
 	assert.Len(t, r.OutputProcessing, 1)
 }
@@ -656,16 +632,6 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Equal(t, "head_tail", r.OutputProcessing["search_code"].Truncation)
 	assert.Equal(t, 500, r.OutputProcessing["read_file"].MaxLines)
 
-	// Model Profiles
-	require.NotNil(t, r.ModelProfiles)
-	gpt := r.ModelProfiles["gpt-4o"]
-	assert.Equal(t, 128000, gpt.ContextBudget)
-
-	gemini := r.ModelProfiles["gemini-2.0-flash"]
-	assert.Equal(t, 1000000, gemini.ContextBudget)
-
-	llama := r.ModelProfiles["local-llama"]
-	assert.Equal(t, 8192, llama.ContextBudget)
 }
 
 // ─── Parse edge cases ───────────────────────────────────────────────────────
@@ -714,14 +680,13 @@ func TestParse_Constraints_InvalidMaxSteps(t *testing.T) {
 // ─── Empty new sections ─────────────────────────────────────────────────────
 
 func TestParse_EmptyNewSections(t *testing.T) {
-	r, err := recipe.Parse(writeRecipe(t, v1(`
+	_, err := recipe.Parse(writeRecipe(t, v1(`
 ## Tool Descriptions
 ## Model Profiles
 ## System Reminders
 ## Hooks
 `)))
 	require.NoError(t, err)
-	assert.Nil(t, r.ModelProfiles)
 }
 
 // ─── MarshalMarkdown tests ───────────────────────────────────────────────────

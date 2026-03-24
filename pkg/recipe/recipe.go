@@ -56,9 +56,6 @@ type Recipe struct {
 	// Deterministic output processing rules (applied to all models).
 	OutputProcessing map[string]OutputRuleConfig // tool → rule
 
-	// Model profiles for capability overrides
-	ModelProfiles map[string]ModelProfileConfig // model_id → profile
-
 	// SectionsPresent tracks which ## sections were declared in the parsed recipe.
 	// nil for programmatic recipes; populated by parseV1(). Used by ApplyRecipe
 	// to decide between atomic (section-replaces-defaults) and legacy (field-by-field)
@@ -119,11 +116,6 @@ type OutputRuleConfig struct {
 	MaxTokens         int    // truncate at this many tokens (0 = unlimited)
 	Truncation        string // "head", "tail", "head_tail"
 	TruncationMessage string // template with {line_count}, {token_count}
-}
-
-// ModelProfileConfig overrides auto-discovered model capabilities.
-type ModelProfileConfig struct {
-	ContextBudget int // override context window budget (0 = not set)
 }
 
 // ─── Runner (version-pinned execution) ──────────────────────────────────────
@@ -326,9 +318,7 @@ func parseV1(data []byte) (*Recipe, error) {
 			r.SummarizationPrompt = parseProse(body)
 		case "output processing":
 			r.OutputProcessing = parseOutputRules(body)
-		case "model profiles":
-			r.ModelProfiles = parseModelProfiles(body)
-		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata":
+		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata", "model profiles":
 			// Removed sections — silently ignored for backward compatibility.
 
 		default:
@@ -458,26 +448,6 @@ func parseOneOutputRule(body string) OutputRuleConfig {
 		rule.TruncationMessage = v
 	}
 	return rule
-}
-
-// parseModelProfiles parses ### sub-sections into ModelProfileConfig entries.
-func parseModelProfiles(body string) map[string]ModelProfileConfig {
-	subs := splitSubSections(body)
-	if len(subs) == 0 {
-		return nil
-	}
-	m := make(map[string]ModelProfileConfig, len(subs))
-	for _, s := range subs {
-		kv := parseMap(s.body)
-		var p ModelProfileConfig
-		if v, ok := kv["context_budget"]; ok {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				p.ContextBudget = n
-			}
-		}
-		m[s.name] = p
-	}
-	return m
 }
 
 // parseTools parses the ## Tools section into a ToolsConfig.

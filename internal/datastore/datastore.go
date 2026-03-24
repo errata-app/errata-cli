@@ -574,14 +574,6 @@ func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
 			}
 		}
 
-		if len(rec.ModelProfiles) > 0 {
-			snap.ModelProfiles = make(map[string]recipestore.ModelProfileConfig, len(rec.ModelProfiles))
-			for name, p := range rec.ModelProfiles {
-				snap.ModelProfiles[name] = recipestore.ModelProfileConfig{
-					ContextBudget: p.ContextBudget,
-				}
-			}
-		}
 	}
 
 	// Populate tools from the last run's active tool list.

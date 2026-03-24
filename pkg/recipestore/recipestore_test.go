@@ -151,11 +151,6 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 		OutputProcessing: map[string]recipestore.OutputRuleConfig{
 			"bash": {MaxLines: 50, Truncation: "tail", TruncationMessage: "truncated"},
 		},
-		ModelProfiles: map[string]recipestore.ModelProfileConfig{
-			"claude-sonnet-4-6": {
-				ContextBudget: 100000,
-			},
-		},
 	}
 
 	data, err := json.Marshal(cfg)
@@ -187,9 +182,6 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 	assert.Equal(t, 50, got.OutputProcessing["bash"].MaxLines)
 	assert.Equal(t, "tail", got.OutputProcessing["bash"].Truncation)
 
-	require.Contains(t, got.ModelProfiles, "claude-sonnet-4-6")
-	prof := got.ModelProfiles["claude-sonnet-4-6"]
-	assert.Equal(t, 100000, prof.ContextBudget)
 }
 
 func TestList(t *testing.T) {
