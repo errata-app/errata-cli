@@ -326,7 +326,7 @@ func buildRunContext(parent context.Context, opts *Options, rec *recipe.Recipe, 
 	if rec.Tools != nil {
 		ctx = tools.WithToolGuidanceMap(ctx, rec.Tools.Guidance)
 	}
-	ctx = prompt.WithSummarizationPrompt(ctx, rec.SummarizationPrompt)
+	ctx = prompt.WithSummarizationPrompt(ctx, rec.Context.SummarizationPrompt)
 	ctx = sandbox.WithConfig(ctx, sandbox.Config{
 		Filesystem:  rec.Sandbox.Filesystem,
 		Network:     rec.Sandbox.Network,

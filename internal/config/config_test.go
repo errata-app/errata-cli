@@ -43,7 +43,7 @@ func TestDefaultRecipe_HasToolsAndGuidance(t *testing.T) {
 	assert.Len(t, r.Tools.Allowlist, 9, "default recipe should list all 9 built-in tools")
 	require.NotNil(t, r.Tools.Guidance, "default recipe should have per-tool guidance")
 	assert.Len(t, r.Tools.Guidance, 9, "each tool should have guidance text")
-	assert.NotEmpty(t, r.SummarizationPrompt, "default recipe should have summarization prompt")
+	assert.NotEmpty(t, r.Context.SummarizationPrompt, "default recipe should have summarization prompt")
 }
 
 func TestResolvedActiveModels_FromKeys(t *testing.T) {

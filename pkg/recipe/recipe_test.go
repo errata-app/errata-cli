@@ -472,7 +472,7 @@ func TestParse_SummarizationPrompt(t *testing.T) {
 Summarize for context continuity. Preserve: file paths, decisions.
 `)))
 	require.NoError(t, err)
-	assert.Contains(t, r.SummarizationPrompt, "context continuity")
+	assert.Contains(t, r.Context.SummarizationPrompt, "context continuity")
 }
 
 // ─── Gap 7: Output Processing ────────────────────────────────────────────────
@@ -589,7 +589,7 @@ seed: 42
 	assert.Equal(t, "auto_compact", r.Context.Strategy)
 	assert.Equal(t, "project_only", r.Sandbox.Filesystem)
 
-	assert.NotEmpty(t, r.SummarizationPrompt)
+	assert.NotEmpty(t, r.Context.SummarizationPrompt)
 	assert.Len(t, r.OutputProcessing, 1)
 }
 
@@ -609,7 +609,7 @@ func TestParse_ExampleRecipe_AllNewSections(t *testing.T) {
 	assert.Len(t, r.Models, 3)
 
 	// Context Summarization Prompt
-	assert.Contains(t, r.SummarizationPrompt, "Summarize this conversation")
+	assert.Contains(t, r.Context.SummarizationPrompt, "Summarize this conversation")
 
 	// Output Processing
 	require.NotNil(t, r.OutputProcessing)

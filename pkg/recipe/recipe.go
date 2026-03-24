@@ -50,9 +50,6 @@ type Recipe struct {
 	Tasks           []string
 	SuccessCriteria []string
 
-	// Context summarization prompt (applied to all models).
-	SummarizationPrompt string
-
 	// Deterministic output processing rules (applied to all models).
 	OutputProcessing map[string]OutputRuleConfig // tool → rule
 
@@ -97,10 +94,11 @@ type ConstraintsConfig struct {
 
 // ContextConfig controls conversation history management.
 type ContextConfig struct {
-	MaxHistoryTurns  int     // 0 = not set
-	Strategy         string  // "" | "auto_compact" | "manual" | "off"
-	CompactThreshold float64 // 0 = not set
-	TaskMode         string  // "" | "independent" | "sequential"
+	MaxHistoryTurns     int     // 0 = not set
+	Strategy            string  // "" | "auto_compact" | "manual" | "off"
+	CompactThreshold    float64 // 0 = not set
+	TaskMode            string  // "" | "independent" | "sequential"
+	SummarizationPrompt string  // "" = use default
 }
 
 // SandboxConfig restricts the execution environment.
@@ -284,7 +282,7 @@ func parseV1(data []byte) (*Recipe, error) {
 		case "success criteria":
 			r.SuccessCriteria = parseList(body)
 		case "context summarization prompt":
-			r.SummarizationPrompt = parseProse(body)
+			r.Context.SummarizationPrompt = parseProse(body)
 		case "output processing":
 			r.OutputProcessing = parseOutputRules(body)
 		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata", "model profiles":
@@ -723,9 +721,9 @@ func (r *Recipe) MarshalMarkdown() string {
 	}
 
 	// Context Summarization Prompt
-	if r.SummarizationPrompt != "" {
+	if r.Context.SummarizationPrompt != "" {
 		sb.WriteString("\n## Context Summarization Prompt\n")
-		sb.WriteString(r.SummarizationPrompt)
+		sb.WriteString(r.Context.SummarizationPrompt)
 		sb.WriteByte('\n')
 	}
 

@@ -159,7 +159,7 @@ func (a App) handleCompactCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 	prog := a.prog
 	var compactSumPrompt string
 	if compactRec := a.store.ActiveRecipe(); compactRec != nil {
-		compactSumPrompt = compactRec.SummarizationPrompt
+		compactSumPrompt = compactRec.Context.SummarizationPrompt
 	}
 	app, printCmd := a.withMessage("Compacting conversation history…")
 	return app, tea.Batch(printCmd, func() tea.Msg {
@@ -304,7 +304,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	var recSystemPrompt string
 	var recToolGuidanceMap map[string]string
 	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
-		sumPrompt = activeRec.SummarizationPrompt
+		sumPrompt = activeRec.Context.SummarizationPrompt
 		recSystemPrompt = activeRec.SystemPrompt
 		if activeRec.Tools != nil {
 			activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.Tools.Guidance)
@@ -532,7 +532,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	var resumeSystemPrompt string
 	var resumeToolGuidanceMap map[string]string
 	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
-		resumeSumPrompt = resumeRec.SummarizationPrompt
+		resumeSumPrompt = resumeRec.Context.SummarizationPrompt
 		resumeSystemPrompt = resumeRec.SystemPrompt
 		if resumeRec.Tools != nil {
 			activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.Tools.Guidance)
@@ -775,7 +775,7 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 					case "system-prompt":
 						content = sessRec.SystemPrompt
 					case "context-summarization":
-						content = sessRec.SummarizationPrompt
+						content = sessRec.Context.SummarizationPrompt
 					}
 					a.configTextArea.SetValue(content)
 					a.configTextArea.Focus()
