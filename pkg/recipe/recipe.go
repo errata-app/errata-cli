@@ -285,9 +285,6 @@ func parseV1(data []byte) (*Recipe, error) {
 			r.Context.SummarizationPrompt = parseProse(body)
 		case "output processing":
 			r.OutputProcessing = parseOutputRules(body)
-		case "model parameters", "sub-agent", "sub-agent modes", "system reminders", "hooks", "metadata", "model profiles":
-			// Removed sections — silently ignored for backward compatibility.
-
 		default:
 			fmt.Fprintf(os.Stderr, "recipe: unknown section %q, skipping\n", s.header)
 		}
