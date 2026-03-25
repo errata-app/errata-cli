@@ -40,6 +40,27 @@ func CollectForUpload(baseDir string, since time.Time, nameLookup func(string) s
 	return out
 }
 
+// CollectConfigHashes scans all sessions and returns the unique non-empty
+// ConfigHash values found across all runs and session headers.
+func CollectConfigHashes(sessions []api.SessionUpload) []string {
+	seen := make(map[string]struct{})
+	for _, s := range sessions {
+		if s.ConfigHash != "" {
+			seen[s.ConfigHash] = struct{}{}
+		}
+		for _, r := range s.Runs {
+			if r.ConfigHash != "" {
+				seen[r.ConfigHash] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for h := range seen {
+		out = append(out, h)
+	}
+	return out
+}
+
 // redactRuns converts RunSummary values to RunUpload values,
 // stripping PromptPreview, AppliedFiles, and Note.
 func redactRuns(runs []RunSummary) []api.RunUpload {

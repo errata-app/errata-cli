@@ -495,6 +495,24 @@ func (s *Store) RecipeNameLookup() func(string) string {
 	}
 }
 
+// ConfigSnapshots resolves a list of config hashes to their RecipeSnapshot values.
+// Unknown hashes are silently skipped.
+func (s *Store) ConfigSnapshots(hashes []string) map[string]recipestore.RecipeSnapshot {
+	if s.recipeStore == nil {
+		return nil
+	}
+	out := make(map[string]recipestore.RecipeSnapshot, len(hashes))
+	for _, h := range hashes {
+		if snap := s.recipeStore.Get(h); snap != nil {
+			out[h] = *snap
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // RecipeStore returns the recipe store (for /stats filter).
 func (s *Store) RecipeStore() *recipestore.Store { return s.recipeStore }
 

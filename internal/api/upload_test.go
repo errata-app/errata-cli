@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/errata-app/errata-cli/pkg/recipestore"
 )
 
 func TestUploadPreferences_Success(t *testing.T) {
@@ -146,4 +147,61 @@ func TestPreferenceUpload_RoundTrip(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-6", r.Selected)
 	assert.Equal(t, map[string]int64{"claude-sonnet-4-6": 1200, "gpt-4o": 800}, r.LatenciesMS)
 	assert.Equal(t, map[string]map[string]int{"claude-sonnet-4-6": {"bash": 2}}, r.ToolCalls)
+}
+
+func TestPreferenceUpload_RoundTripWithConfigs(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	payload := PreferenceUpload{
+		Configs: map[string]recipestore.RecipeSnapshot{
+			"cfg_v1_abc": {
+				Name:         "Test Recipe",
+				SystemPrompt: "be helpful",
+				Tools:        []string{"bash", "read_file"},
+			},
+		},
+		Sessions: []SessionUpload{
+			{
+				ID:         "ses_cfg",
+				CreatedAt:  now,
+				ConfigHash: "cfg_v1_abc",
+				Runs:       []RunUpload{{PromptHash: "ph_1", Models: []string{"m1"}, ConfigHash: "cfg_v1_abc"}},
+			},
+		},
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	// Verify JSON shape has "configs" key.
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	assert.Contains(t, raw, "configs")
+	assert.Contains(t, raw, "sessions")
+
+	var got PreferenceUpload
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	require.Len(t, got.Configs, 1)
+	snap, ok := got.Configs["cfg_v1_abc"]
+	require.True(t, ok)
+	assert.Equal(t, "Test Recipe", snap.Name)
+	assert.Equal(t, "be helpful", snap.SystemPrompt)
+	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
+
+	require.Len(t, got.Sessions, 1)
+	assert.Equal(t, "cfg_v1_abc", got.Sessions[0].ConfigHash)
+}
+
+func TestPreferenceUpload_OmitsConfigsWhenEmpty(t *testing.T) {
+	payload := PreferenceUpload{
+		Sessions: []SessionUpload{{ID: "ses_1"}},
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	_, hasConfigs := raw["configs"]
+	assert.False(t, hasConfigs, "configs should be omitted when nil")
 }
