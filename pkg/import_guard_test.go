@@ -21,7 +21,7 @@ func TestPkgPackages_NoInternalImports(t *testing.T) {
 			t.Fatalf("go list -deps %s: %v", pkg, err)
 		}
 		for dep := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-			if strings.Contains(dep, "suarezc/errata/internal/") {
+			if strings.Contains(dep, "errata-app/errata-cli/internal/") {
 				t.Errorf("%s imports internal package %s", pkg, dep)
 			}
 		}
