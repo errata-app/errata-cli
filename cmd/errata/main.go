@@ -636,13 +636,27 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Resolve config snapshots for all referenced hashes.
+	var configs map[string]recipestore.RecipeSnapshot
+	if hashes := session.CollectConfigHashes(sessions); len(hashes) > 0 {
+		configs = make(map[string]recipestore.RecipeSnapshot, len(hashes))
+		for _, h := range hashes {
+			if snap := rs.Get(h); snap != nil {
+				configs[h] = *snap
+			}
+		}
+		if len(configs) == 0 {
+			configs = nil
+		}
+	}
+
 	totalRuns := 0
 	for _, s := range sessions {
 		totalRuns += len(s.Runs)
 	}
 	fmt.Printf("Uploading %d runs across %d sessions…\n", totalRuns, len(sessions))
 
-	accepted, err := client.UploadPreferences(api.PreferenceUpload{Sessions: sessions})
+	accepted, err := client.UploadPreferences(api.PreferenceUpload{Configs: configs, Sessions: sessions})
 	if err != nil {
 		return fmt.Errorf("sync failed: %w", err)
 	}

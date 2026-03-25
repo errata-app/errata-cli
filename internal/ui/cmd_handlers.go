@@ -733,6 +733,7 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 	client := a.apiClient
 	sessionsDir := a.store.SessionsDir()
 	nameLookup := a.store.RecipeNameLookup()
+	store := a.store
 
 	app, printCmd := a.withMessage("Syncing…")
 	return app, tea.Batch(printCmd, func() tea.Msg {
@@ -741,7 +742,8 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 		if len(sessions) == 0 {
 			return syncCompleteMsg{accepted: 0}
 		}
-		accepted, err := client.UploadPreferences(api.PreferenceUpload{Sessions: sessions})
+		configs := store.ConfigSnapshots(session.CollectConfigHashes(sessions))
+		accepted, err := client.UploadPreferences(api.PreferenceUpload{Configs: configs, Sessions: sessions})
 		if err != nil {
 			return syncCompleteMsg{err: err}
 		}

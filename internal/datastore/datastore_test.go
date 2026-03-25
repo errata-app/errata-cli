@@ -741,3 +741,63 @@ func TestRecipeNameLookup_NilStore(t *testing.T) {
 	lookup := s.RecipeNameLookup()
 	assert.Empty(t, lookup("cfg_v1_anything"))
 }
+
+// ── ConfigSnapshots ─────────────────────────────────────────────────────────
+
+func TestConfigSnapshots_ResolvesKnownHashes(t *testing.T) {
+	tmp := t.TempDir()
+	sp := session.PathsFor(tmp, "ses_test")
+	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+	h1 := rs.Put(&recipestore.RecipeSnapshot{Name: "Recipe A", SystemPrompt: "a"})
+	h2 := rs.Put(&recipestore.RecipeSnapshot{Name: "Recipe B", SystemPrompt: "b"})
+
+	s, err := New(Options{
+		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+		SessionPaths:   sp,
+		RecipeStore:    rs,
+	})
+	require.NoError(t, err)
+
+	configs := s.ConfigSnapshots([]string{h1, h2, "cfg_v1_unknown"})
+	require.Len(t, configs, 2)
+	assert.Equal(t, "Recipe A", configs[h1].Name)
+	assert.Equal(t, "Recipe B", configs[h2].Name)
+}
+
+func TestConfigSnapshots_SkipsUnknownHashes(t *testing.T) {
+	tmp := t.TempDir()
+	sp := session.PathsFor(tmp, "ses_test")
+	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+
+	s, err := New(Options{
+		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+		SessionPaths:   sp,
+		RecipeStore:    rs,
+	})
+	require.NoError(t, err)
+
+	configs := s.ConfigSnapshots([]string{"cfg_v1_nonexistent"})
+	assert.Nil(t, configs)
+}
+
+func TestConfigSnapshots_NilStore(t *testing.T) {
+	s := tempStore(t)
+	configs := s.ConfigSnapshots([]string{"cfg_v1_anything"})
+	assert.Nil(t, configs)
+}
+
+func TestConfigSnapshots_EmptyHashes(t *testing.T) {
+	tmp := t.TempDir()
+	sp := session.PathsFor(tmp, "ses_test")
+	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+
+	s, err := New(Options{
+		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
+		SessionPaths:   sp,
+		RecipeStore:    rs,
+	})
+	require.NoError(t, err)
+
+	configs := s.ConfigSnapshots(nil)
+	assert.Nil(t, configs)
+}

@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/errata-app/errata-cli/pkg/recipestore"
 )
 
 // PreferenceUpload is the bulk upload request body for POST /preferences.
 type PreferenceUpload struct {
-	Sessions []SessionUpload `json:"sessions"`
+	Configs  map[string]recipestore.RecipeSnapshot `json:"configs,omitempty"`
+	Sessions []SessionUpload                       `json:"sessions"`
 }
 
 // SessionUpload is a redacted session metadata record for upload.

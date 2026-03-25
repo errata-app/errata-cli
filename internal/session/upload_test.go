@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/errata-app/errata-cli/internal/api"
 )
 
 func TestCollectForUpload_Basic(t *testing.T) {
@@ -204,4 +205,63 @@ func TestCollectForUpload_EmptyDir(t *testing.T) {
 func TestCollectForUpload_NonexistentDir(t *testing.T) {
 	sessions := CollectForUpload("/nonexistent/path", time.Time{}, nil)
 	assert.Nil(t, sessions)
+}
+
+func TestCollectConfigHashes_DeduplicatesAcrossSessions(t *testing.T) {
+	sessions := []api.SessionUpload{
+		{
+			ConfigHash: "cfg_v1_aaa",
+			Runs: []api.RunUpload{
+				{ConfigHash: "cfg_v1_aaa"},
+				{ConfigHash: "cfg_v1_bbb"},
+			},
+		},
+		{
+			ConfigHash: "cfg_v1_bbb",
+			Runs: []api.RunUpload{
+				{ConfigHash: "cfg_v1_ccc"},
+				{ConfigHash: "cfg_v1_aaa"},
+			},
+		},
+	}
+
+	hashes := CollectConfigHashes(sessions)
+	assert.Len(t, hashes, 3)
+	// Verify all three unique hashes are present (order not guaranteed).
+	hashSet := make(map[string]bool, len(hashes))
+	for _, h := range hashes {
+		hashSet[h] = true
+	}
+	assert.True(t, hashSet["cfg_v1_aaa"])
+	assert.True(t, hashSet["cfg_v1_bbb"])
+	assert.True(t, hashSet["cfg_v1_ccc"])
+}
+
+func TestCollectConfigHashes_SkipsEmpty(t *testing.T) {
+	sessions := []api.SessionUpload{
+		{
+			ConfigHash: "",
+			Runs: []api.RunUpload{
+				{ConfigHash: ""},
+				{ConfigHash: "cfg_v1_aaa"},
+			},
+		},
+	}
+
+	hashes := CollectConfigHashes(sessions)
+	assert.Len(t, hashes, 1)
+	assert.Equal(t, "cfg_v1_aaa", hashes[0])
+}
+
+func TestCollectConfigHashes_EmptyInput(t *testing.T) {
+	hashes := CollectConfigHashes(nil)
+	assert.Empty(t, hashes)
+}
+
+func TestCollectConfigHashes_NoHashes(t *testing.T) {
+	sessions := []api.SessionUpload{
+		{Runs: []api.RunUpload{{PromptHash: "ph_1"}}},
+	}
+	hashes := CollectConfigHashes(sessions)
+	assert.Empty(t, hashes)
 }

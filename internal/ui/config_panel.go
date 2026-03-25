@@ -637,7 +637,7 @@ func renderConfigOverlay(sections []configSection, selectedIdx, expandedIdx int,
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF"))
-	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AFAF")).Width(16)
+	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AFAF")).Width(20)
 	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF00"))
 	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 
