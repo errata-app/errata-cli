@@ -203,8 +203,10 @@ func listGeminiModels(ctx context.Context, apiKey string) ([]string, int, error)
 			SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
 		} `json:"models"`
 	}
-	url := "https://generativelanguage.googleapis.com/v1beta/models?key=" + apiKey
-	if err := doGetJSON(ctx, url, nil, &body); err != nil {
+	url := "https://generativelanguage.googleapis.com/v1beta/models"
+	if err := doGetJSON(ctx, url, func(r *http.Request) {
+		r.Header.Set("x-goog-api-key", apiKey)
+	}, &body); err != nil {
 		return nil, 0, err
 	}
 
