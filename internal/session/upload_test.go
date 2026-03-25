@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/errata-app/errata-cli/internal/api"
+	"github.com/errata-app/errata-cli/internal/models"
 )
 
 func TestCollectForUpload_Basic(t *testing.T) {
@@ -205,6 +206,61 @@ func TestCollectForUpload_EmptyDir(t *testing.T) {
 func TestCollectForUpload_NonexistentDir(t *testing.T) {
 	sessions := CollectForUpload("/nonexistent/path", time.Time{}, nil)
 	assert.Nil(t, sessions)
+}
+
+func TestCollectContentForUpload_Basic(t *testing.T) {
+	dir := t.TempDir()
+	sp := PathsFor(dir, "ses_c1")
+	content := SessionContent{
+		Runs: []RunContent{
+			{
+				Prompt: "fix bug",
+				Models: []ModelRunContent{
+					{
+						ModelID:    "m1",
+						Text:       "Done.",
+						StopReason: "complete",
+						Steps:      2,
+					},
+				},
+			},
+		},
+		Histories: map[string][]models.ConversationTurn{
+			"m1": {{Role: "user", Content: "fix bug"}, {Role: "assistant", Content: "Done."}},
+		},
+	}
+	require.NoError(t, SaveContent(sp.ContentPath, content))
+
+	result := CollectContentForUpload(dir, []string{"ses_c1"})
+	require.Len(t, result, 1)
+	assert.Equal(t, "ses_c1", result[0].SessionID)
+	require.Len(t, result[0].Runs, 1)
+	assert.Equal(t, "fix bug", result[0].Runs[0].Prompt)
+	require.Len(t, result[0].Runs[0].Models, 1)
+	assert.Equal(t, "m1", result[0].Runs[0].Models[0].ModelID)
+	assert.Equal(t, "Done.", result[0].Runs[0].Models[0].Text)
+	assert.Equal(t, "complete", result[0].Runs[0].Models[0].StopReason)
+	require.Len(t, result[0].Histories, 1)
+	assert.Len(t, result[0].Histories["m1"], 2)
+}
+
+func TestCollectContentForUpload_MissingSessions(t *testing.T) {
+	dir := t.TempDir()
+	// Create one session with content and leave "ses_missing" absent.
+	sp := PathsFor(dir, "ses_exists")
+	content := SessionContent{
+		Runs: []RunContent{{Prompt: "hello", Models: []ModelRunContent{{ModelID: "m1", Text: "hi"}}}},
+	}
+	require.NoError(t, SaveContent(sp.ContentPath, content))
+
+	result := CollectContentForUpload(dir, []string{"ses_missing", "ses_exists"})
+	require.Len(t, result, 1)
+	assert.Equal(t, "ses_exists", result[0].SessionID)
+}
+
+func TestCollectContentForUpload_EmptyList(t *testing.T) {
+	result := CollectContentForUpload(t.TempDir(), nil)
+	assert.Nil(t, result)
 }
 
 func TestCollectConfigHashes_DeduplicatesAcrossSessions(t *testing.T) {

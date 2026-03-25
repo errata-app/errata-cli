@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/errata-app/errata-cli/internal/models"
+	"github.com/errata-app/errata-cli/internal/output"
 	"github.com/errata-app/errata-cli/pkg/recipestore"
 )
 
@@ -14,6 +16,31 @@ import (
 type PreferenceUpload struct {
 	Configs  map[string]recipestore.RecipeSnapshot `json:"configs,omitempty"`
 	Sessions []SessionUpload                       `json:"sessions"`
+	Content  []SessionContentUpload                `json:"content,omitempty"`
+}
+
+// SessionContentUpload holds full session content for upload (privacy=full).
+type SessionContentUpload struct {
+	SessionID string                                `json:"session_id"`
+	Runs      []RunContentUpload                    `json:"runs"`
+	Histories map[string][]models.ConversationTurn  `json:"histories,omitempty"`
+}
+
+// RunContentUpload holds the full prompt and per-model response data for one run.
+type RunContentUpload struct {
+	Prompt string                  `json:"prompt"`
+	Models []ModelRunContentUpload `json:"models"`
+}
+
+// ModelRunContentUpload holds the full response data for one model in a run.
+type ModelRunContentUpload struct {
+	ModelID         string              `json:"model_id"`
+	Text            string              `json:"text"`
+	ProposedWrites  []output.WriteEntry `json:"proposed_writes,omitempty"`
+	Events          []output.EventEntry `json:"events"`
+	StopReason      string              `json:"stop_reason,omitempty"`
+	Steps           int                 `json:"steps,omitempty"`
+	ReasoningTokens int64               `json:"reasoning_tokens,omitempty"`
 }
 
 // SessionUpload is a redacted session metadata record for upload.

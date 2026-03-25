@@ -24,6 +24,7 @@ var All = []Command{
 	{"/publish", "Publish recipe to errata.app"},
 	{"/pull", "Pull recipe from errata.app: /pull <author/name>"},
 	{"/sync", "Upload preference data to errata.app"},
+	{"/privacy", "View/set upload privacy mode (metadata or full)"},
 	{"/stats", "Show preference wins and session cost"},
 	{"/exit", "Exit"},
 }
