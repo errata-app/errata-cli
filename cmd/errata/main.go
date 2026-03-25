@@ -138,6 +138,14 @@ func main() {
 		Short: "Upload preference data to errata.app",
 		RunE:  runSync,
 	}
+	syncCmd.Flags().Bool("full", false, "Include full session content (one-shot override)")
+
+	privacyCmd := &cobra.Command{
+		Use:   "privacy [metadata|full]",
+		Short: "View or set upload privacy mode",
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runPrivacy,
+	}
 
 	root.AddCommand(
 		statsCmd,
@@ -149,6 +157,7 @@ func main() {
 		publishCmd,
 		pullCmd,
 		syncCmd,
+		privacyCmd,
 	)
 
 	if err := root.Execute(); err != nil {
@@ -656,7 +665,23 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Uploading %d runs across %d sessions…\n", totalRuns, len(sessions))
 
-	accepted, err := client.UploadPreferences(api.PreferenceUpload{Configs: configs, Sessions: sessions})
+	payload := api.PreferenceUpload{Configs: configs, Sessions: sessions}
+
+	// Determine whether to include full content.
+	fullFlag, _ := cmd.Flags().GetBool("full")
+	privacy := api.LoadPrivacy()
+	if fullFlag || privacy.Mode == api.PrivacyFull {
+		sessionIDs := make([]string, len(sessions))
+		for i, s := range sessions {
+			sessionIDs[i] = s.ID
+		}
+		payload.Content = session.CollectContentForUpload(layout.Sessions, sessionIDs)
+		if payload.Content != nil {
+			fmt.Printf("Including full content for %d sessions (privacy=full).\n", len(payload.Content))
+		}
+	}
+
+	accepted, err := client.UploadPreferences(payload)
 	if err != nil {
 		return fmt.Errorf("sync failed: %w", err)
 	}
@@ -665,5 +690,22 @@ func runSync(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: could not save sync timestamp: %v\n", saveErr)
 	}
 	fmt.Printf("Synced: %d runs accepted.\n", accepted)
+	return nil
+}
+
+func runPrivacy(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		s := api.LoadPrivacy()
+		fmt.Printf("Upload privacy mode: %s\n", s.Mode)
+		return nil
+	}
+	mode := api.PrivacyMode(args[0])
+	if mode != api.PrivacyMetadata && mode != api.PrivacyFull {
+		return fmt.Errorf("invalid mode %q — use \"metadata\" or \"full\"", args[0])
+	}
+	if err := api.SavePrivacy(api.PrivacySettings{Mode: mode}); err != nil {
+		return fmt.Errorf("could not save privacy setting: %w", err)
+	}
+	fmt.Printf("Upload privacy mode set to: %s\n", mode)
 	return nil
 }

@@ -192,6 +192,73 @@ func TestPreferenceUpload_RoundTripWithConfigs(t *testing.T) {
 	assert.Equal(t, "cfg_v1_abc", got.Sessions[0].ConfigHash)
 }
 
+func TestPreferenceUpload_RoundTripWithContent(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	payload := PreferenceUpload{
+		Sessions: []SessionUpload{
+			{
+				ID:        "ses_content",
+				CreatedAt: now,
+				Runs:      []RunUpload{{PromptHash: "ph_1", Models: []string{"m1"}}},
+			},
+		},
+		Content: []SessionContentUpload{
+			{
+				SessionID: "ses_content",
+				Runs: []RunContentUpload{
+					{
+						Prompt: "fix the bug",
+						Models: []ModelRunContentUpload{
+							{
+								ModelID:         "m1",
+								Text:            "I fixed the bug.",
+								StopReason:      "complete",
+								Steps:           3,
+								ReasoningTokens: 500,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	assert.Contains(t, raw, "content")
+
+	var got PreferenceUpload
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.Len(t, got.Content, 1)
+	assert.Equal(t, "ses_content", got.Content[0].SessionID)
+	require.Len(t, got.Content[0].Runs, 1)
+	assert.Equal(t, "fix the bug", got.Content[0].Runs[0].Prompt)
+	require.Len(t, got.Content[0].Runs[0].Models, 1)
+	m := got.Content[0].Runs[0].Models[0]
+	assert.Equal(t, "m1", m.ModelID)
+	assert.Equal(t, "I fixed the bug.", m.Text)
+	assert.Equal(t, "complete", m.StopReason)
+	assert.Equal(t, 3, m.Steps)
+	assert.Equal(t, int64(500), m.ReasoningTokens)
+}
+
+func TestPreferenceUpload_OmitsContentWhenEmpty(t *testing.T) {
+	payload := PreferenceUpload{
+		Sessions: []SessionUpload{{ID: "ses_1"}},
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	_, hasContent := raw["content"]
+	assert.False(t, hasContent, "content should be omitted when nil")
+}
+
 func TestPreferenceUpload_OmitsConfigsWhenEmpty(t *testing.T) {
 	payload := PreferenceUpload{
 		Sessions: []SessionUpload{{ID: "ses_1"}},

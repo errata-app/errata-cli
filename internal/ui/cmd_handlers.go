@@ -54,6 +54,9 @@ func (a App) handlePrompt(userPrompt string) (tea.Model, tea.Cmd) { //nolint:goc
 	if lower == "/sync" {
 		return a.handleSyncCommand()
 	}
+	if lower == "/privacy" || strings.HasPrefix(lower, "/privacy ") {
+		return a.handlePrivacyCommand(strings.TrimSpace(trimmed[len("/privacy"):]))
+	}
 	switch lower {
 	case "/exit", "/quit":
 		return a, tea.Quit
@@ -725,6 +728,21 @@ func (a App) handlePullComplete(raw, ref string) (tea.Model, tea.Cmd) { //nolint
 	return a.withMessage(fmt.Sprintf("Pulled %q — loaded as session recipe. Saved to %s", name, dest))
 }
 
+func (a App) handlePrivacyCommand(args string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
+	if args == "" {
+		s := api.LoadPrivacy()
+		return a.withMessage(fmt.Sprintf("Upload privacy mode: %s", s.Mode))
+	}
+	mode := api.PrivacyMode(args)
+	if mode != api.PrivacyMetadata && mode != api.PrivacyFull {
+		return a.withMessage(fmt.Sprintf("Invalid mode %q — use \"metadata\" or \"full\".", args))
+	}
+	if err := api.SavePrivacy(api.PrivacySettings{Mode: mode}); err != nil {
+		return a.withMessage(fmt.Sprintf("Could not save privacy setting: %v", err))
+	}
+	return a.withMessage(fmt.Sprintf("Upload privacy mode set to: %s", mode))
+}
+
 func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
 	if !a.apiClient.IsLoggedIn() {
 		return a.withMessage("Not logged in. Run: errata login")
@@ -734,6 +752,7 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 	sessionsDir := a.store.SessionsDir()
 	nameLookup := a.store.RecipeNameLookup()
 	store := a.store
+	privacy := api.LoadPrivacy()
 
 	app, printCmd := a.withMessage("Syncing…")
 	return app, tea.Batch(printCmd, func() tea.Msg {
@@ -743,7 +762,15 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 			return syncCompleteMsg{accepted: 0}
 		}
 		configs := store.ConfigSnapshots(session.CollectConfigHashes(sessions))
-		accepted, err := client.UploadPreferences(api.PreferenceUpload{Configs: configs, Sessions: sessions})
+		payload := api.PreferenceUpload{Configs: configs, Sessions: sessions}
+		if privacy.Mode == api.PrivacyFull {
+			sessionIDs := make([]string, len(sessions))
+			for i, s := range sessions {
+				sessionIDs[i] = s.ID
+			}
+			payload.Content = session.CollectContentForUpload(sessionsDir, sessionIDs)
+		}
+		accepted, err := client.UploadPreferences(payload)
 		if err != nil {
 			return syncCompleteMsg{err: err}
 		}

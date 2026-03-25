@@ -61,6 +61,56 @@ func CollectConfigHashes(sessions []api.SessionUpload) []string {
 	return out
 }
 
+// CollectContentForUpload walks session content files and returns full content
+// upload payloads for the given session IDs. Sessions with missing or corrupt
+// content files are silently skipped.
+func CollectContentForUpload(baseDir string, sessionIDs []string) []api.SessionContentUpload {
+	if len(sessionIDs) == 0 {
+		return nil
+	}
+	var out []api.SessionContentUpload
+	for _, id := range sessionIDs {
+		sp := PathsFor(baseDir, id)
+		content, err := LoadContent(sp.ContentPath)
+		if err != nil || content == nil {
+			continue
+		}
+		if len(content.Runs) == 0 {
+			continue
+		}
+		sc := api.SessionContentUpload{
+			SessionID: id,
+			Runs:      convertRuns(content.Runs),
+			Histories: content.Histories,
+		}
+		out = append(out, sc)
+	}
+	return out
+}
+
+func convertRuns(runs []RunContent) []api.RunContentUpload {
+	out := make([]api.RunContentUpload, len(runs))
+	for i, r := range runs {
+		ms := make([]api.ModelRunContentUpload, len(r.Models))
+		for j, m := range r.Models {
+			ms[j] = api.ModelRunContentUpload{
+				ModelID:         m.ModelID,
+				Text:            m.Text,
+				ProposedWrites:  m.ProposedWrites,
+				Events:          m.Events,
+				StopReason:      m.StopReason,
+				Steps:           m.Steps,
+				ReasoningTokens: m.ReasoningTokens,
+			}
+		}
+		out[i] = api.RunContentUpload{
+			Prompt: r.Prompt,
+			Models: ms,
+		}
+	}
+	return out
+}
+
 // redactRuns converts RunSummary values to RunUpload values,
 // stripping PromptPreview, AppliedFiles, and Note.
 func redactRuns(runs []RunSummary) []api.RunUpload {
