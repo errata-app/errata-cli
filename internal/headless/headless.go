@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/errata-app/errata-cli/internal/adapters"
+	"github.com/errata-app/errata-cli/internal/api"
 	"github.com/errata-app/errata-cli/internal/checkpoint"
 	"github.com/errata-app/errata-cli/internal/criteria"
 	"github.com/errata-app/errata-cli/internal/models"
@@ -35,11 +36,11 @@ import (
 type Options struct {
 	Recipe         *recipe.Recipe
 	Adapters       []models.ModelAdapter
-	SessionID      string
 	OutputDir      string // directory for output reports (required)
 	CheckpointPath string // path for checkpoint file (required)
 	Verbose        bool
 	JSON           bool // also emit report to stdout
+	FullUpload     bool // --full flag: override privacy to upload full report
 
 	// DebugLog enables raw API request logging in adapter loops.
 	DebugLog bool
@@ -186,7 +187,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 
 		// Build the per-task output report.
 		toolNames := toolNameList(activeDefs)
-		report := output.BuildReport(opts.SessionID, rec, taskPrompt, responses, collector, toolNames)
+		report := output.BuildReport("", rec, taskPrompt, responses, collector, toolNames)
 
 		// Evaluate criteria.
 		criteriaResults := make(map[string][]criteria.Result)
@@ -224,7 +225,6 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 	headlessReport := &RunReport{
 		ID:        reportID,
 		Timestamp: time.Now().UTC(),
-		SessionID: opts.SessionID,
 		Recipe:    snapshotRecipe(rec),
 		TaskMode:  taskMode,
 		Tasks:     taskResults,
@@ -249,6 +249,21 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 		fmt.Fprintf(w, "warning: could not save metadata report: %v\n", metaErr)
 	} else {
 		fmt.Fprintf(w, "Metadata report saved to %s\n", metaPath)
+	}
+
+	// Upload report if logged in (non-fatal).
+	if client := api.NewClient(); client.IsLoggedIn() {
+		var reportBytes []byte
+		if opts.FullUpload {
+			reportBytes, _ = json.Marshal(headlessReport)
+		} else {
+			reportBytes, _ = json.Marshal(metaReport)
+		}
+		if uploadErr := client.UploadReport(json.RawMessage(reportBytes)); uploadErr != nil {
+			fmt.Fprintf(w, "warning: report upload failed: %v\n", uploadErr)
+		} else {
+			fmt.Fprintf(w, "Report uploaded to errata.app\n")
+		}
 	}
 
 	fmt.Fprintf(w, "Run output saved to %s\n", runDir)

@@ -65,6 +65,7 @@ func main() {
 	runCmd.Flags().Bool("json", false, "Print report to stdout as JSON")
 	runCmd.Flags().String("output-dir", "", "Output directory (default: data/outputs/)")
 	runCmd.Flags().Bool("verbose", false, "Show model text events in progress")
+	runCmd.Flags().Bool("full", false, "Upload full report (one-shot override)")
 
 	sessionsCmd := &cobra.Command{
 		Use:   "sessions",
@@ -367,8 +368,8 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	applyProjectRoot(rec)
 	// BashTimeout and AllowLocalFetch are wired through context at run sites.
 
-	sessionID := uid.New("ses_")
-	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, rec, layout.PricingCache, debugLogPath, sessionID)
+	logCorrelationID := uid.New("run_")
+	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, rec, layout.PricingCache, debugLogPath, logCorrelationID)
 	defer cleanup()
 
 	if len(ads) == 0 {
@@ -385,6 +386,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 		outputDir = layout.Outputs
 	}
 	verbose, _ := cmd.Flags().GetBool("verbose")
+	fullUpload, _ := cmd.Flags().GetBool("full")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -400,11 +402,11 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	_, err := headless.Run(ctx, &headless.Options{
 		Recipe:         rec,
 		Adapters:       ads,
-		SessionID:      sessionID,
 		OutputDir:      outputDir,
 		CheckpointPath: layout.Checkpoint,
 		Verbose:        verbose,
 		JSON:           jsonFlag,
+		FullUpload:     fullUpload,
 		DebugLog:       debugLogPath != "",
 		MCPDefs:        mcpDefs,
 		MCPDispatchers: mcpDispatchers,

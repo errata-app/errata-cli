@@ -47,6 +47,20 @@ type RunUpload struct {
 	ConfigHash          string                    `json:"config_hash,omitempty"`
 }
 
+// UploadReport uploads a headless run report (MetadataReport or RunReport).
+// The caller marshals the appropriate struct and passes it as raw JSON.
+func (c *Client) UploadReport(payload json.RawMessage) error {
+	resp, err := c.do("POST", "/reports", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return parseError(resp)
+	}
+	return nil
+}
+
 // UploadPreferences uploads redacted preference data.
 // Returns the number of runs the server accepted.
 func (c *Client) UploadPreferences(payload PreferenceUpload) (int, error) {

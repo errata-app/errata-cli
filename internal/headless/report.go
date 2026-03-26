@@ -15,7 +15,6 @@ import (
 type RunReport struct {
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
-	SessionID string    `json:"session_id"`
 
 	Recipe   RecipeSnapshot `json:"recipe"`
 	TaskMode string         `json:"task_mode"`
@@ -103,7 +102,6 @@ func newReportID() string {
 type MetadataReport struct {
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
-	SessionID string    `json:"session_id"`
 
 	Recipe   MetaRecipeSnapshot `json:"recipe"`
 	TaskMode string             `json:"task_mode"`
@@ -152,7 +150,6 @@ func BuildMetadataReport(full *RunReport) *MetadataReport {
 	meta := &MetadataReport{
 		ID:        full.ID,
 		Timestamp: full.Timestamp,
-		SessionID: full.SessionID,
 		Recipe: MetaRecipeSnapshot{
 			Name:            full.Recipe.Name,
 			Version:         full.Recipe.Version,
