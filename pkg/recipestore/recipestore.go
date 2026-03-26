@@ -18,9 +18,10 @@ import (
 // preference recording. It mirrors the fields relevant for comparing
 // experimental setups.
 //
-// Name and Version are stored for display and diagnostics but excluded from
-// the content-addressed hash — they are metadata about the recipe, not
-// settings that affect model behavior.
+// All fields including Name are included in the content-addressed hash, so
+// two recipes with different names but identical settings produce distinct
+// hashes. Version is also included because it determines which Runner
+// implementation executes the recipe.
 type RecipeSnapshot struct {
 	Version             int                           `json:"version,omitempty"`
 	Name                string                        `json:"name"`
@@ -59,18 +60,14 @@ type OutputRuleConfig struct {
 
 // Hash returns the content-addressed key for a RecipeSnapshot.
 //
-// Name is excluded — it is a display label, not a behavioral setting.
-// Version is included because it determines which Runner implementation
-// executes the recipe, so identical fields under different schema versions
-// produce different behavior.
+// All fields including Name are hashed. Version is included because it
+// determines which Runner implementation executes the recipe.
 //
-// Format: cfg_v{version}_{sha256hex}
+// Format: rcp_v{version}_{sha256hex}
 func Hash(cfg *RecipeSnapshot) string {
-	hashable := *cfg
-	hashable.Name = ""
-	data, _ := json.Marshal(hashable)
+	data, _ := json.Marshal(cfg)
 	h := sha256.Sum256(data)
-	return fmt.Sprintf("cfg_v%d_%x", cfg.Version, h)
+	return fmt.Sprintf("rcp_v%d_%x", cfg.Version, h)
 }
 
 // Store is a content-addressed store for RecipeSnapshot values.

@@ -20,14 +20,14 @@ func TestHash_Deterministic(t *testing.T) {
 	h1 := recipestore.Hash(cfg)
 	h2 := recipestore.Hash(cfg)
 	assert.Equal(t, h1, h2)
-	assert.Contains(t, h1, "cfg_v")
+	assert.Contains(t, h1, "rcp_v")
 }
 
-func TestHash_ExcludesName(t *testing.T) {
+func TestHash_IncludesName(t *testing.T) {
 	cfg1 := &recipestore.RecipeSnapshot{Name: "recipe-a", SystemPrompt: "same"}
 	cfg2 := &recipestore.RecipeSnapshot{Name: "recipe-b", SystemPrompt: "same"}
-	assert.Equal(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2),
-		"name should not affect the hash")
+	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2),
+		"different names should produce different hashes")
 }
 
 func TestHash_IncludesVersion(t *testing.T) {
@@ -35,8 +35,8 @@ func TestHash_IncludesVersion(t *testing.T) {
 	cfg2 := &recipestore.RecipeSnapshot{Version: 2, SystemPrompt: "same"}
 	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2),
 		"different versions should produce different hashes")
-	assert.Contains(t, recipestore.Hash(cfg1), "cfg_v1_")
-	assert.Contains(t, recipestore.Hash(cfg2), "cfg_v2_")
+	assert.Contains(t, recipestore.Hash(cfg1), "rcp_v1_")
+	assert.Contains(t, recipestore.Hash(cfg2), "rcp_v2_")
 }
 
 func TestHash_DifferentSystemPrompts(t *testing.T) {
@@ -57,7 +57,7 @@ func TestPutAndGet(t *testing.T) {
 
 	cfg := &recipestore.RecipeSnapshot{Name: "my-recipe", Tools: []string{"bash"}}
 	h := s.Put(cfg)
-	assert.Contains(t, h, "cfg_v")
+	assert.Contains(t, h, "rcp_v")
 
 	got := s.Get(h)
 	require.NotNil(t, got)
@@ -81,7 +81,7 @@ func TestPut_Idempotent(t *testing.T) {
 func TestGet_NotFound(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "configs.json")
 	s := recipestore.New(path)
-	assert.Nil(t, s.Get("cfg_v0_0000"))
+	assert.Nil(t, s.Get("rcp_v0_0000"))
 }
 
 func TestNew_MissingFile(t *testing.T) {

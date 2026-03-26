@@ -21,7 +21,7 @@ func TestCollectForUpload_Basic(t *testing.T) {
 		LastActiveAt: now,
 		Models:       []string{"m1", "m2"},
 		PromptCount:  2,
-		ConfigHash:   "cfg_v1_abc",
+		ConfigHash:   "rcp_v1_abc",
 		FirstPrompt:  "sensitive prompt text",
 		LastPrompt:   "also sensitive",
 		Runs: []RunSummary{
@@ -34,7 +34,7 @@ func TestCollectForUpload_Basic(t *testing.T) {
 				LatenciesMS:   map[string]int64{"m1": 1000, "m2": 800},
 				AppliedFiles:  []string{"main.go"},
 				Note:          "should be stripped",
-				ConfigHash:    "cfg_v1_abc",
+				ConfigHash:    "rcp_v1_abc",
 			},
 		},
 	}
@@ -43,7 +43,7 @@ func TestCollectForUpload_Basic(t *testing.T) {
 	require.NoError(t, SaveMetadata(path, m))
 
 	nameLookup := func(hash string) string {
-		if hash == "cfg_v1_abc" {
+		if hash == "rcp_v1_abc" {
 			return "Test Recipe"
 		}
 		return ""
@@ -55,7 +55,7 @@ func TestCollectForUpload_Basic(t *testing.T) {
 	s := sessions[0]
 	assert.Equal(t, "ses_1", s.ID)
 	assert.Equal(t, "Test Recipe", s.RecipeName)
-	assert.Equal(t, "cfg_v1_abc", s.ConfigHash)
+	assert.Equal(t, "rcp_v1_abc", s.ConfigHash)
 	assert.Equal(t, 2, s.PromptCount)
 
 	require.Len(t, s.Runs, 1)
@@ -63,7 +63,7 @@ func TestCollectForUpload_Basic(t *testing.T) {
 	assert.Equal(t, "ph_aaa", r.PromptHash)
 	assert.Equal(t, "m1", r.Selected)
 	assert.Equal(t, map[string]int64{"m1": 1000, "m2": 800}, r.LatenciesMS)
-	assert.Equal(t, "cfg_v1_abc", r.ConfigHash)
+	assert.Equal(t, "rcp_v1_abc", r.ConfigHash)
 }
 
 func TestCollectForUpload_StripsPrivateFields(t *testing.T) {
@@ -84,7 +84,7 @@ func TestCollectForUpload_StripsPrivateFields(t *testing.T) {
 				Selected:      "m1",
 				AppliedFiles:  []string{"secret/path.go"},
 				Note:          "private note",
-				ConfigHash:    "cfg_v1_xyz",
+				ConfigHash:    "rcp_v1_xyz",
 			},
 		},
 	}
@@ -100,7 +100,7 @@ func TestCollectForUpload_StripsPrivateFields(t *testing.T) {
 	assert.Equal(t, "ph_bbb", r.PromptHash)
 	assert.Equal(t, []string{"m1"}, r.Models)
 	assert.Equal(t, "m1", r.Selected)
-	assert.Equal(t, "cfg_v1_xyz", r.ConfigHash)
+	assert.Equal(t, "rcp_v1_xyz", r.ConfigHash)
 
 	// Marshal to JSON and verify sensitive fields are absent.
 	data, err := json.Marshal(sessions[0])
@@ -186,7 +186,7 @@ func TestCollectForUpload_NilNameLookup(t *testing.T) {
 	m := SessionMetadata{
 		ID:           "ses_nil",
 		LastActiveAt: now,
-		ConfigHash:   "cfg_v1_xyz",
+		ConfigHash:   "rcp_v1_xyz",
 		Runs:         []RunSummary{{PromptHash: "ph_1", Models: []string{"m1"}}},
 	}
 	require.NoError(t, SaveMetadata(filepath.Join(dir, "ses_nil", "session_metadata.json"), m))
@@ -210,17 +210,17 @@ func TestCollectForUpload_NonexistentDir(t *testing.T) {
 func TestCollectConfigHashes_DeduplicatesAcrossSessions(t *testing.T) {
 	sessions := []api.SessionUpload{
 		{
-			ConfigHash: "cfg_v1_aaa",
+			ConfigHash: "rcp_v1_aaa",
 			Runs: []api.RunUpload{
-				{ConfigHash: "cfg_v1_aaa"},
-				{ConfigHash: "cfg_v1_bbb"},
+				{ConfigHash: "rcp_v1_aaa"},
+				{ConfigHash: "rcp_v1_bbb"},
 			},
 		},
 		{
-			ConfigHash: "cfg_v1_bbb",
+			ConfigHash: "rcp_v1_bbb",
 			Runs: []api.RunUpload{
-				{ConfigHash: "cfg_v1_ccc"},
-				{ConfigHash: "cfg_v1_aaa"},
+				{ConfigHash: "rcp_v1_ccc"},
+				{ConfigHash: "rcp_v1_aaa"},
 			},
 		},
 	}
@@ -232,9 +232,9 @@ func TestCollectConfigHashes_DeduplicatesAcrossSessions(t *testing.T) {
 	for _, h := range hashes {
 		hashSet[h] = true
 	}
-	assert.True(t, hashSet["cfg_v1_aaa"])
-	assert.True(t, hashSet["cfg_v1_bbb"])
-	assert.True(t, hashSet["cfg_v1_ccc"])
+	assert.True(t, hashSet["rcp_v1_aaa"])
+	assert.True(t, hashSet["rcp_v1_bbb"])
+	assert.True(t, hashSet["rcp_v1_ccc"])
 }
 
 func TestCollectConfigHashes_SkipsEmpty(t *testing.T) {
@@ -243,14 +243,14 @@ func TestCollectConfigHashes_SkipsEmpty(t *testing.T) {
 			ConfigHash: "",
 			Runs: []api.RunUpload{
 				{ConfigHash: ""},
-				{ConfigHash: "cfg_v1_aaa"},
+				{ConfigHash: "rcp_v1_aaa"},
 			},
 		},
 	}
 
 	hashes := CollectConfigHashes(sessions)
 	assert.Len(t, hashes, 1)
-	assert.Equal(t, "cfg_v1_aaa", hashes[0])
+	assert.Equal(t, "rcp_v1_aaa", hashes[0])
 }
 
 func TestCollectConfigHashes_EmptyInput(t *testing.T) {
