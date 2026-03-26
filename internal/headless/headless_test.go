@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -115,7 +116,6 @@ func testOpts(rec *recipe.Recipe, adapters []models.ModelAdapter, outputDir stri
 	return &headless.Options{
 		Recipe:         rec,
 		Adapters:       adapters,
-		SessionID:      "test-session",
 		OutputDir:      outputDir,
 		CheckpointPath: filepath.Join(outputDir, "checkpoint.json"),
 		Stderr:         &bytes.Buffer{},
@@ -130,9 +130,8 @@ func TestMetadataReport_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
 	meta := &headless.MetadataReport{
-		ID:        "rpt_test123",
-		SessionID: "sess1",
-		TaskMode:  "independent",
+		ID:       "rpt_test123",
+		TaskMode: "independent",
 		Recipe: headless.MetaRecipeSnapshot{
 			Name:            "test",
 			Version:         1,
@@ -168,7 +167,6 @@ func TestMetadataReport_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, meta.ID, loaded.ID)
-	assert.Equal(t, meta.SessionID, loaded.SessionID)
 	assert.Equal(t, meta.TaskMode, loaded.TaskMode)
 	assert.Equal(t, meta.Recipe.Name, loaded.Recipe.Name)
 	require.Len(t, loaded.Tasks, 1)
@@ -210,10 +208,63 @@ func TestMetadataReport_NoSensitiveContent(t *testing.T) {
 	assert.NotContains(t, jsonStr, "super secret system prompt")
 	assert.NotContains(t, jsonStr, "Here is the secret response")
 
+	// SessionID must be absent.
+	assert.NotContains(t, jsonStr, "session_id")
+
 	// Must contain structural metadata.
 	assert.Contains(t, jsonStr, "prompt_hash")
 	assert.Contains(t, jsonStr, "model-a")
 	assert.Contains(t, jsonStr, "no_errors")
+}
+
+func TestRunReport_NoSessionID(t *testing.T) {
+	report := &headless.RunReport{
+		ID:       "rpt_test",
+		TaskMode: "independent",
+		Recipe:   headless.RecipeSnapshot{Name: "test", Tasks: []string{"t"}},
+		Tasks:    []headless.TaskResult{{Index: 0, Prompt: "t"}},
+		Summary:  headless.Summary{TotalTasks: 1},
+	}
+
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "session_id")
+}
+
+func TestRunReport_ContainsConfigHash(t *testing.T) {
+	t.Chdir(t.TempDir())
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	rec := testRecipe([]string{"task"}, nil)
+	rec.Name = "hash-test"
+	a1 := &mockAdapter{
+		id:       "model-a",
+		response: models.ModelResponse{Text: "done", LatencyMS: 100},
+	}
+
+	opts := testOpts(rec, []models.ModelAdapter{a1}, outDir)
+	report, err := headless.Run(context.Background(), opts)
+	require.NoError(t, err)
+
+	assert.True(t, strings.HasPrefix(report.ConfigHash, "rcp_v"),
+		"ConfigHash should start with rcp_v, got %q", report.ConfigHash)
+}
+
+func TestMetadataReport_InheritsConfigHash(t *testing.T) {
+	full := &headless.RunReport{
+		ID:         "rpt_test",
+		ConfigHash: "rcp_v1_abc123",
+		Recipe:     headless.RecipeSnapshot{Name: "test", Tasks: []string{"t"}},
+		Tasks:      []headless.TaskResult{{Index: 0, Prompt: "t"}},
+		Summary:    headless.Summary{TotalTasks: 1},
+	}
+
+	meta := headless.BuildMetadataReport(full)
+	assert.Equal(t, "rcp_v1_abc123", meta.ConfigHash)
+
+	data, err := json.Marshal(meta)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "rcp_v1_abc123")
 }
 
 func TestRun_BundledOutputDir(t *testing.T) {

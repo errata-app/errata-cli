@@ -16,9 +16,11 @@ func TestSaveContent_LoadContent_RoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "session_content.json")
 
 	c := SessionContent{
+		SessionID: "ses_abc123",
 		Runs: []RunContent{
 			{
-				Prompt: "fix the bug",
+				Prompt:     "fix the bug",
+				PromptHash: "ph_deadbeef",
 				Models: []ModelRunContent{
 					{
 						ModelID:    "claude-sonnet-4-6",
@@ -62,9 +64,11 @@ func TestSaveContent_LoadContent_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
 
+	assert.Equal(t, "ses_abc123", loaded.SessionID)
 	require.Len(t, loaded.Runs, 1)
 	run := loaded.Runs[0]
 	assert.Equal(t, "fix the bug", run.Prompt)
+	assert.Equal(t, "ph_deadbeef", run.PromptHash)
 	require.Len(t, run.Models, 2)
 
 	m0 := run.Models[0]

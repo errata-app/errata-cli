@@ -12,14 +12,16 @@ import (
 // SessionContent holds the full prompts, responses, events, and conversation
 // histories for a session (session_content.json).
 type SessionContent struct {
+	SessionID string                                `json:"session_id,omitempty"`
 	Runs      []RunContent                          `json:"runs"`
 	Histories map[string][]models.ConversationTurn  `json:"histories,omitempty"`
 }
 
 // RunContent holds the full prompt and per-model response data for one run.
 type RunContent struct {
-	Prompt string            `json:"prompt"`
-	Models []ModelRunContent `json:"models"`
+	Prompt     string            `json:"prompt"`
+	PromptHash string            `json:"prompt_hash"`
+	Models     []ModelRunContent `json:"models"`
 }
 
 // ModelRunContent holds the full response data for one model in a run.

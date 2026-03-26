@@ -44,7 +44,7 @@ func TestUploadPreferences_Success(t *testing.T) {
 				LastActiveAt: now,
 				Models:       []string{"m1", "m2"},
 				PromptCount:  2,
-				ConfigHash:   "cfg_v1_abc",
+				ConfigHash:   "rcp_v1_abc",
 				RecipeName:   "Test Recipe",
 				Runs: []RunUpload{
 					{
@@ -107,7 +107,7 @@ func TestPreferenceUpload_RoundTrip(t *testing.T) {
 				LastActiveAt: now,
 				Models:       []string{"claude-sonnet-4-6", "gpt-4o"},
 				PromptCount:  3,
-				ConfigHash:   "cfg_v1_deadbeef",
+				ConfigHash:   "rcp_v1_deadbeef",
 				RecipeName:   "My Recipe",
 				Runs: []RunUpload{
 					{
@@ -121,7 +121,7 @@ func TestPreferenceUpload_RoundTrip(t *testing.T) {
 						OutputTokens:        map[string]int64{"claude-sonnet-4-6": 200, "gpt-4o": 180},
 						ToolCalls:           map[string]map[string]int{"claude-sonnet-4-6": {"bash": 2}},
 						ProposedWritesCount: map[string]int{"claude-sonnet-4-6": 3},
-						ConfigHash:          "cfg_v1_deadbeef",
+						ConfigHash:          "rcp_v1_deadbeef",
 					},
 				},
 			},
@@ -138,7 +138,7 @@ func TestPreferenceUpload_RoundTrip(t *testing.T) {
 	s := got.Sessions[0]
 	assert.Equal(t, "ses_round", s.ID)
 	assert.Equal(t, "My Recipe", s.RecipeName)
-	assert.Equal(t, "cfg_v1_deadbeef", s.ConfigHash)
+	assert.Equal(t, "rcp_v1_deadbeef", s.ConfigHash)
 	assert.True(t, s.CreatedAt.Equal(now))
 
 	require.Len(t, s.Runs, 1)
@@ -153,7 +153,7 @@ func TestPreferenceUpload_RoundTripWithConfigs(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	payload := PreferenceUpload{
 		Configs: map[string]recipestore.RecipeSnapshot{
-			"cfg_v1_abc": {
+			"rcp_v1_abc": {
 				Name:         "Test Recipe",
 				SystemPrompt: "be helpful",
 				Tools:        []string{"bash", "read_file"},
@@ -163,8 +163,8 @@ func TestPreferenceUpload_RoundTripWithConfigs(t *testing.T) {
 			{
 				ID:         "ses_cfg",
 				CreatedAt:  now,
-				ConfigHash: "cfg_v1_abc",
-				Runs:       []RunUpload{{PromptHash: "ph_1", Models: []string{"m1"}, ConfigHash: "cfg_v1_abc"}},
+				ConfigHash: "rcp_v1_abc",
+				Runs:       []RunUpload{{PromptHash: "ph_1", Models: []string{"m1"}, ConfigHash: "rcp_v1_abc"}},
 			},
 		},
 	}
@@ -182,14 +182,49 @@ func TestPreferenceUpload_RoundTripWithConfigs(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &got))
 
 	require.Len(t, got.Configs, 1)
-	snap, ok := got.Configs["cfg_v1_abc"]
+	snap, ok := got.Configs["rcp_v1_abc"]
 	require.True(t, ok)
 	assert.Equal(t, "Test Recipe", snap.Name)
 	assert.Equal(t, "be helpful", snap.SystemPrompt)
 	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
 
 	require.Len(t, got.Sessions, 1)
-	assert.Equal(t, "cfg_v1_abc", got.Sessions[0].ConfigHash)
+	assert.Equal(t, "rcp_v1_abc", got.Sessions[0].ConfigHash)
+}
+
+func TestUploadReport_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "/api/v1/reports", r.URL.Path)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		assert.Contains(t, string(body), "rpt_test")
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, token: "test-token", httpClient: srv.Client()}
+	err := c.UploadReport(json.RawMessage(`{"id":"rpt_test"}`))
+	require.NoError(t, err)
+}
+
+func TestUploadReport_Unauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid token"})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, token: "bad", httpClient: srv.Client()}
+	err := c.UploadReport(json.RawMessage(`{}`))
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 401, apiErr.StatusCode)
 }
 
 func TestPreferenceUpload_RoundTripWithContent(t *testing.T) {

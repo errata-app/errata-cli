@@ -20,14 +20,14 @@ func TestHash_Deterministic(t *testing.T) {
 	h1 := recipestore.Hash(cfg)
 	h2 := recipestore.Hash(cfg)
 	assert.Equal(t, h1, h2)
-	assert.Contains(t, h1, "cfg_v")
+	assert.Contains(t, h1, "rcp_v")
 }
 
-func TestHash_ExcludesName(t *testing.T) {
+func TestHash_IncludesName(t *testing.T) {
 	cfg1 := &recipestore.RecipeSnapshot{Name: "recipe-a", SystemPrompt: "same"}
 	cfg2 := &recipestore.RecipeSnapshot{Name: "recipe-b", SystemPrompt: "same"}
-	assert.Equal(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2),
-		"name should not affect the hash")
+	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2),
+		"different names should produce different hashes")
 }
 
 func TestHash_IncludesVersion(t *testing.T) {
@@ -35,8 +35,8 @@ func TestHash_IncludesVersion(t *testing.T) {
 	cfg2 := &recipestore.RecipeSnapshot{Version: 2, SystemPrompt: "same"}
 	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2),
 		"different versions should produce different hashes")
-	assert.Contains(t, recipestore.Hash(cfg1), "cfg_v1_")
-	assert.Contains(t, recipestore.Hash(cfg2), "cfg_v2_")
+	assert.Contains(t, recipestore.Hash(cfg1), "rcp_v1_")
+	assert.Contains(t, recipestore.Hash(cfg2), "rcp_v2_")
 }
 
 func TestHash_DifferentSystemPrompts(t *testing.T) {
@@ -52,12 +52,12 @@ func TestHash_DifferentTools(t *testing.T) {
 }
 
 func TestPutAndGet(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 
 	cfg := &recipestore.RecipeSnapshot{Name: "my-recipe", Tools: []string{"bash"}}
 	h := s.Put(cfg)
-	assert.Contains(t, h, "cfg_v")
+	assert.Contains(t, h, "rcp_v")
 
 	got := s.Get(h)
 	require.NotNil(t, got)
@@ -66,7 +66,7 @@ func TestPutAndGet(t *testing.T) {
 }
 
 func TestPut_Idempotent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 
 	cfg := &recipestore.RecipeSnapshot{Name: "dup"}
@@ -79,19 +79,19 @@ func TestPut_Idempotent(t *testing.T) {
 }
 
 func TestGet_NotFound(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
-	assert.Nil(t, s.Get("cfg_v0_0000"))
+	assert.Nil(t, s.Get("rcp_v0_0000"))
 }
 
 func TestNew_MissingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nonexistent", "configs.json")
+	path := filepath.Join(t.TempDir(), "nonexistent", "recipes.json")
 	s := recipestore.New(path)
 	assert.Empty(t, s.List())
 }
 
 func TestPersistence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s1 := recipestore.New(path)
 
 	cfg := &recipestore.RecipeSnapshot{
@@ -185,7 +185,7 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 
 	s.Put(&recipestore.RecipeSnapshot{Name: "a", SystemPrompt: "prompt-a"})
@@ -196,7 +196,7 @@ func TestList(t *testing.T) {
 }
 
 func TestHashesForName(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 
 	s.Put(&recipestore.RecipeSnapshot{Name: "target", Tools: []string{"a"}})
@@ -211,7 +211,7 @@ func TestHashesForName(t *testing.T) {
 }
 
 func TestNew_CorruptFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	require.NoError(t, os.WriteFile(path, []byte("{bad json"), 0o600))
 
 	s := recipestore.New(path)
@@ -219,7 +219,7 @@ func TestNew_CorruptFile(t *testing.T) {
 }
 
 func TestPut_CreatesParentDirs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "dir", "configs.json")
+	path := filepath.Join(t.TempDir(), "sub", "dir", "recipes.json")
 	s := recipestore.New(path)
 	s.Put(&recipestore.RecipeSnapshot{Name: "nested"})
 

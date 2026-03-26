@@ -14,7 +14,7 @@ type Layout struct {
 	Root          string // e.g. "data"
 	PricingCache  string // e.g. "data/pricing_cache.json"
 	PromptHistory string // e.g. "data/prompt_history.jsonl"
-	ConfigStore   string // e.g. "data/configs.json"
+	RecipeStorePath string // e.g. "data/recipes.json"
 	Outputs       string // e.g. "data/outputs"
 	Sessions      string // e.g. "data/sessions"
 	Checkpoint    string // e.g. "data/checkpoint.json"
@@ -27,7 +27,7 @@ func New(root string) Layout {
 		Root:          root,
 		PricingCache:  filepath.Join(root, "pricing_cache.json"),
 		PromptHistory: filepath.Join(root, "prompt_history.jsonl"),
-		ConfigStore:   filepath.Join(root, "configs.json"),
+		RecipeStorePath: filepath.Join(root, "recipes.json"),
 		Outputs:       filepath.Join(root, "outputs"),
 		Sessions:      filepath.Join(root, "sessions"),
 		Checkpoint:    filepath.Join(root, "checkpoint.json"),

@@ -13,9 +13,9 @@ import (
 
 // RunReport is the top-level JSON report produced by `errata run`.
 type RunReport struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	SessionID string    `json:"session_id"`
+	ID         string    `json:"id"`
+	Timestamp  time.Time `json:"timestamp"`
+	ConfigHash string    `json:"config_hash,omitempty"`
 
 	Recipe   RecipeSnapshot `json:"recipe"`
 	TaskMode string         `json:"task_mode"`
@@ -101,9 +101,9 @@ func newReportID() string {
 // MetadataReport is a shareable, redacted report containing only benchmark
 // metrics — no prompts, responses, file contents, or raw events.
 type MetadataReport struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	SessionID string    `json:"session_id"`
+	ID         string    `json:"id"`
+	Timestamp  time.Time `json:"timestamp"`
+	ConfigHash string    `json:"config_hash,omitempty"`
 
 	Recipe   MetaRecipeSnapshot `json:"recipe"`
 	TaskMode string             `json:"task_mode"`
@@ -150,9 +150,9 @@ type MetaModelResult struct {
 // hashing prompts and stripping sensitive content.
 func BuildMetadataReport(full *RunReport) *MetadataReport {
 	meta := &MetadataReport{
-		ID:        full.ID,
-		Timestamp: full.Timestamp,
-		SessionID: full.SessionID,
+		ID:         full.ID,
+		Timestamp:  full.Timestamp,
+		ConfigHash: full.ConfigHash,
 		Recipe: MetaRecipeSnapshot{
 			Name:            full.Recipe.Name,
 			Version:         full.Recipe.Version,

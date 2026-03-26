@@ -65,6 +65,7 @@ func main() {
 	runCmd.Flags().Bool("json", false, "Print report to stdout as JSON")
 	runCmd.Flags().String("output-dir", "", "Output directory (default: data/outputs/)")
 	runCmd.Flags().Bool("verbose", false, "Show model text events in progress")
+	runCmd.Flags().Bool("full", false, "Upload full report (one-shot override)")
 
 	sessionsCmd := &cobra.Command{
 		Use:   "sessions",
@@ -350,7 +351,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		SessionPaths:   sp,
 		SessionID:      sessionID,
 		Meta:           meta,
-		RecipeStore:    recipestore.New(layout.ConfigStore),
+		RecipeStore:    recipestore.New(layout.RecipeStorePath),
 		Recipe:         rec,
 	})
 	if err != nil {
@@ -376,8 +377,8 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	applyProjectRoot(rec)
 	// BashTimeout and AllowLocalFetch are wired through context at run sites.
 
-	sessionID := uid.New("ses_")
-	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, rec, layout.PricingCache, debugLogPath, sessionID)
+	logCorrelationID := uid.New("run_")
+	ads, warnings, mcpDefs, mcpDispatchers, cleanup := setupAdapters(cfg, rec, layout.PricingCache, debugLogPath, logCorrelationID)
 	defer cleanup()
 
 	if len(ads) == 0 {
@@ -394,6 +395,7 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 		outputDir = layout.Outputs
 	}
 	verbose, _ := cmd.Flags().GetBool("verbose")
+	fullUpload, _ := cmd.Flags().GetBool("full")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -409,11 +411,11 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 	_, err := headless.Run(ctx, &headless.Options{
 		Recipe:         rec,
 		Adapters:       ads,
-		SessionID:      sessionID,
 		OutputDir:      outputDir,
 		CheckpointPath: layout.Checkpoint,
 		Verbose:        verbose,
 		JSON:           jsonFlag,
+		FullUpload:     fullUpload,
 		DebugLog:       debugLogPath != "",
 		MCPDefs:        mcpDefs,
 		MCPDispatchers: mcpDispatchers,
@@ -430,7 +432,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 	config.ApplyRecipe(rec, &cfg)
 	layout := paths.New(cfg.DataDir)
 
-	filter := resolveStatsFilter(layout.ConfigStore, recipeFilter, configFilter)
+	filter := resolveStatsFilter(layout.RecipeStorePath, recipeFilter, configFilter)
 
 	if detail {
 		return runStatsDetailed(layout.Sessions, filter)
@@ -467,12 +469,12 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 // resolveStatsFilter builds a StatsFilter from CLI flags.
 // --config takes precedence; --recipe resolves to matching hashes via the config store.
-func resolveStatsFilter(configStorePath, recipeName, configHash string) *session.StatsFilter {
+func resolveStatsFilter(recipeStorePath, recipeName, configHash string) *session.StatsFilter {
 	if configHash != "" {
 		return &session.StatsFilter{ConfigHash: configHash}
 	}
 	if recipeName != "" {
-		cs := recipestore.New(configStorePath)
+		cs := recipestore.New(recipeStorePath)
 		hashes := cs.HashesForName(recipeName)
 		if len(hashes) == 1 {
 			return &session.StatsFilter{ConfigHash: hashes[0]}
@@ -631,7 +633,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	layout := paths.New(cfg.DataDir)
 	since := api.LoadLastSync()
 
-	rs := recipestore.New(layout.ConfigStore)
+	rs := recipestore.New(layout.RecipeStorePath)
 	nameLookup := func(hash string) string {
 		if snap := rs.Get(hash); snap != nil {
 			return snap.Name
