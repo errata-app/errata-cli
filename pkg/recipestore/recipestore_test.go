@@ -52,7 +52,7 @@ func TestHash_DifferentTools(t *testing.T) {
 }
 
 func TestPutAndGet(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 
 	cfg := &recipestore.RecipeSnapshot{Name: "my-recipe", Tools: []string{"bash"}}
@@ -66,7 +66,7 @@ func TestPutAndGet(t *testing.T) {
 }
 
 func TestPut_Idempotent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 
 	cfg := &recipestore.RecipeSnapshot{Name: "dup"}
@@ -79,19 +79,19 @@ func TestPut_Idempotent(t *testing.T) {
 }
 
 func TestGet_NotFound(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 	assert.Nil(t, s.Get("rcp_v0_0000"))
 }
 
 func TestNew_MissingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nonexistent", "configs.json")
+	path := filepath.Join(t.TempDir(), "nonexistent", "recipes.json")
 	s := recipestore.New(path)
 	assert.Empty(t, s.List())
 }
 
 func TestPersistence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s1 := recipestore.New(path)
 
 	cfg := &recipestore.RecipeSnapshot{
@@ -185,7 +185,7 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 
 	s.Put(&recipestore.RecipeSnapshot{Name: "a", SystemPrompt: "prompt-a"})
@@ -196,7 +196,7 @@ func TestList(t *testing.T) {
 }
 
 func TestHashesForName(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	s := recipestore.New(path)
 
 	s.Put(&recipestore.RecipeSnapshot{Name: "target", Tools: []string{"a"}})
@@ -211,7 +211,7 @@ func TestHashesForName(t *testing.T) {
 }
 
 func TestNew_CorruptFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configs.json")
+	path := filepath.Join(t.TempDir(), "recipes.json")
 	require.NoError(t, os.WriteFile(path, []byte("{bad json"), 0o600))
 
 	s := recipestore.New(path)
@@ -219,7 +219,7 @@ func TestNew_CorruptFile(t *testing.T) {
 }
 
 func TestPut_CreatesParentDirs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "dir", "configs.json")
+	path := filepath.Join(t.TempDir(), "sub", "dir", "recipes.json")
 	s := recipestore.New(path)
 	s.Put(&recipestore.RecipeSnapshot{Name: "nested"})
 

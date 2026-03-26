@@ -708,7 +708,7 @@ func TestSessionsDir(t *testing.T) {
 func TestRecipeNameLookup_Hit(t *testing.T) {
 	tmp := t.TempDir()
 	sp := session.PathsFor(tmp, "ses_test")
-	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+	rs := recipestore.New(filepath.Join(tmp, "recipes.json"))
 	hash := rs.Put(&recipestore.RecipeSnapshot{Name: "My Recipe", SystemPrompt: "test"})
 
 	s, err := New(Options{
@@ -725,7 +725,7 @@ func TestRecipeNameLookup_Hit(t *testing.T) {
 func TestRecipeNameLookup_Miss(t *testing.T) {
 	tmp := t.TempDir()
 	sp := session.PathsFor(tmp, "ses_test")
-	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+	rs := recipestore.New(filepath.Join(tmp, "recipes.json"))
 
 	s, err := New(Options{
 		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
@@ -749,7 +749,7 @@ func TestRecipeNameLookup_NilStore(t *testing.T) {
 func TestConfigSnapshots_ResolvesKnownHashes(t *testing.T) {
 	tmp := t.TempDir()
 	sp := session.PathsFor(tmp, "ses_test")
-	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+	rs := recipestore.New(filepath.Join(tmp, "recipes.json"))
 	h1 := rs.Put(&recipestore.RecipeSnapshot{Name: "Recipe A", SystemPrompt: "a"})
 	h2 := rs.Put(&recipestore.RecipeSnapshot{Name: "Recipe B", SystemPrompt: "b"})
 
@@ -769,7 +769,7 @@ func TestConfigSnapshots_ResolvesKnownHashes(t *testing.T) {
 func TestConfigSnapshots_SkipsUnknownHashes(t *testing.T) {
 	tmp := t.TempDir()
 	sp := session.PathsFor(tmp, "ses_test")
-	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+	rs := recipestore.New(filepath.Join(tmp, "recipes.json"))
 
 	s, err := New(Options{
 		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),
@@ -791,7 +791,7 @@ func TestConfigSnapshots_NilStore(t *testing.T) {
 func TestConfigSnapshots_EmptyHashes(t *testing.T) {
 	tmp := t.TempDir()
 	sp := session.PathsFor(tmp, "ses_test")
-	rs := recipestore.New(filepath.Join(tmp, "configs.json"))
+	rs := recipestore.New(filepath.Join(tmp, "recipes.json"))
 
 	s, err := New(Options{
 		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),

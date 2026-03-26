@@ -342,7 +342,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		SessionPaths:   sp,
 		SessionID:      sessionID,
 		Meta:           meta,
-		RecipeStore:    recipestore.New(layout.ConfigStore),
+		RecipeStore:    recipestore.New(layout.RecipeStorePath),
 		Recipe:         rec,
 	})
 	if err != nil {
@@ -423,7 +423,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 	config.ApplyRecipe(rec, &cfg)
 	layout := paths.New(cfg.DataDir)
 
-	filter := resolveStatsFilter(layout.ConfigStore, recipeFilter, configFilter)
+	filter := resolveStatsFilter(layout.RecipeStorePath, recipeFilter, configFilter)
 
 	if detail {
 		return runStatsDetailed(layout.Sessions, filter)
@@ -460,12 +460,12 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 // resolveStatsFilter builds a StatsFilter from CLI flags.
 // --config takes precedence; --recipe resolves to matching hashes via the config store.
-func resolveStatsFilter(configStorePath, recipeName, configHash string) *session.StatsFilter {
+func resolveStatsFilter(recipeStorePath, recipeName, configHash string) *session.StatsFilter {
 	if configHash != "" {
 		return &session.StatsFilter{ConfigHash: configHash}
 	}
 	if recipeName != "" {
-		cs := recipestore.New(configStorePath)
+		cs := recipestore.New(recipeStorePath)
 		hashes := cs.HashesForName(recipeName)
 		if len(hashes) == 1 {
 			return &session.StatsFilter{ConfigHash: hashes[0]}
@@ -624,7 +624,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	layout := paths.New(cfg.DataDir)
 	since := api.LoadLastSync()
 
-	rs := recipestore.New(layout.ConfigStore)
+	rs := recipestore.New(layout.RecipeStorePath)
 	nameLookup := func(hash string) string {
 		if snap := rs.Get(hash); snap != nil {
 			return snap.Name
