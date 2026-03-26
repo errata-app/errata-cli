@@ -282,8 +282,14 @@ func (s *Store) PersistRunState(
 		fmt.Fprintf(os.Stderr, "warning: could not save session metadata: %v\n", err)
 	}
 
+	// Set the session ID once (idempotent).
+	s.content.SessionID = s.sessionID
+
 	// Build RunContent.
-	rc := session.RunContent{Prompt: lastPrompt}
+	rc := session.RunContent{
+		Prompt:     lastPrompt,
+		PromptHash: rs.PromptHash,
+	}
 	for _, resp := range responses {
 		var writes []output.WriteEntry
 		for _, fw := range resp.ProposedWrites {
