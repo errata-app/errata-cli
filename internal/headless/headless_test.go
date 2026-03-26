@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -228,6 +229,42 @@ func TestRunReport_NoSessionID(t *testing.T) {
 	data, err := json.Marshal(report)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "session_id")
+}
+
+func TestRunReport_ContainsConfigHash(t *testing.T) {
+	t.Chdir(t.TempDir())
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	rec := testRecipe([]string{"task"}, nil)
+	rec.Name = "hash-test"
+	a1 := &mockAdapter{
+		id:       "model-a",
+		response: models.ModelResponse{Text: "done", LatencyMS: 100},
+	}
+
+	opts := testOpts(rec, []models.ModelAdapter{a1}, outDir)
+	report, err := headless.Run(context.Background(), opts)
+	require.NoError(t, err)
+
+	assert.True(t, strings.HasPrefix(report.ConfigHash, "rcp_v"),
+		"ConfigHash should start with rcp_v, got %q", report.ConfigHash)
+}
+
+func TestMetadataReport_InheritsConfigHash(t *testing.T) {
+	full := &headless.RunReport{
+		ID:         "rpt_test",
+		ConfigHash: "rcp_v1_abc123",
+		Recipe:     headless.RecipeSnapshot{Name: "test", Tasks: []string{"t"}},
+		Tasks:      []headless.TaskResult{{Index: 0, Prompt: "t"}},
+		Summary:    headless.Summary{TotalTasks: 1},
+	}
+
+	meta := headless.BuildMetadataReport(full)
+	assert.Equal(t, "rcp_v1_abc123", meta.ConfigHash)
+
+	data, err := json.Marshal(meta)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "rcp_v1_abc123")
 }
 
 func TestRun_BundledOutputDir(t *testing.T) {
