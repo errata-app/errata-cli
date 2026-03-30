@@ -663,9 +663,20 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 			BashPrefixes: []string{"go test"},
 			Guidance:     map[string]string{"bash": "use tools wisely"},
 		},
-		Constraints:         recipe.ConstraintsConfig{MaxSteps: 5, Timeout: 3 * time.Minute},
-		Context:             recipe.ContextConfig{MaxHistoryTurns: 10, Strategy: "auto_compact", CompactThreshold: 0.8, TaskMode: "sequential", SummarizationPrompt: "summarize it"},
-		OutputProcessing:    map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
+		MCPServers:  []recipe.MCPServerEntry{{Name: "db", Command: "npx db-server"}},
+		Constraints: recipe.ConstraintsConfig{
+			MaxSteps: 5, Timeout: 3 * time.Minute,
+			BashTimeout: 30 * time.Second, ProjectRoot: "/tmp/proj",
+		},
+		Context: recipe.ContextConfig{
+			MaxHistoryTurns: 10, Strategy: "auto_compact",
+			CompactThreshold: 0.8, TaskMode: "sequential",
+			SummarizationPrompt: "summarize it",
+		},
+		Sandbox:          recipe.SandboxConfig{Filesystem: "project_only", Network: "none"},
+		Tasks:            []string{"fix the bug"},
+		SuccessCriteria:  []string{"tests pass"},
+		OutputProcessing: map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
 	}
 	s.lastActiveTools = []string{"bash", "read_file"}
 
@@ -679,7 +690,24 @@ func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
 	assert.Equal(t, map[string]string{"bash": "use tools wisely"}, snap.ToolDescriptions)
 	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
 	assert.Equal(t, "summarize it", snap.SummarizationPrompt)
+
+	assert.Equal(t, []string{"fix the bug"}, snap.Tasks)
+	assert.Equal(t, []string{"tests pass"}, snap.SuccessCriteria)
+
+	require.Len(t, snap.MCPServers, 1)
+	assert.Equal(t, "db", snap.MCPServers[0].Name)
+	assert.Equal(t, "npx db-server", snap.MCPServers[0].Command)
+
+	require.NotNil(t, snap.Sandbox)
+	assert.Equal(t, "project_only", snap.Sandbox.Filesystem)
+	assert.Equal(t, "none", snap.Sandbox.Network)
+
 	require.NotNil(t, snap.Constraints)
+	assert.Equal(t, 5, snap.Constraints.MaxSteps)
+	assert.Equal(t, "3m0s", snap.Constraints.Timeout)
+	assert.Equal(t, "30s", snap.Constraints.BashTimeout)
+	assert.Equal(t, "/tmp/proj", snap.Constraints.ProjectRoot)
+
 	require.NotNil(t, snap.Context)
 }
 

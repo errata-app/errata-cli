@@ -223,7 +223,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 
 	summary := buildSummary(taskResults, parsedCriteria, totalCost)
 
-	configHash := recipestore.Hash(buildRecipeStoreSnapshot(rec, toolNameList(activeDefs)))
+	configHash := recipestore.Hash(recipestore.SnapshotFromRecipe(rec, toolNameList(activeDefs)))
 
 	headlessReport := &RunReport{
 		ID:         reportID,
@@ -712,57 +712,6 @@ func snapshotRecipe(rec *recipe.Recipe) RecipeSnapshot {
 		Tasks:           rec.Tasks,
 		SuccessCriteria: rec.SuccessCriteria,
 	}
-}
-
-// buildRecipeStoreSnapshot converts a recipe.Recipe into a recipestore.RecipeSnapshot
-// suitable for hashing. This mirrors datastore.BuildRecipeSnapshot but without
-// session state dependencies.
-func buildRecipeStoreSnapshot(rec *recipe.Recipe, activeTools []string) *recipestore.RecipeSnapshot {
-	snap := &recipestore.RecipeSnapshot{
-		Version:      rec.Version,
-		Name:         recipeName(rec),
-		SystemPrompt: rec.SystemPrompt,
-		Tools:        activeTools,
-	}
-	if rec.Tools != nil {
-		snap.ToolGuidance = rec.Tools.Guidance
-		snap.ToolDescriptions = rec.Tools.Guidance
-		snap.BashPrefixes = rec.Tools.BashPrefixes
-	}
-	snap.SummarizationPrompt = rec.Context.SummarizationPrompt
-
-	if rec.Constraints.MaxSteps > 0 || rec.Constraints.Timeout > 0 {
-		snap.Constraints = &recipestore.ConstraintsConfig{
-			MaxSteps: rec.Constraints.MaxSteps,
-		}
-		if rec.Constraints.Timeout > 0 {
-			snap.Constraints.Timeout = rec.Constraints.Timeout.String()
-		}
-	}
-
-	if rec.Context.MaxHistoryTurns > 0 || rec.Context.Strategy != "" ||
-		rec.Context.CompactThreshold > 0 || rec.Context.TaskMode != "" {
-		snap.Context = &recipestore.ContextConfig{
-			MaxHistoryTurns:  rec.Context.MaxHistoryTurns,
-			Strategy:         rec.Context.Strategy,
-			CompactThreshold: rec.Context.CompactThreshold,
-			TaskMode:         rec.Context.TaskMode,
-		}
-	}
-
-	if len(rec.OutputProcessing) > 0 {
-		snap.OutputProcessing = make(map[string]recipestore.OutputRuleConfig, len(rec.OutputProcessing))
-		for name, rule := range rec.OutputProcessing {
-			snap.OutputProcessing[name] = recipestore.OutputRuleConfig{
-				MaxLines:          rule.MaxLines,
-				MaxTokens:         rule.MaxTokens,
-				Truncation:        rule.Truncation,
-				TruncationMessage: rule.TruncationMessage,
-			}
-		}
-	}
-
-	return snap
 }
 
 func recipeName(rec *recipe.Recipe) string {
