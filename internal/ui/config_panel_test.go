@@ -720,8 +720,8 @@ func TestSetConfigValue_SystemPrompt_SetsRecipeField(t *testing.T) {
 
 // ── applySessionRecipe regression tests ─────────────────────────────────────
 
-func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
-	// Pins the full sync path from session recipe to runtime state.
+func TestApplySessionRecipe_PersistsAllFields(t *testing.T) {
+	// Pins the full sync path: applySessionRecipe persists the recipe to disk.
 	ads := []models.ModelAdapter{uiStub{"m1"}}
 	a := newAppForTest(t, ads)
 
@@ -747,23 +747,32 @@ func TestApplySessionRecipe_SyncsAllFields(t *testing.T) {
 	a.store.SetSessionRecipe(sessionRec)
 	a.applySessionRecipe()
 
-	// App fields synced from session recipe.
-	assert.Equal(t, []string{"read_file", "bash"}, a.toolAllowlist)
-	assert.Equal(t, []string{"go test", "go vet"}, a.bashPrefixes)
-	assert.Equal(t, "manual", a.contextStrategy)
-	assert.Equal(t, "project_only", a.sandboxFilesystem)
-	assert.Equal(t, "none", a.sandboxNetwork)
-	assert.Equal(t, "/opt/project", a.projectRoot)
+	// Recipe persisted to disk.
+	path := a.store.SessionRecipePath()
+	require.NotEmpty(t, path)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(data)
+	assert.Contains(t, content, "read_file")
+	assert.Contains(t, content, "manual")
+	assert.Contains(t, content, "project_only")
+	assert.Contains(t, content, "none")
+
+	// ActiveRecipe should return the session recipe fields.
+	active := a.store.ActiveRecipe()
+	require.NotNil(t, active)
+	assert.Equal(t, []string{"read_file", "bash"}, active.Tools.Allowlist)
+	assert.Equal(t, "manual", active.Context.Strategy)
+	assert.Equal(t, "project_only", active.Sandbox.Filesystem)
+	assert.Equal(t, "none", active.Sandbox.Network)
+	assert.Equal(t, "/opt/project", active.Constraints.ProjectRoot)
 }
 
 func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
-	// Pre-populate App/cfg with non-default values.
-	// Session recipe with only Tools set, everything else zero.
-	// Pins the `if > 0` / `if != nil` guards.
+	// Editing one recipe field doesn't clobber others (Go struct semantics).
 	ads := []models.ModelAdapter{uiStub{"m1"}}
 	a := newAppForTest(t, ads)
 
-	// Start from a full base recipe clone (matches real /config flow).
 	base := &recipe.Recipe{
 		Version: 1,
 		Tools: &recipe.ToolsConfig{
@@ -789,23 +798,21 @@ func TestApplySessionRecipe_ZeroFieldsPreserveExisting(t *testing.T) {
 	sessRec.Tools.Allowlist = []string{"write_file"}
 	a.applySessionRecipe()
 
-	// Tools should have changed.
-	assert.Equal(t, []string{"write_file"}, a.toolAllowlist)
+	// Verify the edited field changed via ActiveRecipe.
+	active := a.store.ActiveRecipe()
+	assert.Equal(t, []string{"write_file"}, active.Tools.Allowlist)
 
-	// All other fields should be preserved from the full clone.
-	assert.Equal(t, "/existing/root", a.projectRoot)
-	assert.Equal(t, "auto_compact", a.contextStrategy)
-	assert.Equal(t, "read_only", a.sandboxFilesystem)
-	assert.Equal(t, "full", a.sandboxNetwork)
+	// All other fields preserved on the recipe.
+	assert.Equal(t, "/existing/root", active.Constraints.ProjectRoot)
+	assert.Equal(t, "auto_compact", active.Context.Strategy)
+	assert.Equal(t, "read_only", active.Sandbox.Filesystem)
+	assert.Equal(t, "full", active.Sandbox.Network)
 }
 
 func TestApplySessionRecipe_NilRecipeIsNoop(t *testing.T) {
-	// No session recipe set, call applySessionRecipe(), assert no panic and no field changes.
+	// No session recipe set, call applySessionRecipe(), assert no panic.
 	ads := []models.ModelAdapter{uiStub{"m1"}}
 	a := newAppForTest(t, ads)
-
-	// Pre-populate.
-	a.contextStrategy = "manual"
 
 	// Ensure no session recipe is set.
 	assert.Nil(t, a.store.SessionRecipe())
@@ -814,9 +821,6 @@ func TestApplySessionRecipe_NilRecipeIsNoop(t *testing.T) {
 	assert.NotPanics(t, func() {
 		a.applySessionRecipe()
 	})
-
-	// Fields should be unchanged.
-	assert.Equal(t, "manual", a.contextStrategy)
 }
 
 func TestApplySessionRecipe_PersistsToDisk(t *testing.T) {

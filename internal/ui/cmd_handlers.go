@@ -283,53 +283,12 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	promptPrintCmd := tea.Println(wrapText("> "+trimmed, max(a.width, 40), 0, promptStyle))
 
+	params := a.captureRunParams()
 	ads := toRun
 	verbose := a.verbose
 	prog := a.prog
 	histories := a.store.Histories() // read-only in goroutine; written only by main loop
-	activeDefs := tools.DefinitionsAllowed(a.toolAllowlist, a.disabledTools)
-	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
-	// Apply sandbox restrictions from recipe.
-	if a.sandboxFilesystem == "read_only" {
-		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
-			tools.WriteToolName: true,
-			tools.EditToolName:  true,
-		})
-	}
-	if a.sandboxNetwork == "none" {
-		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
-			tools.WebFetchToolName:  true,
-			tools.WebSearchToolName: true,
-		})
-	}
-	// Apply recipe-level tool description overrides (uniform for all models).
-	var sumPrompt, recSystemPrompt string
-	var recToolGuidanceMap map[string]string
-	var bashTimeout, agentTimeout time.Duration
-	var allowLocalFetch bool
-	var compactThreshold float64
-	var maxHistoryTurns, maxSteps int
-	if activeRec := a.store.ActiveRecipe(); activeRec != nil {
-		sumPrompt = activeRec.Context.SummarizationPrompt
-		recSystemPrompt = activeRec.SystemPrompt
-		bashTimeout = activeRec.Constraints.BashTimeout
-		allowLocalFetch = activeRec.Sandbox.AllowLocalFetch
-		agentTimeout = activeRec.Constraints.Timeout
-		compactThreshold = activeRec.Context.CompactThreshold
-		maxHistoryTurns = activeRec.Context.MaxHistoryTurns
-		maxSteps = activeRec.Constraints.MaxSteps
-		if activeRec.Tools != nil {
-			activeDefs = tools.ApplyDescriptions(activeDefs, activeRec.Tools.Guidance)
-			recToolGuidanceMap = activeRec.Tools.Guidance
-		}
-	}
 	mcpDispatchers := a.mcpDispatchers
-	bashPrefixes := a.bashPrefixes
-	contextStrategy := a.contextStrategy
-	sandboxFilesystem := a.sandboxFilesystem
-	sandboxNetwork := a.sandboxNetwork
-	projectRoot := a.projectRoot
-	cpPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
@@ -345,10 +304,10 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
 		// Skip auto-compact when context strategy is "manual" or "off".
-		if contextStrategy != "manual" && contextStrategy != "off" {
-			compactCtx := prompt.WithSummarizationPrompt(baseCtx, sumPrompt)
+		if params.contextStrategy != "manual" && params.contextStrategy != "off" {
+			compactCtx := prompt.WithSummarizationPrompt(baseCtx, params.sumPrompt)
 			for _, ad := range ads {
-				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), compactThreshold) {
+				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), params.compactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
 						Type: models.EventText, Data: "[auto-compacting history…]",
 					}})
@@ -362,27 +321,7 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 				}
 			}
 		}
-		runCtx := tools.WithActiveTools(baseCtx, activeDefs)
-		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
-		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
-		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
-			Filesystem:      sandboxFilesystem,
-			Network:         sandboxNetwork,
-			ProjectRoot:     projectRoot,
-			AllowLocalFetch: allowLocalFetch,
-		})
-		if bashTimeout > 0 {
-			runCtx = tools.WithBashTimeout(runCtx, bashTimeout)
-		}
-		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
-			Timeout:          agentTimeout,
-			CompactThreshold: compactThreshold,
-			MaxHistoryTurns:  maxHistoryTurns,
-			MaxSteps:         maxSteps,
-			CheckpointPath:   cpPath,
-		})
-		runCtx = tools.WithSystemPromptExtra(runCtx, recSystemPrompt)
-		runCtx = tools.WithToolGuidanceMap(runCtx, recToolGuidanceMap)
+		runCtx := wireRunContext(baseCtx, params, mcpDispatchers)
 		collector := output.NewCollector()
 		responses := runner.RunAll(
 			runCtx, ads, effectiveHistories, trimmed,
@@ -403,20 +342,126 @@ func (a App) launchRunTargeted(trimmed string, mentionTargets []models.ModelAdap
 				panelIDs[i] = ad.ID()
 			}
 			if cp := checkpoint.Build(trimmed, panelIDs, responses, verbose); cp != nil {
-				if err := checkpoint.Save(cpPath, *cp); err != nil {
+				if err := checkpoint.Save(params.checkpointPath, *cp); err != nil {
 					log.Printf("warning: failed to save checkpoint: %v", err)
 				}
 			}
 		}
 
-		toolNames := make([]string, len(activeDefs))
-		for i, d := range activeDefs {
+		toolNames := make([]string, len(params.activeDefs))
+		for i, d := range params.activeDefs {
 			toolNames[i] = d.Name
 		}
 
 		return runCompleteMsg{responses: responses, compactedHistories: compacted, collector: collector, toolNames: toolNames}
 	})
 	return a, tea.Batch(batchCmds...)
+}
+
+// runLaunchParams holds all recipe-derived settings captured once at launch time.
+type runLaunchParams struct {
+	activeDefs        []tools.ToolDef
+	toolGuidanceMap   map[string]string
+	bashPrefixes      []string
+	contextStrategy   string
+	sumPrompt         string
+	systemPrompt      string
+	bashTimeout       time.Duration
+	agentTimeout      time.Duration
+	allowLocalFetch   bool
+	compactThreshold  float64
+	maxHistoryTurns   int
+	maxSteps          int
+	sandboxFilesystem string
+	sandboxNetwork    string
+	projectRoot       string
+	checkpointPath    string
+}
+
+// captureRunParams reads ActiveRecipe() once and builds runLaunchParams with
+// all recipe-derived settings needed for a run.
+func (a App) captureRunParams() runLaunchParams { //nolint:gocritic // called from bubbletea value-receiver methods
+	rec := a.store.ActiveRecipe()
+	if rec == nil {
+		rec = &recipe.Recipe{}
+	}
+
+	var allowlist []string
+	var bashPrefixes []string
+	var toolGuidanceMap map[string]string
+	if rec.Tools != nil {
+		allowlist = rec.Tools.Allowlist
+		bashPrefixes = rec.Tools.BashPrefixes
+		toolGuidanceMap = rec.Tools.Guidance
+	}
+
+	activeDefs := tools.DefinitionsAllowed(allowlist, a.disabledTools)
+	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
+
+	// Apply sandbox restrictions.
+	if rec.Sandbox.Filesystem == "read_only" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
+			tools.WriteToolName: true,
+			tools.EditToolName:  true,
+		})
+	}
+	if rec.Sandbox.Network == "none" {
+		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
+			tools.WebFetchToolName:  true,
+			tools.WebSearchToolName: true,
+		})
+	}
+
+	// Apply recipe-level tool description overrides.
+	if rec.Tools != nil {
+		activeDefs = tools.ApplyDescriptions(activeDefs, rec.Tools.Guidance)
+	}
+
+	return runLaunchParams{
+		activeDefs:        activeDefs,
+		toolGuidanceMap:   toolGuidanceMap,
+		bashPrefixes:      bashPrefixes,
+		contextStrategy:   rec.Context.Strategy,
+		sumPrompt:         rec.Context.SummarizationPrompt,
+		systemPrompt:      rec.SystemPrompt,
+		bashTimeout:       rec.Constraints.BashTimeout,
+		agentTimeout:      rec.Constraints.Timeout,
+		allowLocalFetch:   rec.Sandbox.AllowLocalFetch,
+		compactThreshold:  rec.Context.CompactThreshold,
+		maxHistoryTurns:   rec.Context.MaxHistoryTurns,
+		maxSteps:          rec.Constraints.MaxSteps,
+		sandboxFilesystem: rec.Sandbox.Filesystem,
+		sandboxNetwork:    rec.Sandbox.Network,
+		projectRoot:       rec.Constraints.ProjectRoot,
+		checkpointPath:    a.store.CheckpointPath(),
+	}
+}
+
+// wireRunContext applies all recipe-derived settings from runLaunchParams onto
+// a base context, returning the fully-wired context for runner.RunAll.
+func wireRunContext(baseCtx context.Context, p runLaunchParams, mcpDispatchers map[string]tools.MCPDispatcher) context.Context {
+	ctx := tools.WithActiveTools(baseCtx, p.activeDefs)
+	ctx = tools.WithMCPDispatchers(ctx, mcpDispatchers)
+	ctx = tools.WithBashPrefixes(ctx, p.bashPrefixes)
+	ctx = sandbox.WithConfig(ctx, sandbox.Config{
+		Filesystem:      p.sandboxFilesystem,
+		Network:         p.sandboxNetwork,
+		ProjectRoot:     p.projectRoot,
+		AllowLocalFetch: p.allowLocalFetch,
+	})
+	if p.bashTimeout > 0 {
+		ctx = tools.WithBashTimeout(ctx, p.bashTimeout)
+	}
+	ctx = runner.WithRunOptions(ctx, runner.RunOptions{
+		Timeout:          p.agentTimeout,
+		CompactThreshold: p.compactThreshold,
+		MaxHistoryTurns:  p.maxHistoryTurns,
+		MaxSteps:         p.maxSteps,
+		CheckpointPath:   p.checkpointPath,
+	})
+	ctx = tools.WithSystemPromptExtra(ctx, p.systemPrompt)
+	ctx = tools.WithToolGuidanceMap(ctx, p.toolGuidanceMap)
+	return ctx
 }
 
 func (a App) handleResumeCmd() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea tea.Model requires value receiver
@@ -525,51 +570,11 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00AFAF"))
 	promptPrintCmd := tea.Println(wrapText("> [resume] "+userPrompt, max(a.width, 40), 0, promptStyle))
 
+	params := a.captureRunParams()
 	ads := rerunAdapters
 	prog := a.prog
 	histories := a.store.Histories()
-	activeDefs := tools.DefinitionsAllowed(a.toolAllowlist, a.disabledTools)
-	activeDefs = append(activeDefs, tools.FilterDefs(a.mcpDefs, a.disabledTools)...)
-	if a.sandboxFilesystem == "read_only" {
-		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
-			tools.WriteToolName: true,
-			tools.EditToolName:  true,
-		})
-	}
-	if a.sandboxNetwork == "none" {
-		activeDefs = tools.FilterDefs(activeDefs, map[string]bool{
-			tools.WebFetchToolName:  true,
-			tools.WebSearchToolName: true,
-		})
-	}
-	// Apply recipe-level tool description overrides (uniform for all models).
-	var resumeSumPrompt, resumeSystemPrompt string
-	var resumeToolGuidanceMap map[string]string
-	var resumeBashTimeout, resumeAgentTimeout time.Duration
-	var resumeAllowLocalFetch bool
-	var resumeCompactThreshold float64
-	var resumeMaxHistoryTurns, resumeMaxSteps int
-	if resumeRec := a.store.ActiveRecipe(); resumeRec != nil {
-		resumeSumPrompt = resumeRec.Context.SummarizationPrompt
-		resumeSystemPrompt = resumeRec.SystemPrompt
-		resumeBashTimeout = resumeRec.Constraints.BashTimeout
-		resumeAllowLocalFetch = resumeRec.Sandbox.AllowLocalFetch
-		resumeAgentTimeout = resumeRec.Constraints.Timeout
-		resumeCompactThreshold = resumeRec.Context.CompactThreshold
-		resumeMaxHistoryTurns = resumeRec.Context.MaxHistoryTurns
-		resumeMaxSteps = resumeRec.Constraints.MaxSteps
-		if resumeRec.Tools != nil {
-			activeDefs = tools.ApplyDescriptions(activeDefs, resumeRec.Tools.Guidance)
-			resumeToolGuidanceMap = resumeRec.Tools.Guidance
-		}
-	}
 	mcpDispatchers := a.mcpDispatchers
-	bashPrefixes := a.bashPrefixes
-	contextStrategy := a.contextStrategy
-	sandboxFilesystem := a.sandboxFilesystem
-	sandboxNetwork := a.sandboxNetwork
-	projectRoot := a.projectRoot
-	resumeCPPath := a.store.CheckpointPath()
 
 	baseCtx, cancelFn := context.WithCancel(context.Background())
 	a.cancelRun = cancelFn
@@ -584,10 +589,10 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 	resumeBatchCmds = append(resumeBatchCmds, promptPrintCmd, panelTick(), func() tea.Msg {
 		effectiveHistories := histories
 		var compacted map[string][]models.ConversationTurn
-		if contextStrategy != "manual" && contextStrategy != "off" {
-			compactCtx := prompt.WithSummarizationPrompt(baseCtx, resumeSumPrompt)
+		if params.contextStrategy != "manual" && params.contextStrategy != "off" {
+			compactCtx := prompt.WithSummarizationPrompt(baseCtx, params.sumPrompt)
 			for _, ad := range ads {
-				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), resumeCompactThreshold) {
+				if runner.ShouldAutoCompact(effectiveHistories, ad.ID(), params.compactThreshold) {
 					prog.Send(agentEventMsg{modelID: ad.ID(), event: models.AgentEvent{
 						Type: models.EventText, Data: "[auto-compacting history…]",
 					}})
@@ -601,27 +606,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 				}
 			}
 		}
-		runCtx := tools.WithActiveTools(baseCtx, activeDefs)
-		runCtx = tools.WithMCPDispatchers(runCtx, mcpDispatchers)
-		runCtx = tools.WithBashPrefixes(runCtx, bashPrefixes)
-		runCtx = sandbox.WithConfig(runCtx, sandbox.Config{
-			Filesystem:      sandboxFilesystem,
-			Network:         sandboxNetwork,
-			ProjectRoot:     projectRoot,
-			AllowLocalFetch: resumeAllowLocalFetch,
-		})
-		if resumeBashTimeout > 0 {
-			runCtx = tools.WithBashTimeout(runCtx, resumeBashTimeout)
-		}
-		runCtx = runner.WithRunOptions(runCtx, runner.RunOptions{
-			Timeout:          resumeAgentTimeout,
-			CompactThreshold: resumeCompactThreshold,
-			MaxHistoryTurns:  resumeMaxHistoryTurns,
-			MaxSteps:         resumeMaxSteps,
-			CheckpointPath:   resumeCPPath,
-		})
-		runCtx = tools.WithSystemPromptExtra(runCtx, resumeSystemPrompt)
-		runCtx = tools.WithToolGuidanceMap(runCtx, resumeToolGuidanceMap)
+		runCtx := wireRunContext(baseCtx, params, mcpDispatchers)
 		collector := output.NewCollector()
 		completedCount := len(completedResponses)
 		responses := runner.RunAll(
@@ -644,7 +629,7 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 				allIDs[i] = r.ModelID
 			}
 			if cp := checkpoint.Build(userPrompt, allIDs, allResp, verbose); cp != nil {
-				if err := checkpoint.Save(resumeCPPath, *cp); err != nil {
+				if err := checkpoint.Save(params.checkpointPath, *cp); err != nil {
 					log.Printf("warning: failed to save checkpoint: %v", err)
 				}
 			}
@@ -653,8 +638,8 @@ func (a App) launchResumeRun(userPrompt string, rerunAdapters []models.ModelAdap
 		// Merge completed responses (from checkpoint) with fresh re-run responses.
 		allResponses := slices.Concat(completedResponses, responses)
 
-		toolNames := make([]string, len(activeDefs))
-		for i, d := range activeDefs {
+		toolNames := make([]string, len(params.activeDefs))
+		for i, d := range params.activeDefs {
 			toolNames[i] = d.Name
 		}
 
@@ -809,7 +794,11 @@ func (a App) handleConfigCommand(args string) (tea.Model, tea.Cmd) { //nolint:go
 						a.configListFilter = ""
 						a.configListItems = buildModelsList(a.activeAdapters, a.adapters, a.providerModels, "")
 					case "tools":
-						a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
+						var allowlist []string
+						if sessRec.Tools != nil {
+							allowlist = sessRec.Tools.Allowlist
+						}
+						a.configListItems = buildToolsList(allowlist, a.disabledTools)
 					case "mcp-servers":
 						var items []listItem
 						for _, s := range sessRec.MCPServers {

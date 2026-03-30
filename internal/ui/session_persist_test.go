@@ -191,7 +191,7 @@ func TestSyncToolAllowlist_CreatesToolsConfig(t *testing.T) {
 	assert.Equal(t, []string{"bash"}, a.store.SessionRecipe().Tools.Allowlist)
 }
 
-func TestSyncToolAllowlist_SyncsToAppField(t *testing.T) {
+func TestSyncToolAllowlist_SyncsToRecipe(t *testing.T) {
 	a := newAppForTest(t, nil)
 	a.store.SetSessionRecipe(&recipe.Recipe{})
 	a.configListItems = []listItem{
@@ -201,7 +201,7 @@ func TestSyncToolAllowlist_SyncsToAppField(t *testing.T) {
 
 	a.syncToolAllowlist()
 
-	assert.Equal(t, a.store.SessionRecipe().Tools.Allowlist, a.toolAllowlist)
+	assert.Equal(t, []string{"read_file", "bash"}, a.store.SessionRecipe().Tools.Allowlist)
 }
 
 func TestSyncToolAllowlist_AllInactiveEmptiesAllowlist(t *testing.T) {
@@ -216,8 +216,6 @@ func TestSyncToolAllowlist_AllInactiveEmptiesAllowlist(t *testing.T) {
 
 	assert.NotNil(t, a.store.SessionRecipe().Tools.Allowlist, "should be non-nil empty slice (zero tools)")
 	assert.Empty(t, a.store.SessionRecipe().Tools.Allowlist)
-	assert.NotNil(t, a.toolAllowlist, "should be non-nil empty slice (zero tools)")
-	assert.Empty(t, a.toolAllowlist)
 }
 
 // ── Group J: handleRewindCmd metadata persistence ───────────────────────────
