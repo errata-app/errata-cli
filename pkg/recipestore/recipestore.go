@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/errata-app/errata-cli/pkg/recipe"
 )
 
 // RecipeSnapshot captures the active recipe/configuration at the time of a
@@ -23,23 +25,42 @@ import (
 // hashes. Version is also included because it determines which Runner
 // implementation executes the recipe.
 type RecipeSnapshot struct {
-	Version             int                           `json:"version,omitempty"`
-	Name                string                        `json:"name"`
-	SystemPrompt        string                        `json:"system_prompt,omitempty"`
-	ToolGuidance        map[string]string             `json:"tool_guidance,omitempty"`
-	Tools               []string                      `json:"tools,omitempty"`
-	BashPrefixes        []string                      `json:"bash_prefixes,omitempty"`
-	ToolDescriptions    map[string]string             `json:"tool_descriptions,omitempty"`
-	Constraints      *ConstraintsConfig            `json:"constraints,omitempty"`
-	Context          *ContextConfig                `json:"context,omitempty"`
-	OutputProcessing map[string]OutputRuleConfig   `json:"output_processing,omitempty"`
-	SummarizationPrompt string `json:"summarization_prompt,omitempty"`
+	Version             int                         `json:"version,omitempty"`
+	Name                string                      `json:"name"`
+	SystemPrompt        string                      `json:"system_prompt,omitempty"`
+	ToolGuidance        map[string]string           `json:"tool_guidance,omitempty"`
+	Tools               []string                    `json:"tools,omitempty"`
+	BashPrefixes        []string                    `json:"bash_prefixes,omitempty"`
+	ToolDescriptions    map[string]string           `json:"tool_descriptions,omitempty"`
+	Tasks               []string                    `json:"tasks,omitempty"`
+	SuccessCriteria     []string                    `json:"success_criteria,omitempty"`
+	MCPServers          []MCPServerSnapshot         `json:"mcp_servers,omitempty"`
+	Sandbox             *SandboxConfig              `json:"sandbox,omitempty"`
+	Constraints         *ConstraintsConfig          `json:"constraints,omitempty"`
+	Context             *ContextConfig              `json:"context,omitempty"`
+	OutputProcessing    map[string]OutputRuleConfig `json:"output_processing,omitempty"`
+	SummarizationPrompt string                      `json:"summarization_prompt,omitempty"`
+}
+
+// MCPServerSnapshot captures a named MCP server for snapshot comparison.
+type MCPServerSnapshot struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+}
+
+// SandboxConfig captures sandbox restriction settings.
+type SandboxConfig struct {
+	Filesystem      string `json:"filesystem,omitempty"`
+	Network         string `json:"network,omitempty"`
+	AllowLocalFetch bool   `json:"allow_local_fetch,omitempty"`
 }
 
 // ConstraintsConfig captures constraint settings relevant to preference comparison.
 type ConstraintsConfig struct {
-	MaxSteps int    `json:"max_steps,omitempty"`
-	Timeout  string `json:"timeout,omitempty"`
+	MaxSteps    int    `json:"max_steps,omitempty"`
+	Timeout     string `json:"timeout,omitempty"`
+	BashTimeout string `json:"bash_timeout,omitempty"`
+	ProjectRoot string `json:"project_root,omitempty"`
 }
 
 // ContextConfig captures conversation history management settings.
@@ -56,6 +77,85 @@ type OutputRuleConfig struct {
 	MaxTokens         int    `json:"max_tokens,omitempty"`
 	Truncation        string `json:"truncation,omitempty"`
 	TruncationMessage string `json:"truncation_message,omitempty"`
+}
+
+// SnapshotFromRecipe converts a recipe.Recipe into a RecipeSnapshot suitable
+// for content-addressed hashing. activeTools is the resolved list of tool names.
+func SnapshotFromRecipe(rec *recipe.Recipe, activeTools []string) *RecipeSnapshot {
+	name := rec.Name
+	if name == "" {
+		name = "default"
+	}
+	snap := &RecipeSnapshot{
+		Version:             rec.Version,
+		Name:                name,
+		SystemPrompt:        rec.SystemPrompt,
+		Tools:               activeTools,
+		Tasks:               rec.Tasks,
+		SuccessCriteria:     rec.SuccessCriteria,
+		SummarizationPrompt: rec.Context.SummarizationPrompt,
+	}
+
+	if rec.Tools != nil {
+		snap.ToolGuidance = rec.Tools.Guidance
+		snap.ToolDescriptions = rec.Tools.Guidance
+		snap.BashPrefixes = rec.Tools.BashPrefixes
+	}
+
+	if len(rec.MCPServers) > 0 {
+		snap.MCPServers = make([]MCPServerSnapshot, len(rec.MCPServers))
+		for i, s := range rec.MCPServers {
+			snap.MCPServers[i] = MCPServerSnapshot{Name: s.Name, Command: s.Command}
+		}
+	}
+
+	hasSandbox := rec.Sandbox.Filesystem != "" || rec.Sandbox.Network != "" || rec.Sandbox.AllowLocalFetch
+	if hasSandbox {
+		snap.Sandbox = &SandboxConfig{
+			Filesystem:      rec.Sandbox.Filesystem,
+			Network:         rec.Sandbox.Network,
+			AllowLocalFetch: rec.Sandbox.AllowLocalFetch,
+		}
+	}
+
+	hasConstraints := rec.Constraints.MaxSteps > 0 || rec.Constraints.Timeout > 0 ||
+		rec.Constraints.BashTimeout > 0 || rec.Constraints.ProjectRoot != ""
+	if hasConstraints {
+		snap.Constraints = &ConstraintsConfig{
+			MaxSteps:    rec.Constraints.MaxSteps,
+			ProjectRoot: rec.Constraints.ProjectRoot,
+		}
+		if rec.Constraints.Timeout > 0 {
+			snap.Constraints.Timeout = rec.Constraints.Timeout.String()
+		}
+		if rec.Constraints.BashTimeout > 0 {
+			snap.Constraints.BashTimeout = rec.Constraints.BashTimeout.String()
+		}
+	}
+
+	if rec.Context.MaxHistoryTurns > 0 || rec.Context.Strategy != "" ||
+		rec.Context.CompactThreshold > 0 || rec.Context.TaskMode != "" {
+		snap.Context = &ContextConfig{
+			MaxHistoryTurns:  rec.Context.MaxHistoryTurns,
+			Strategy:         rec.Context.Strategy,
+			CompactThreshold: rec.Context.CompactThreshold,
+			TaskMode:         rec.Context.TaskMode,
+		}
+	}
+
+	if len(rec.OutputProcessing) > 0 {
+		snap.OutputProcessing = make(map[string]OutputRuleConfig, len(rec.OutputProcessing))
+		for name, rule := range rec.OutputProcessing {
+			snap.OutputProcessing[name] = OutputRuleConfig{
+				MaxLines:          rule.MaxLines,
+				MaxTokens:         rule.MaxTokens,
+				Truncation:        rule.Truncation,
+				TruncationMessage: rule.TruncationMessage,
+			}
+		}
+	}
+
+	return snap
 }
 
 // Hash returns the content-addressed key for a RecipeSnapshot.

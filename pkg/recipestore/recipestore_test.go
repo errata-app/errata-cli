@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/errata-app/errata-cli/pkg/recipe"
 	"github.com/errata-app/errata-cli/pkg/recipestore"
 )
 
@@ -137,10 +139,16 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 		Tools:               []string{"read_file", "write_file", "bash"},
 		BashPrefixes:        []string{"go test", "go vet"},
 		ToolDescriptions:    map[string]string{"read_file": "reads a file"},
+		Tasks:               []string{"fix the bug", "add tests"},
+		SuccessCriteria:     []string{"tests pass", "no lint errors"},
+		MCPServers:          []recipestore.MCPServerSnapshot{{Name: "db", Command: "npx db-server"}},
+		Sandbox:             &recipestore.SandboxConfig{Filesystem: "project_only", Network: "none", AllowLocalFetch: true},
 		SummarizationPrompt: "summarize the conversation",
 		Constraints: &recipestore.ConstraintsConfig{
-			MaxSteps: 10,
-			Timeout:  "5m0s",
+			MaxSteps:    10,
+			Timeout:     "5m0s",
+			BashTimeout: "30s",
+			ProjectRoot: "/tmp/proj",
 		},
 		Context: &recipestore.ContextConfig{
 			MaxHistoryTurns:  20,
@@ -168,9 +176,22 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 	assert.Equal(t, map[string]string{"read_file": "reads a file"}, got.ToolDescriptions)
 	assert.Equal(t, "summarize the conversation", got.SummarizationPrompt)
 
+	assert.Equal(t, []string{"fix the bug", "add tests"}, got.Tasks)
+	assert.Equal(t, []string{"tests pass", "no lint errors"}, got.SuccessCriteria)
+	require.Len(t, got.MCPServers, 1)
+	assert.Equal(t, "db", got.MCPServers[0].Name)
+	assert.Equal(t, "npx db-server", got.MCPServers[0].Command)
+
+	require.NotNil(t, got.Sandbox)
+	assert.Equal(t, "project_only", got.Sandbox.Filesystem)
+	assert.Equal(t, "none", got.Sandbox.Network)
+	assert.True(t, got.Sandbox.AllowLocalFetch)
+
 	require.NotNil(t, got.Constraints)
 	assert.Equal(t, 10, got.Constraints.MaxSteps)
 	assert.Equal(t, "5m0s", got.Constraints.Timeout)
+	assert.Equal(t, "30s", got.Constraints.BashTimeout)
+	assert.Equal(t, "/tmp/proj", got.Constraints.ProjectRoot)
 
 	require.NotNil(t, got.Context)
 	assert.Equal(t, 20, got.Context.MaxHistoryTurns)
@@ -181,7 +202,6 @@ func TestRecipeSnapshot_RoundTrip(t *testing.T) {
 	require.Contains(t, got.OutputProcessing, "bash")
 	assert.Equal(t, 50, got.OutputProcessing["bash"].MaxLines)
 	assert.Equal(t, "tail", got.OutputProcessing["bash"].Truncation)
-
 }
 
 func TestList(t *testing.T) {
@@ -226,4 +246,119 @@ func TestPut_CreatesParentDirs(t *testing.T) {
 	// Verify file was created.
 	_, err := os.Stat(path)
 	require.NoError(t, err)
+}
+
+// ── SnapshotFromRecipe ──────────────────────────────────────────────────────
+
+func TestSnapshotFromRecipe_AllFields(t *testing.T) {
+	rec := &recipe.Recipe{
+		Version:      1,
+		Name:         "full-recipe",
+		SystemPrompt: "be helpful",
+		Tools: &recipe.ToolsConfig{
+			Allowlist:    []string{"bash", "read_file"},
+			BashPrefixes: []string{"go test"},
+			Guidance:     map[string]string{"bash": "run tests only"},
+		},
+		MCPServers: []recipe.MCPServerEntry{
+			{Name: "db", Command: "npx db-server"},
+		},
+		Constraints: recipe.ConstraintsConfig{
+			MaxSteps:    5,
+			Timeout:     3 * time.Minute,
+			BashTimeout: 30 * time.Second,
+			ProjectRoot: "/tmp/proj",
+		},
+		Context: recipe.ContextConfig{
+			MaxHistoryTurns:     10,
+			Strategy:            "auto_compact",
+			CompactThreshold:    0.8,
+			TaskMode:            "sequential",
+			SummarizationPrompt: "summarize it",
+		},
+		Sandbox: recipe.SandboxConfig{
+			Filesystem:      "project_only",
+			Network:         "none",
+			AllowLocalFetch: true,
+		},
+		Tasks:           []string{"fix the bug", "add tests"},
+		SuccessCriteria: []string{"tests pass"},
+		OutputProcessing: map[string]recipe.OutputRuleConfig{
+			"bash": {MaxLines: 50, Truncation: "tail"},
+		},
+	}
+	activeTools := []string{"bash", "read_file", "write_file"}
+
+	snap := recipestore.SnapshotFromRecipe(rec, activeTools)
+
+	assert.Equal(t, 1, snap.Version)
+	assert.Equal(t, "full-recipe", snap.Name)
+	assert.Equal(t, "be helpful", snap.SystemPrompt)
+	assert.Equal(t, activeTools, snap.Tools)
+	assert.Equal(t, []string{"go test"}, snap.BashPrefixes)
+	assert.Equal(t, map[string]string{"bash": "run tests only"}, snap.ToolGuidance)
+	assert.Equal(t, map[string]string{"bash": "run tests only"}, snap.ToolDescriptions)
+	assert.Equal(t, "summarize it", snap.SummarizationPrompt)
+
+	assert.Equal(t, []string{"fix the bug", "add tests"}, snap.Tasks)
+	assert.Equal(t, []string{"tests pass"}, snap.SuccessCriteria)
+
+	require.Len(t, snap.MCPServers, 1)
+	assert.Equal(t, "db", snap.MCPServers[0].Name)
+	assert.Equal(t, "npx db-server", snap.MCPServers[0].Command)
+
+	require.NotNil(t, snap.Sandbox)
+	assert.Equal(t, "project_only", snap.Sandbox.Filesystem)
+	assert.Equal(t, "none", snap.Sandbox.Network)
+	assert.True(t, snap.Sandbox.AllowLocalFetch)
+
+	require.NotNil(t, snap.Constraints)
+	assert.Equal(t, 5, snap.Constraints.MaxSteps)
+	assert.Equal(t, "3m0s", snap.Constraints.Timeout)
+	assert.Equal(t, "30s", snap.Constraints.BashTimeout)
+	assert.Equal(t, "/tmp/proj", snap.Constraints.ProjectRoot)
+
+	require.NotNil(t, snap.Context)
+	assert.Equal(t, 10, snap.Context.MaxHistoryTurns)
+	assert.Equal(t, "auto_compact", snap.Context.Strategy)
+	assert.InDelta(t, 0.8, snap.Context.CompactThreshold, 1e-9)
+	assert.Equal(t, "sequential", snap.Context.TaskMode)
+
+	require.Contains(t, snap.OutputProcessing, "bash")
+	assert.Equal(t, 50, snap.OutputProcessing["bash"].MaxLines)
+}
+
+func TestSnapshotFromRecipe_MinimalRecipe(t *testing.T) {
+	rec := &recipe.Recipe{Version: 1}
+	snap := recipestore.SnapshotFromRecipe(rec, nil)
+
+	assert.Equal(t, 1, snap.Version)
+	assert.Equal(t, "default", snap.Name)
+	assert.Empty(t, snap.SystemPrompt)
+	assert.Nil(t, snap.Tools)
+	assert.Nil(t, snap.Tasks)
+	assert.Nil(t, snap.SuccessCriteria)
+	assert.Nil(t, snap.MCPServers)
+	assert.Nil(t, snap.Sandbox)
+	assert.Nil(t, snap.Constraints)
+	assert.Nil(t, snap.Context)
+	assert.Nil(t, snap.OutputProcessing)
+}
+
+func TestHash_DifferentTasks(t *testing.T) {
+	cfg1 := &recipestore.RecipeSnapshot{Name: "r", Tasks: []string{"task-a"}}
+	cfg2 := &recipestore.RecipeSnapshot{Name: "r", Tasks: []string{"task-b"}}
+	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2))
+}
+
+func TestHash_DifferentSandbox(t *testing.T) {
+	cfg1 := &recipestore.RecipeSnapshot{Name: "r", Sandbox: &recipestore.SandboxConfig{Filesystem: "project_only"}}
+	cfg2 := &recipestore.RecipeSnapshot{Name: "r", Sandbox: &recipestore.SandboxConfig{Filesystem: "unrestricted"}}
+	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2))
+}
+
+func TestHash_DifferentMCPServers(t *testing.T) {
+	cfg1 := &recipestore.RecipeSnapshot{Name: "r", MCPServers: []recipestore.MCPServerSnapshot{{Name: "a", Command: "cmd-a"}}}
+	cfg2 := &recipestore.RecipeSnapshot{Name: "r", MCPServers: []recipestore.MCPServerSnapshot{{Name: "b", Command: "cmd-b"}}}
+	assert.NotEqual(t, recipestore.Hash(cfg1), recipestore.Hash(cfg2))
 }
