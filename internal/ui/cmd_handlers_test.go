@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -367,4 +368,78 @@ func TestHandleSyncCommand_Success(t *testing.T) {
 	last := app.feed[len(app.feed)-1].text
 	assert.Contains(t, last, "Syncing")
 	assert.NotNil(t, cmd)
+}
+
+// ── captureRunParams tests ───────────────────────────────────────────────────
+
+func TestCaptureRunParams_ReadsFromActiveRecipe(t *testing.T) {
+	ads := []models.ModelAdapter{uiStub{"m1"}}
+	a := newAppForTest(t, ads)
+
+	sessionRec := &recipe.Recipe{
+		Tools: &recipe.ToolsConfig{
+			Allowlist:    []string{"read_file", "bash"},
+			BashPrefixes: []string{"go test"},
+			Guidance:     map[string]string{"bash": "run tests only"},
+		},
+		Context: recipe.ContextConfig{
+			Strategy:            "manual",
+			SummarizationPrompt: "summarize",
+			MaxHistoryTurns:     30,
+			CompactThreshold:    0.75,
+		},
+		Sandbox: recipe.SandboxConfig{
+			Filesystem:      "project_only",
+			Network:         "none",
+			AllowLocalFetch: true,
+		},
+		Constraints: recipe.ConstraintsConfig{
+			Timeout:     10 * time.Minute,
+			BashTimeout: 30 * time.Second,
+			MaxSteps:    50,
+			ProjectRoot: "/opt/project",
+		},
+		SystemPrompt: "Be helpful",
+	}
+	a.store.SetSessionRecipe(sessionRec)
+
+	params := a.captureRunParams()
+
+	assert.Equal(t, []string{"go test"}, params.bashPrefixes)
+	assert.Equal(t, "manual", params.contextStrategy)
+	assert.Equal(t, "summarize", params.sumPrompt)
+	assert.Equal(t, "Be helpful", params.systemPrompt)
+	assert.Equal(t, 30*time.Second, params.bashTimeout)
+	assert.Equal(t, 10*time.Minute, params.agentTimeout)
+	assert.True(t, params.allowLocalFetch)
+	assert.InDelta(t, 0.75, params.compactThreshold, 0.001)
+	assert.Equal(t, 30, params.maxHistoryTurns)
+	assert.Equal(t, 50, params.maxSteps)
+	assert.Equal(t, "project_only", params.sandboxFilesystem)
+	assert.Equal(t, "none", params.sandboxNetwork)
+	assert.Equal(t, "/opt/project", params.projectRoot)
+	assert.NotEmpty(t, params.activeDefs)
+	assert.Equal(t, map[string]string{"bash": "run tests only"}, params.toolGuidanceMap)
+}
+
+func TestCaptureRunParams_NilRecipeUsesDefaults(t *testing.T) {
+	a := newAppForTest(t, nil)
+
+	params := a.captureRunParams()
+
+	assert.Empty(t, params.bashPrefixes)
+	assert.Empty(t, params.contextStrategy)
+	assert.Empty(t, params.sumPrompt)
+	assert.Empty(t, params.systemPrompt)
+	assert.Zero(t, params.bashTimeout)
+	assert.Zero(t, params.agentTimeout)
+	assert.False(t, params.allowLocalFetch)
+	assert.Zero(t, params.compactThreshold)
+	assert.Zero(t, params.maxHistoryTurns)
+	assert.Zero(t, params.maxSteps)
+	assert.Empty(t, params.sandboxFilesystem)
+	assert.Empty(t, params.sandboxNetwork)
+	assert.Empty(t, params.projectRoot)
+	// activeDefs should have the full set of built-in tools.
+	assert.NotEmpty(t, params.activeDefs)
 }

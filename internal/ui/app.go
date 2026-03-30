@@ -121,14 +121,6 @@ type App struct {
 	mcpDefs        []tools.ToolDef
 	mcpDispatchers map[string]tools.MCPDispatcher
 
-	// Recipe-derived settings (nil/empty = unrestricted)
-	toolAllowlist     []string // nil = all tools; from recipe ## Tools allowlist
-	bashPrefixes      []string // nil = unrestricted bash; from recipe ## Tools bash(...)
-	contextStrategy   string   // "auto_compact" | "manual" | "off"
-	sandboxFilesystem string   // "" | "project_only" | "read_only"
-	sandboxNetwork    string   // "" | "full" | "none"
-	projectRoot       string   // absolute path from recipe Metadata.ProjectRoot; "" = cwd
-
 	mode    mode
 	verbose bool
 	width   int
@@ -240,16 +232,6 @@ func New(adapterList []models.ModelAdapter, cfg config.Config, mcpDefs []tools.T
 		apiClient:      api.NewClient(),
 		debugLog:       debugLog,
 		store:          store,
-	}
-	if rec := store.BaseRecipe(); rec != nil {
-		if rec.Tools != nil {
-			app.toolAllowlist = rec.Tools.Allowlist
-			app.bashPrefixes = rec.Tools.BashPrefixes
-		}
-		app.contextStrategy = rec.Context.Strategy
-		app.sandboxFilesystem = rec.Sandbox.Filesystem
-		app.sandboxNetwork = rec.Sandbox.Network
-		app.projectRoot = rec.Constraints.ProjectRoot
 	}
 	return app
 }

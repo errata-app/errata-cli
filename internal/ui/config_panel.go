@@ -589,19 +589,8 @@ func cloneRecipe(r *recipe.Recipe) *recipe.Recipe {
 // runtime fields so that subsequent runs use the updated configuration.
 // Also persists the session recipe to disk so changes survive a restart.
 func (a *App) applySessionRecipe() {
-	rec := a.store.SessionRecipe()
-	if rec == nil {
+	if a.store.SessionRecipe() == nil {
 		return
-	}
-	if rec.Tools != nil {
-		a.toolAllowlist = rec.Tools.Allowlist
-		a.bashPrefixes = rec.Tools.BashPrefixes
-	}
-	a.contextStrategy = rec.Context.Strategy
-	a.sandboxFilesystem = rec.Sandbox.Filesystem
-	a.sandboxNetwork = rec.Sandbox.Network
-	if rec.Constraints.ProjectRoot != "" {
-		a.projectRoot = rec.Constraints.ProjectRoot
 	}
 	a.store.PersistSessionRecipe()
 }
@@ -626,7 +615,6 @@ func (a *App) syncToolAllowlist() {
 		sessRec.Tools = &recipe.ToolsConfig{}
 	}
 	sessRec.Tools.Allowlist = allowlist
-	a.toolAllowlist = allowlist
 	a.store.PersistSessionRecipe()
 }
 
@@ -853,7 +841,11 @@ func (a App) handleConfigNavKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) { //no
 				a.configListFilter = ""
 				a.configListItems = buildModelsList(a.activeAdapters, a.adapters, a.providerModels, "")
 			case "tools":
-				a.configListItems = buildToolsList(a.toolAllowlist, a.disabledTools)
+				var allowlist []string
+				if sessRec != nil && sessRec.Tools != nil {
+					allowlist = sessRec.Tools.Allowlist
+				}
+				a.configListItems = buildToolsList(allowlist, a.disabledTools)
 			case "mcp-servers":
 				// MCP servers are read-only in the overlay for now.
 				var items []listItem
