@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/errata-app/errata-cli/pkg/recipestore"
 )
 
 func TestUploadPreferences_Success(t *testing.T) {
@@ -149,16 +148,10 @@ func TestPreferenceUpload_RoundTrip(t *testing.T) {
 	assert.Equal(t, map[string]map[string]int{"claude-sonnet-4-6": {"bash": 2}}, r.ToolCalls)
 }
 
-func TestPreferenceUpload_RoundTripWithConfigs(t *testing.T) {
+func TestPreferenceUpload_RoundTripWithRecipe(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	payload := PreferenceUpload{
-		Configs: map[string]recipestore.RecipeSnapshot{
-			"rcp_v1_abc": {
-				Name:         "Test Recipe",
-				SystemPrompt: "be helpful",
-				Tools:        []string{"bash", "read_file"},
-			},
-		},
+		Recipe: "# Test Recipe\n\n## Models\n- m1\n",
 		Sessions: []SessionUpload{
 			{
 				ID:         "ses_cfg",
@@ -172,22 +165,16 @@ func TestPreferenceUpload_RoundTripWithConfigs(t *testing.T) {
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	// Verify JSON shape has "configs" key.
+	// Verify JSON shape has "recipe" key.
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &raw))
-	assert.Contains(t, raw, "configs")
+	assert.Contains(t, raw, "recipe")
 	assert.Contains(t, raw, "sessions")
 
 	var got PreferenceUpload
 	require.NoError(t, json.Unmarshal(data, &got))
 
-	require.Len(t, got.Configs, 1)
-	snap, ok := got.Configs["rcp_v1_abc"]
-	require.True(t, ok)
-	assert.Equal(t, "Test Recipe", snap.Name)
-	assert.Equal(t, "be helpful", snap.SystemPrompt)
-	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
-
+	assert.Equal(t, "# Test Recipe\n\n## Models\n- m1\n", got.Recipe)
 	require.Len(t, got.Sessions, 1)
 	assert.Equal(t, "rcp_v1_abc", got.Sessions[0].ConfigHash)
 }
@@ -203,13 +190,20 @@ func TestUploadReport_Success(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, string(body), "rpt_test")
 
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{
+			"id":        "rpt_test",
+			"recipe_id": "rec_abc",
+		})
 	}))
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, token: "test-token", httpClient: srv.Client()}
-	err := c.UploadReport(json.RawMessage(`{"id":"rpt_test"}`))
+	result, err := c.UploadReport(json.RawMessage(`{"id":"rpt_test"}`))
 	require.NoError(t, err)
+	assert.Equal(t, "rpt_test", result.ID)
+	assert.Equal(t, "rec_abc", result.RecipeID)
 }
 
 func TestUploadReport_Unauthorized(t *testing.T) {
@@ -220,7 +214,7 @@ func TestUploadReport_Unauthorized(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, token: "bad", httpClient: srv.Client()}
-	err := c.UploadReport(json.RawMessage(`{}`))
+	_, err := c.UploadReport(json.RawMessage(`{}`))
 	require.Error(t, err)
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
@@ -294,7 +288,7 @@ func TestPreferenceUpload_OmitsContentWhenEmpty(t *testing.T) {
 	assert.False(t, hasContent, "content should be omitted when nil")
 }
 
-func TestPreferenceUpload_OmitsConfigsWhenEmpty(t *testing.T) {
+func TestPreferenceUpload_OmitsRecipeWhenEmpty(t *testing.T) {
 	payload := PreferenceUpload{
 		Sessions: []SessionUpload{{ID: "ses_1"}},
 	}
@@ -304,6 +298,21 @@ func TestPreferenceUpload_OmitsConfigsWhenEmpty(t *testing.T) {
 
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &raw))
-	_, hasConfigs := raw["configs"]
-	assert.False(t, hasConfigs, "configs should be omitted when nil")
+	_, hasRecipe := raw["recipe"]
+	assert.False(t, hasRecipe, "recipe should be omitted when empty")
+}
+
+func TestReportUploadResult_RoundTrip(t *testing.T) {
+	result := ReportUploadResult{
+		ID:       "rpt_abc123",
+		RecipeID: "rec_xyz",
+	}
+
+	data, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var got ReportUploadResult
+	require.NoError(t, json.Unmarshal(data, &got))
+	assert.Equal(t, "rpt_abc123", got.ID)
+	assert.Equal(t, "rec_xyz", got.RecipeID)
 }

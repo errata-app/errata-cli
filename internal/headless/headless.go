@@ -257,13 +257,18 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 
 	// Upload report if logged in (non-fatal).
 	if client := api.NewClient(); client.IsLoggedIn() {
-		var reportBytes []byte
-		if opts.FullUpload {
-			reportBytes, _ = json.Marshal(headlessReport)
-		} else {
-			reportBytes, _ = json.Marshal(metaReport)
+		envelope := reportUploadEnvelope{
+			ID:        headlessReport.ID,
+			Recipe:    rec.MarshalMarkdown(),
+			Timestamp: headlessReport.Timestamp,
 		}
-		if uploadErr := client.UploadReport(json.RawMessage(reportBytes)); uploadErr != nil {
+		if opts.FullUpload {
+			envelope.Content, _ = json.Marshal(headlessReport)
+		} else {
+			envelope.Metrics, _ = json.Marshal(metaReport)
+		}
+		envelopeBytes, _ := json.Marshal(envelope)
+		if _, uploadErr := client.UploadReport(json.RawMessage(envelopeBytes)); uploadErr != nil {
 			fmt.Fprintf(w, "warning: report upload failed: %v\n", uploadErr)
 		} else {
 			fmt.Fprintf(w, "Report uploaded to errata.app\n")
@@ -702,6 +707,16 @@ func buildSummary(tasks []TaskResult, parsedCriteria []criteria.Criterion, total
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// reportUploadEnvelope wraps a report for upload, adding the recipe markdown
+// and separating metrics from content per the backend spec.
+type reportUploadEnvelope struct {
+	ID        string          `json:"id"`
+	Recipe    string          `json:"recipe"`
+	Timestamp time.Time       `json:"timestamp"`
+	Metrics   json.RawMessage `json:"metrics,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+}
 
 func snapshotRecipe(rec *recipe.Recipe) RecipeSnapshot {
 	return RecipeSnapshot{

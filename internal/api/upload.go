@@ -9,14 +9,13 @@ import (
 
 	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
-	"github.com/errata-app/errata-cli/pkg/recipestore"
 )
 
 // PreferenceUpload is the bulk upload request body for POST /preferences.
 type PreferenceUpload struct {
-	Configs  map[string]recipestore.RecipeSnapshot `json:"configs,omitempty"`
-	Sessions []SessionUpload                       `json:"sessions"`
-	Content  []SessionContentUpload                `json:"content,omitempty"`
+	Recipe   string                 `json:"recipe,omitempty"`
+	Sessions []SessionUpload        `json:"sessions"`
+	Content  []SessionContentUpload `json:"content,omitempty"`
 }
 
 // SessionContentUpload holds full session content for upload (privacy=full).
@@ -74,18 +73,28 @@ type RunUpload struct {
 	ConfigHash          string                    `json:"config_hash,omitempty"`
 }
 
+// ReportUploadResult is the response body from POST /reports.
+type ReportUploadResult struct {
+	ID       string `json:"id"`
+	RecipeID string `json:"recipe_id"`
+}
+
 // UploadReport uploads a headless run report (MetadataReport or RunReport).
 // The caller marshals the appropriate struct and passes it as raw JSON.
-func (c *Client) UploadReport(payload json.RawMessage) error {
+func (c *Client) UploadReport(payload json.RawMessage) (*ReportUploadResult, error) {
 	resp, err := c.do("POST", "/reports", bytes.NewReader(payload), "application/json")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return parseError(resp)
+	if resp.StatusCode != http.StatusCreated {
+		return nil, parseError(resp)
 	}
-	return nil
+	var result ReportUploadResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("api: decode report response: %w", err)
+	}
+	return &result, nil
 }
 
 // UploadPreferences uploads redacted preference data.
