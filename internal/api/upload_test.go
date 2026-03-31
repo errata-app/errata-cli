@@ -206,6 +206,23 @@ func TestUploadReport_Success(t *testing.T) {
 	assert.Equal(t, "rec_abc", result.RecipeID)
 }
 
+func TestUploadReport_Idempotent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"id":        "rpt_dup",
+			"recipe_id": "rec_abc",
+		})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
+	result, err := c.UploadReport(json.RawMessage(`{"id":"rpt_dup"}`))
+	require.NoError(t, err)
+	assert.Equal(t, "rpt_dup", result.ID)
+}
+
 func TestUploadReport_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

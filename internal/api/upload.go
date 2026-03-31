@@ -87,7 +87,7 @@ func (c *Client) UploadReport(payload json.RawMessage) (*ReportUploadResult, err
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		return nil, parseError(resp)
 	}
 	var result ReportUploadResult
