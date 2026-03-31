@@ -647,27 +647,17 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Resolve config snapshots for all referenced hashes.
-	var configs map[string]recipestore.RecipeSnapshot
-	if hashes := session.CollectConfigHashes(sessions); len(hashes) > 0 {
-		configs = make(map[string]recipestore.RecipeSnapshot, len(hashes))
-		for _, h := range hashes {
-			if snap := rs.Get(h); snap != nil {
-				configs[h] = *snap
-			}
-		}
-		if len(configs) == 0 {
-			configs = nil
-		}
-	}
-
 	totalRuns := 0
 	for _, s := range sessions {
 		totalRuns += len(s.Runs)
 	}
 	fmt.Printf("Uploading %d runs across %d sessions…\n", totalRuns, len(sessions))
 
-	payload := api.PreferenceUpload{Configs: configs, Sessions: sessions}
+	payload := api.PreferenceUpload{Sessions: sessions}
+
+	// Add recipe markdown from the active recipe if available.
+	rec := loadRecipe()
+	payload.Recipe = rec.MarshalMarkdown()
 
 	// Determine whether to include full content.
 	fullFlag, _ := cmd.Flags().GetBool("full")

@@ -746,8 +746,10 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 		if len(sessions) == 0 {
 			return syncCompleteMsg{accepted: 0}
 		}
-		configs := store.ConfigSnapshots(session.CollectConfigHashes(sessions))
-		payload := api.PreferenceUpload{Configs: configs, Sessions: sessions}
+		payload := api.PreferenceUpload{Sessions: sessions}
+		if rec := store.ActiveRecipe(); rec != nil {
+			payload.Recipe = rec.MarshalMarkdown()
+		}
 		if privacy.Mode == api.PrivacyFull {
 			sessionIDs := make([]string, len(sessions))
 			for i, s := range sessions {

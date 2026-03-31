@@ -205,63 +205,6 @@ func TestLogout_Success(t *testing.T) {
 	assert.Empty(t, LoadToken())
 }
 
-// ── GetRecipe endpoint ───────────────────────────────────────────────────────
-
-func TestGetRecipe_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/recipes/alice/code-review", r.URL.Path)
-		json.NewEncoder(w).Encode(RecipeEntry{
-			ID:             "r2",
-			Name:           "Code Review",
-			Slug:           "code-review",
-			AuthorUsername: "alice",
-		})
-	}))
-	defer srv.Close()
-
-	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	entry, err := c.GetRecipe("alice/code-review")
-	require.NoError(t, err)
-	assert.Equal(t, "Code Review", entry.Name)
-	assert.Equal(t, "code-review", entry.Slug)
-}
-
-// ── DeleteRecipe endpoint ────────────────────────────────────────────────────
-
-func TestDeleteRecipe_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "DELETE", r.Method)
-		assert.Equal(t, "/api/v1/recipes/r1", r.URL.Path)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	require.NoError(t, c.DeleteRecipe("r1"))
-}
-
-// ── UpdateRecipe endpoint ────────────────────────────────────────────────────
-
-func TestUpdateRecipe_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "PUT", r.Method)
-		assert.Equal(t, "/api/v1/recipes/r1", r.URL.Path)
-		assert.Equal(t, "text/markdown", r.Header.Get("Content-Type"))
-		json.NewEncoder(w).Encode(RecipeEntry{
-			ID:             "r1",
-			Name:           "Updated",
-			Slug:           "updated",
-			AuthorUsername: "alice",
-		})
-	}))
-	defer srv.Close()
-
-	c := &Client{baseURL: srv.URL, token: "tok", httpClient: srv.Client()}
-	entry, err := c.UpdateRecipe("r1", "# Updated\nversion: 1\n")
-	require.NoError(t, err)
-	assert.Equal(t, "Updated", entry.Name)
-}
-
 // ── No auth header when token is empty ───────────────────────────────────────
 
 func TestNoAuthHeaderWhenTokenEmpty(t *testing.T) {

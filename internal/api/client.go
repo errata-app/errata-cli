@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,14 +89,6 @@ func SlugFromRef(ref string) string {
 		return ref[i+1:]
 	}
 	return ref
-}
-
-// RecipeList is the paginated response from GET /recipes.
-type RecipeList struct {
-	Recipes []RecipeEntry `json:"recipes"`
-	Total   int           `json:"total"`
-	Page    int           `json:"page"`
-	PerPage int           `json:"per_page"`
 }
 
 // APIError is returned on non-2xx responses.
@@ -215,57 +206,6 @@ func (c *Client) Logout() error {
 	return DeleteToken()
 }
 
-// ListRecipes fetches paginated recipes with optional filters.
-func (c *Client) ListRecipes(page, perPage int, author, query string) (*RecipeList, error) {
-	params := url.Values{}
-	if page > 0 {
-		params.Set("page", fmt.Sprintf("%d", page))
-	}
-	if perPage > 0 {
-		params.Set("per_page", fmt.Sprintf("%d", perPage))
-	}
-	if author != "" {
-		params.Set("author", author)
-	}
-	if query != "" {
-		params.Set("q", query)
-	}
-	path := "/recipes"
-	if len(params) > 0 {
-		path += "?" + params.Encode()
-	}
-	resp, err := c.do("GET", path, nil, "")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, parseError(resp)
-	}
-	var list RecipeList
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, fmt.Errorf("api: decode recipe list: %w", err)
-	}
-	return &list, nil
-}
-
-// GetRecipe fetches a single recipe by ID or author/slug ref.
-func (c *Client) GetRecipe(ref string) (*RecipeEntry, error) {
-	resp, err := c.do("GET", "/recipes/"+ref, nil, "")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, parseError(resp)
-	}
-	var entry RecipeEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
-		return nil, fmt.Errorf("api: decode recipe: %w", err)
-	}
-	return &entry, nil
-}
-
 // GetRecipeRaw fetches the raw markdown content of a recipe by ID or author/slug ref.
 func (c *Client) GetRecipeRaw(ref string) (string, error) {
 	resp, err := c.do("GET", "/recipes/"+ref+"/raw", nil, "")
@@ -298,36 +238,6 @@ func (c *Client) CreateRecipe(markdown string) (*RecipeEntry, error) {
 		return nil, fmt.Errorf("api: decode recipe: %w", err)
 	}
 	return &entry, nil
-}
-
-// UpdateRecipe replaces a recipe's content by ID.
-func (c *Client) UpdateRecipe(id, markdown string) (*RecipeEntry, error) {
-	resp, err := c.do("PUT", "/recipes/"+id, strings.NewReader(markdown), "text/markdown")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, parseError(resp)
-	}
-	var entry RecipeEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
-		return nil, fmt.Errorf("api: decode recipe: %w", err)
-	}
-	return &entry, nil
-}
-
-// DeleteRecipe deletes a recipe by ID.
-func (c *Client) DeleteRecipe(id string) error {
-	resp, err := c.do("DELETE", "/recipes/"+id, nil, "")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		return parseError(resp)
-	}
-	return nil
 }
 
 // AuthLoginURL returns the URL to open in a browser to start the OAuth flow.
