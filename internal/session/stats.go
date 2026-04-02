@@ -34,30 +34,10 @@ type ModelStats struct {
 // Each "rewind" run increments a skip counter for its prompt hash;
 // processing newest-to-oldest, each normal run with an active skip counter is excluded.
 func filterRewound(runs []RunSummary) []RunSummary {
-	skipCount := map[string]int{}
-
-	for i := len(runs) - 1; i >= 0; i-- {
-		if runs[i].Type == "rewind" {
-			skipCount[runs[i].PromptHash]++
-		}
-	}
-
-	result := make([]RunSummary, 0, len(runs))
-	for i := len(runs) - 1; i >= 0; i-- {
-		r := runs[i]
-		if r.Type == "rewind" {
-			continue
-		}
-		if skipCount[r.PromptHash] > 0 {
-			skipCount[r.PromptHash]--
-			continue
-		}
-		result = append(result, r)
-	}
-
-	// Reverse to restore chronological order.
-	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
-		result[i], result[j] = result[j], result[i]
+	indices := survivingIndices(runs)
+	result := make([]RunSummary, len(indices))
+	for i, idx := range indices {
+		result[i] = runs[idx]
 	}
 	return result
 }
