@@ -13,6 +13,7 @@
 package recipe
 
 import (
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -20,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
 )
 
 //go:embed default.recipe.md
@@ -593,6 +593,19 @@ func Default() *Recipe {
 	return parseEmbedded()
 }
 
+
+// ConfigHash returns a content-addressed key for the recipe configuration,
+// excluding the Models section. Two recipes with identical configuration but
+// different model lists produce the same hash.
+//
+// Format: rcp_{sha256hex}
+func (r *Recipe) ConfigHash() string {
+	clone := *r
+	clone.Models = nil
+	normalized := clone.MarshalMarkdown()
+	h := sha256.Sum256([]byte(normalized))
+	return fmt.Sprintf("rcp_%x", h)
+}
 
 // MarshalMarkdown serializes the recipe back to the Markdown format used by
 // recipe.md files. Only non-zero/non-default fields are included.

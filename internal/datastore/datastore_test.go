@@ -644,84 +644,6 @@ func TestRewindStackLen(t *testing.T) {
 	assert.Equal(t, 0, s.RewindStackLen())
 }
 
-// ── BuildRecipeSnapshot ─────────────────────────────────────────────────────
-
-func TestBuildRecipeSnapshot_DefaultRecipe(t *testing.T) {
-	s := tempStore(t)
-	snap := s.BuildRecipeSnapshot()
-	assert.Equal(t, "default", snap.Name)
-}
-
-func TestBuildRecipeSnapshot_AllFields(t *testing.T) {
-	s := tempStore(t)
-	s.baseRecipe = &recipe.Recipe{
-		Version:      1,
-		Name:         "test-recipe",
-		SystemPrompt: "be helpful",
-		Tools: &recipe.ToolsConfig{
-			Allowlist:    []string{"bash"},
-			BashPrefixes: []string{"go test"},
-			Guidance:     map[string]string{"bash": "use tools wisely"},
-		},
-		MCPServers:  []recipe.MCPServerEntry{{Name: "db", Command: "npx db-server"}},
-		Constraints: recipe.ConstraintsConfig{
-			MaxSteps: 5, Timeout: 3 * time.Minute,
-			BashTimeout: 30 * time.Second, ProjectRoot: "/tmp/proj",
-		},
-		Context: recipe.ContextConfig{
-			MaxHistoryTurns: 10, Strategy: "auto_compact",
-			CompactThreshold: 0.8, TaskMode: "sequential",
-			SummarizationPrompt: "summarize it",
-		},
-		Sandbox:          recipe.SandboxConfig{Filesystem: "project_only", Network: "none"},
-		Tasks:            []string{"fix the bug"},
-		SuccessCriteria:  []string{"tests pass"},
-		OutputProcessing: map[string]recipe.OutputRuleConfig{"bash": {MaxLines: 50, Truncation: "tail"}},
-	}
-	s.lastActiveTools = []string{"bash", "read_file"}
-
-	snap := s.BuildRecipeSnapshot()
-
-	assert.Equal(t, 1, snap.Version)
-	assert.Equal(t, "test-recipe", snap.Name)
-	assert.Equal(t, "be helpful", snap.SystemPrompt)
-	assert.Equal(t, map[string]string{"bash": "use tools wisely"}, snap.ToolGuidance)
-	assert.Equal(t, []string{"go test"}, snap.BashPrefixes)
-	assert.Equal(t, map[string]string{"bash": "use tools wisely"}, snap.ToolDescriptions)
-	assert.Equal(t, []string{"bash", "read_file"}, snap.Tools)
-	assert.Equal(t, "summarize it", snap.SummarizationPrompt)
-
-	assert.Equal(t, []string{"fix the bug"}, snap.Tasks)
-	assert.Equal(t, []string{"tests pass"}, snap.SuccessCriteria)
-
-	require.Len(t, snap.MCPServers, 1)
-	assert.Equal(t, "db", snap.MCPServers[0].Name)
-	assert.Equal(t, "npx db-server", snap.MCPServers[0].Command)
-
-	require.NotNil(t, snap.Sandbox)
-	assert.Equal(t, "project_only", snap.Sandbox.Filesystem)
-	assert.Equal(t, "none", snap.Sandbox.Network)
-
-	require.NotNil(t, snap.Constraints)
-	assert.Equal(t, 5, snap.Constraints.MaxSteps)
-	assert.Equal(t, "3m0s", snap.Constraints.Timeout)
-	assert.Equal(t, "30s", snap.Constraints.BashTimeout)
-	assert.Equal(t, "/tmp/proj", snap.Constraints.ProjectRoot)
-
-	require.NotNil(t, snap.Context)
-}
-
-func TestBuildRecipeSnapshot_UsesActiveRecipe(t *testing.T) {
-	s := tempStore(t)
-	s.baseRecipe = &recipe.Recipe{Name: "base", SystemPrompt: "base prompt"}
-	sessionRec := &recipe.Recipe{Name: "session", SystemPrompt: "session prompt"}
-	s.SetSessionRecipe(sessionRec)
-
-	snap := s.BuildRecipeSnapshot()
-	assert.Equal(t, "session prompt", snap.SystemPrompt)
-	assert.Equal(t, "session", snap.Name)
-}
-
 func TestSessionsDir(t *testing.T) {
 	tmp := t.TempDir()
 	sp := session.PathsFor(filepath.Join(tmp, "sessions"), "ses_abc")
@@ -737,7 +659,8 @@ func TestRecipeNameLookup_Hit(t *testing.T) {
 	tmp := t.TempDir()
 	sp := session.PathsFor(tmp, "ses_test")
 	rs := recipestore.New(filepath.Join(tmp, "recipes.json"))
-	hash := rs.Put(&recipestore.RecipeSnapshot{Name: "My Recipe", SystemPrompt: "test"})
+	md := "# My Recipe\nversion: 1\n\n## Models\n- m1\n"
+	hash := rs.Put(md)
 
 	s, err := New(Options{
 		PromptHistPath: filepath.Join(tmp, "prompt_history.jsonl"),

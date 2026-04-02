@@ -246,8 +246,8 @@ func TestRunReport_ContainsConfigHash(t *testing.T) {
 	report, err := headless.Run(context.Background(), opts)
 	require.NoError(t, err)
 
-	assert.True(t, strings.HasPrefix(report.ConfigHash, "rcp_v"),
-		"ConfigHash should start with rcp_v, got %q", report.ConfigHash)
+	assert.True(t, strings.HasPrefix(report.ConfigHash, "rcp_"),
+		"ConfigHash should start with rcp_, got %q", report.ConfigHash)
 }
 
 func TestMetadataReport_InheritsConfigHash(t *testing.T) {

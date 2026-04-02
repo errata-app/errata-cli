@@ -319,6 +319,58 @@ func TestPreferenceUpload_OmitsRecipeWhenEmpty(t *testing.T) {
 	assert.False(t, hasRecipe, "recipe should be omitted when empty")
 }
 
+func TestPreferenceUpload_RoundTripWithRecipes(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	payload := PreferenceUpload{
+		Recipe: "# Active Recipe\nversion: 1\n",
+		Recipes: map[string]string{
+			"rcp_abc123": "# Recipe A\nversion: 1\n\n## Models\n- m1\n",
+			"rcp_def456": "# Recipe B\nversion: 1\n\n## Models\n- m2\n",
+		},
+		Sessions: []SessionUpload{
+			{
+				ID:         "ses_recipes",
+				CreatedAt:  now,
+				ConfigHash: "rcp_abc123",
+				Runs: []RunUpload{
+					{PromptHash: "ph_1", Models: []string{"m1"}, ConfigHash: "rcp_abc123"},
+					{PromptHash: "ph_2", Models: []string{"m2"}, ConfigHash: "rcp_def456"},
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	// Verify JSON shape has "recipes" key.
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	assert.Contains(t, raw, "recipes")
+	assert.Contains(t, raw, "recipe")
+
+	var got PreferenceUpload
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	require.Len(t, got.Recipes, 2)
+	assert.Contains(t, got.Recipes["rcp_abc123"], "Recipe A")
+	assert.Contains(t, got.Recipes["rcp_def456"], "Recipe B")
+}
+
+func TestPreferenceUpload_OmitsRecipesWhenNil(t *testing.T) {
+	payload := PreferenceUpload{
+		Sessions: []SessionUpload{{ID: "ses_1"}},
+	}
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	_, hasRecipes := raw["recipes"]
+	assert.False(t, hasRecipes, "recipes should be omitted when nil")
+}
+
 func TestReportUploadResult_RoundTrip(t *testing.T) {
 	result := ReportUploadResult{
 		ID:       "rpt_abc123",

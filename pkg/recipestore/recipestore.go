@@ -1,7 +1,7 @@
-// Package recipestore provides a content-addressed store for recipe/configuration
-// snapshots. Each unique configuration is stored once, keyed by its SHA-256 hash.
+// Package recipestore provides a content-addressed store for recipe markdown.
+// Each unique recipe is stored once, keyed by its SHA-256 hash.
 // Preference entries emit only the hash, keeping the JSONL lean while enabling
-// full config lookup.
+// full recipe lookup.
 package recipestore
 
 import (
@@ -16,165 +16,11 @@ import (
 	"github.com/errata-app/errata-cli/pkg/recipe"
 )
 
-// RecipeSnapshot captures the active recipe/configuration at the time of a
-// preference recording. It mirrors the fields relevant for comparing
-// experimental setups.
-//
-// All fields including Name are included in the content-addressed hash, so
-// two recipes with different names but identical settings produce distinct
-// hashes. Version is also included because it determines which Runner
-// implementation executes the recipe.
-type RecipeSnapshot struct {
-	Version             int                         `json:"version,omitempty"`
-	Name                string                      `json:"name"`
-	SystemPrompt        string                      `json:"system_prompt,omitempty"`
-	ToolGuidance        map[string]string           `json:"tool_guidance,omitempty"`
-	Tools               []string                    `json:"tools,omitempty"`
-	BashPrefixes        []string                    `json:"bash_prefixes,omitempty"`
-	ToolDescriptions    map[string]string           `json:"tool_descriptions,omitempty"`
-	Tasks               []string                    `json:"tasks,omitempty"`
-	SuccessCriteria     []string                    `json:"success_criteria,omitempty"`
-	MCPServers          []MCPServerSnapshot         `json:"mcp_servers,omitempty"`
-	Sandbox             *SandboxConfig              `json:"sandbox,omitempty"`
-	Constraints         *ConstraintsConfig          `json:"constraints,omitempty"`
-	Context             *ContextConfig              `json:"context,omitempty"`
-	OutputProcessing    map[string]OutputRuleConfig `json:"output_processing,omitempty"`
-	SummarizationPrompt string                      `json:"summarization_prompt,omitempty"`
-}
-
-// MCPServerSnapshot captures a named MCP server for snapshot comparison.
-type MCPServerSnapshot struct {
-	Name    string `json:"name"`
-	Command string `json:"command"`
-}
-
-// SandboxConfig captures sandbox restriction settings.
-type SandboxConfig struct {
-	Filesystem      string `json:"filesystem,omitempty"`
-	Network         string `json:"network,omitempty"`
-	AllowLocalFetch bool   `json:"allow_local_fetch,omitempty"`
-}
-
-// ConstraintsConfig captures constraint settings relevant to preference comparison.
-type ConstraintsConfig struct {
-	MaxSteps    int    `json:"max_steps,omitempty"`
-	Timeout     string `json:"timeout,omitempty"`
-	BashTimeout string `json:"bash_timeout,omitempty"`
-	ProjectRoot string `json:"project_root,omitempty"`
-}
-
-// ContextConfig captures conversation history management settings.
-type ContextConfig struct {
-	MaxHistoryTurns  int     `json:"max_history_turns,omitempty"`
-	Strategy         string  `json:"strategy,omitempty"`
-	CompactThreshold float64 `json:"compact_threshold,omitempty"`
-	TaskMode         string  `json:"task_mode,omitempty"`
-}
-
-// OutputRuleConfig captures deterministic output processing for a tool.
-type OutputRuleConfig struct {
-	MaxLines          int    `json:"max_lines,omitempty"`
-	MaxTokens         int    `json:"max_tokens,omitempty"`
-	Truncation        string `json:"truncation,omitempty"`
-	TruncationMessage string `json:"truncation_message,omitempty"`
-}
-
-// SnapshotFromRecipe converts a recipe.Recipe into a RecipeSnapshot suitable
-// for content-addressed hashing. activeTools is the resolved list of tool names.
-func SnapshotFromRecipe(rec *recipe.Recipe, activeTools []string) *RecipeSnapshot {
-	name := rec.Name
-	if name == "" {
-		name = "default"
-	}
-	snap := &RecipeSnapshot{
-		Version:             rec.Version,
-		Name:                name,
-		SystemPrompt:        rec.SystemPrompt,
-		Tools:               activeTools,
-		Tasks:               rec.Tasks,
-		SuccessCriteria:     rec.SuccessCriteria,
-		SummarizationPrompt: rec.Context.SummarizationPrompt,
-	}
-
-	if rec.Tools != nil {
-		snap.ToolGuidance = rec.Tools.Guidance
-		snap.ToolDescriptions = rec.Tools.Guidance
-		snap.BashPrefixes = rec.Tools.BashPrefixes
-	}
-
-	if len(rec.MCPServers) > 0 {
-		snap.MCPServers = make([]MCPServerSnapshot, len(rec.MCPServers))
-		for i, s := range rec.MCPServers {
-			snap.MCPServers[i] = MCPServerSnapshot{Name: s.Name, Command: s.Command}
-		}
-	}
-
-	hasSandbox := rec.Sandbox.Filesystem != "" || rec.Sandbox.Network != "" || rec.Sandbox.AllowLocalFetch
-	if hasSandbox {
-		snap.Sandbox = &SandboxConfig{
-			Filesystem:      rec.Sandbox.Filesystem,
-			Network:         rec.Sandbox.Network,
-			AllowLocalFetch: rec.Sandbox.AllowLocalFetch,
-		}
-	}
-
-	hasConstraints := rec.Constraints.MaxSteps > 0 || rec.Constraints.Timeout > 0 ||
-		rec.Constraints.BashTimeout > 0 || rec.Constraints.ProjectRoot != ""
-	if hasConstraints {
-		snap.Constraints = &ConstraintsConfig{
-			MaxSteps:    rec.Constraints.MaxSteps,
-			ProjectRoot: rec.Constraints.ProjectRoot,
-		}
-		if rec.Constraints.Timeout > 0 {
-			snap.Constraints.Timeout = rec.Constraints.Timeout.String()
-		}
-		if rec.Constraints.BashTimeout > 0 {
-			snap.Constraints.BashTimeout = rec.Constraints.BashTimeout.String()
-		}
-	}
-
-	if rec.Context.MaxHistoryTurns > 0 || rec.Context.Strategy != "" ||
-		rec.Context.CompactThreshold > 0 || rec.Context.TaskMode != "" {
-		snap.Context = &ContextConfig{
-			MaxHistoryTurns:  rec.Context.MaxHistoryTurns,
-			Strategy:         rec.Context.Strategy,
-			CompactThreshold: rec.Context.CompactThreshold,
-			TaskMode:         rec.Context.TaskMode,
-		}
-	}
-
-	if len(rec.OutputProcessing) > 0 {
-		snap.OutputProcessing = make(map[string]OutputRuleConfig, len(rec.OutputProcessing))
-		for name, rule := range rec.OutputProcessing {
-			snap.OutputProcessing[name] = OutputRuleConfig{
-				MaxLines:          rule.MaxLines,
-				MaxTokens:         rule.MaxTokens,
-				Truncation:        rule.Truncation,
-				TruncationMessage: rule.TruncationMessage,
-			}
-		}
-	}
-
-	return snap
-}
-
-// Hash returns the content-addressed key for a RecipeSnapshot.
-//
-// All fields including Name are hashed. Version is included because it
-// determines which Runner implementation executes the recipe.
-//
-// Format: rcp_v{version}_{sha256hex}
-func Hash(cfg *RecipeSnapshot) string {
-	data, _ := json.Marshal(cfg)
-	h := sha256.Sum256(data)
-	return fmt.Sprintf("rcp_v%d_%x", cfg.Version, h)
-}
-
-// Store is a content-addressed store for RecipeSnapshot values.
+// Store is a content-addressed store for recipe markdown strings.
 // It is safe for concurrent use.
 type Store struct {
 	path    string
-	configs map[string]*RecipeSnapshot // hash → snapshot
+	recipes map[string]string // hash → markdown
 	mu      sync.Mutex
 }
 
@@ -183,57 +29,80 @@ type Store struct {
 func New(path string) *Store {
 	s := &Store{
 		path:    path,
-		configs: make(map[string]*RecipeSnapshot),
+		recipes: make(map[string]string),
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return s // missing file → empty store
 	}
-	var m map[string]*RecipeSnapshot
+	var m map[string]string
 	if err := json.Unmarshal(data, &m); err != nil {
 		return s // corrupt file → empty store
 	}
-	s.configs = m
+	s.recipes = m
 	return s
 }
 
-// Put stores a RecipeSnapshot and returns its hash.
-// If the snapshot already exists (same hash), it is not re-written to disk.
-func (s *Store) Put(cfg *RecipeSnapshot) string {
-	h := Hash(cfg)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.configs[h]; exists {
-		return h
+// Put stores recipe markdown and returns its config hash.
+// The hash excludes the Models section so that the same recipe configuration
+// run with different model sets produces the same hash.
+// If a recipe with the same hash already exists, the stored markdown is kept.
+func (s *Store) Put(markdown string) string {
+	rec, err := recipe.ParseContent([]byte(markdown))
+	if err != nil {
+		// Fallback for unparseable markdown: hash raw content.
+		h := sha256.Sum256([]byte(markdown))
+		hash := fmt.Sprintf("rcp_%x", h)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if _, exists := s.recipes[hash]; !exists {
+			s.recipes[hash] = markdown
+			s.save()
+		}
+		return hash
 	}
-	s.configs[h] = cfg
+	hash := rec.ConfigHash()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.recipes[hash]; exists {
+		return hash
+	}
+	s.recipes[hash] = markdown
 	s.save()
-	return h
+	return hash
 }
 
-// Get retrieves a RecipeSnapshot by its hash. Returns nil if not found.
-func (s *Store) Get(hash string) *RecipeSnapshot {
+// Get retrieves recipe markdown by its hash. Returns "" if not found.
+func (s *Store) Get(hash string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.configs[hash]
+	return s.recipes[hash]
 }
 
-// List returns a copy of all stored snapshots keyed by hash.
-func (s *Store) List() map[string]*RecipeSnapshot {
+// List returns a copy of all stored recipes keyed by hash.
+func (s *Store) List() map[string]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make(map[string]*RecipeSnapshot, len(s.configs))
-	maps.Copy(out, s.configs)
+	out := make(map[string]string, len(s.recipes))
+	maps.Copy(out, s.recipes)
 	return out
 }
 
-// HashesForName returns all hashes whose snapshot has the given recipe name.
+// HashesForName returns all hashes whose recipe markdown parses to the given name.
 func (s *Store) HashesForName(name string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var hashes []string
-	for h, cfg := range s.configs {
-		if cfg.Name == name {
+	for h, md := range s.recipes {
+		rec, err := recipe.ParseContent([]byte(md))
+		if err != nil {
+			continue
+		}
+		parsedName := rec.Name
+		if parsedName == "" {
+			parsedName = "default"
+		}
+		if parsedName == name {
 			hashes = append(hashes, h)
 		}
 	}
@@ -246,7 +115,7 @@ func (s *Store) save() {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
 		return
 	}
-	data, err := json.MarshalIndent(s.configs, "", "  ")
+	data, err := json.MarshalIndent(s.recipes, "", "  ")
 	if err != nil {
 		return
 	}

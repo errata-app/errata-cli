@@ -504,7 +504,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runCompleteMsg:
 		a.cancelRun = nil
-		a.store.SetLastActiveTools(msg.toolNames)
 
 		// Mark panels done. runner.RunAll preserves adapter order, so results[i] == panels[i].
 		for i, resp := range msg.responses {
