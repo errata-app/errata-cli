@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/errata-app/errata-cli/internal/api"
-	"github.com/errata-app/errata-cli/internal/models"
 )
 
 func TestCollectForUpload_Basic(t *testing.T) {
@@ -61,9 +60,9 @@ func TestCollectForUpload_Basic(t *testing.T) {
 
 	require.Len(t, s.Runs, 1)
 	r := s.Runs[0]
-	assert.Equal(t, "ph_aaa", r.PromptHash)
-	assert.Equal(t, "m1", r.Selected)
-	assert.Equal(t, map[string]int64{"m1": 1000, "m2": 800}, r.LatenciesMS)
+	assert.Equal(t, "ph_aaa", r.Metrics.PromptHash)
+	assert.Equal(t, "m1", r.Metrics.Selected)
+	assert.Equal(t, map[string]int64{"m1": 1000, "m2": 800}, r.Metrics.LatenciesMS)
 	assert.Equal(t, "rcp_v1_abc", r.ConfigHash)
 }
 
@@ -98,9 +97,9 @@ func TestCollectForUpload_StripsPrivateFields(t *testing.T) {
 
 	// Safe fields are preserved.
 	r := sessions[0].Runs[0]
-	assert.Equal(t, "ph_bbb", r.PromptHash)
-	assert.Equal(t, []string{"m1"}, r.Models)
-	assert.Equal(t, "m1", r.Selected)
+	assert.Equal(t, "ph_bbb", r.Metrics.PromptHash)
+	assert.Equal(t, []string{"m1"}, r.Metrics.Models)
+	assert.Equal(t, "m1", r.Metrics.Selected)
 	assert.Equal(t, "rcp_v1_xyz", r.ConfigHash)
 
 	// Marshal to JSON and verify sensitive fields are absent.
@@ -208,9 +207,23 @@ func TestCollectForUpload_NonexistentDir(t *testing.T) {
 	assert.Nil(t, sessions)
 }
 
-func TestCollectContentForUpload_Basic(t *testing.T) {
+func TestMergeContent_Basic(t *testing.T) {
 	dir := t.TempDir()
+	now := time.Now().Truncate(time.Second)
 	sp := PathsFor(dir, "ses_c1")
+
+	// Save metadata with one normal run.
+	meta := SessionMetadata{
+		ID:           "ses_c1",
+		CreatedAt:    now,
+		LastActiveAt: now,
+		Runs: []RunSummary{
+			{PromptHash: "ph_1", Models: []string{"m1"}},
+		},
+	}
+	require.NoError(t, SaveMetadata(sp.MetadataPath, meta))
+
+	// Save content with matching run.
 	content := SessionContent{
 		Runs: []RunContent{
 			{
@@ -225,42 +238,100 @@ func TestCollectContentForUpload_Basic(t *testing.T) {
 				},
 			},
 		},
-		Histories: map[string][]models.ConversationTurn{
-			"m1": {{Role: "user", Content: "fix bug"}, {Role: "assistant", Content: "Done."}},
+	}
+	require.NoError(t, SaveContent(sp.ContentPath, content))
+
+	// Build sessions as CollectForUpload would.
+	sessions := []api.SessionUpload{
+		{
+			ID: "ses_c1",
+			Runs: []api.RunUpload{
+				{Timestamp: now, Metrics: api.RunMetrics{PromptHash: "ph_1", Models: []string{"m1"}}},
+			},
+		},
+	}
+
+	MergeContent(sessions, dir)
+
+	require.NotNil(t, sessions[0].Runs[0].Content)
+	assert.Equal(t, "fix bug", sessions[0].Runs[0].Content.Prompt)
+	require.Len(t, sessions[0].Runs[0].Content.Models, 1)
+	assert.Equal(t, "m1", sessions[0].Runs[0].Content.Models[0].ModelID)
+	assert.Equal(t, "Done.", sessions[0].Runs[0].Content.Models[0].Text)
+	assert.Equal(t, "complete", sessions[0].Runs[0].Content.Models[0].StopReason)
+}
+
+func TestMergeContent_SkipsRewoundRuns(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Truncate(time.Second)
+	sp := PathsFor(dir, "ses_rw")
+
+	// Metadata: run0 (normal), run1 (rewind of run0), run2 (normal).
+	// After filterRewound: only run2 survives (index 2 in original).
+	meta := SessionMetadata{
+		ID:           "ses_rw",
+		CreatedAt:    now,
+		LastActiveAt: now,
+		Runs: []RunSummary{
+			{PromptHash: "ph_x", Models: []string{"m1"}, Selected: "m1"},
+			{PromptHash: "ph_x", Type: "rewind"},
+			{PromptHash: "ph_y", Models: []string{"m1"}, Selected: "m1"},
+		},
+	}
+	require.NoError(t, SaveMetadata(sp.MetadataPath, meta))
+
+	content := SessionContent{
+		Runs: []RunContent{
+			{Prompt: "first prompt", Models: []ModelRunContent{{ModelID: "m1", Text: "resp0"}}},
+			{Prompt: "", Models: nil}, // rewind placeholder
+			{Prompt: "second prompt", Models: []ModelRunContent{{ModelID: "m1", Text: "resp2"}}},
 		},
 	}
 	require.NoError(t, SaveContent(sp.ContentPath, content))
 
-	result := CollectContentForUpload(dir, []string{"ses_c1"})
-	require.Len(t, result, 1)
-	assert.Equal(t, "ses_c1", result[0].SessionID)
-	require.Len(t, result[0].Runs, 1)
-	assert.Equal(t, "fix bug", result[0].Runs[0].Prompt)
-	require.Len(t, result[0].Runs[0].Models, 1)
-	assert.Equal(t, "m1", result[0].Runs[0].Models[0].ModelID)
-	assert.Equal(t, "Done.", result[0].Runs[0].Models[0].Text)
-	assert.Equal(t, "complete", result[0].Runs[0].Models[0].StopReason)
-	require.Len(t, result[0].Histories, 1)
-	assert.Len(t, result[0].Histories["m1"], 2)
-}
-
-func TestCollectContentForUpload_MissingSessions(t *testing.T) {
-	dir := t.TempDir()
-	// Create one session with content and leave "ses_missing" absent.
-	sp := PathsFor(dir, "ses_exists")
-	content := SessionContent{
-		Runs: []RunContent{{Prompt: "hello", Models: []ModelRunContent{{ModelID: "m1", Text: "hi"}}}},
+	sessions := []api.SessionUpload{
+		{
+			ID: "ses_rw",
+			Runs: []api.RunUpload{
+				{Timestamp: now, Metrics: api.RunMetrics{PromptHash: "ph_y", Models: []string{"m1"}}},
+			},
+		},
 	}
-	require.NoError(t, SaveContent(sp.ContentPath, content))
 
-	result := CollectContentForUpload(dir, []string{"ses_missing", "ses_exists"})
-	require.Len(t, result, 1)
-	assert.Equal(t, "ses_exists", result[0].SessionID)
+	MergeContent(sessions, dir)
+
+	// The surviving run (index 2) should get content from content.Runs[2].
+	require.NotNil(t, sessions[0].Runs[0].Content)
+	assert.Equal(t, "second prompt", sessions[0].Runs[0].Content.Prompt)
 }
 
-func TestCollectContentForUpload_EmptyList(t *testing.T) {
-	result := CollectContentForUpload(t.TempDir(), nil)
-	assert.Nil(t, result)
+func TestMergeContent_MissingContent(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Truncate(time.Second)
+
+	// Only save metadata, no content file.
+	sp := PathsFor(dir, "ses_no_content")
+	meta := SessionMetadata{
+		ID:           "ses_no_content",
+		CreatedAt:    now,
+		LastActiveAt: now,
+		Runs:         []RunSummary{{PromptHash: "ph_1", Models: []string{"m1"}}},
+	}
+	require.NoError(t, SaveMetadata(sp.MetadataPath, meta))
+
+	sessions := []api.SessionUpload{
+		{
+			ID: "ses_no_content",
+			Runs: []api.RunUpload{
+				{Timestamp: now, Metrics: api.RunMetrics{PromptHash: "ph_1", Models: []string{"m1"}}},
+			},
+		},
+	}
+
+	MergeContent(sessions, dir)
+
+	// Content should remain nil — no crash.
+	assert.Nil(t, sessions[0].Runs[0].Content)
 }
 
 func TestCollectConfigHashes_DeduplicatesAcrossSessions(t *testing.T) {
@@ -316,7 +387,7 @@ func TestCollectConfigHashes_EmptyInput(t *testing.T) {
 
 func TestCollectConfigHashes_NoHashes(t *testing.T) {
 	sessions := []api.SessionUpload{
-		{Runs: []api.RunUpload{{PromptHash: "ph_1"}}},
+		{Runs: []api.RunUpload{{Metrics: api.RunMetrics{PromptHash: "ph_1"}}}},
 	}
 	hashes := CollectConfigHashes(sessions)
 	assert.Empty(t, hashes)

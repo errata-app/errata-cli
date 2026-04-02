@@ -61,51 +61,78 @@ func CollectConfigHashes(sessions []api.SessionUpload) []string {
 	return out
 }
 
-// CollectContentForUpload walks session content files and returns full content
-// upload payloads for the given session IDs. Sessions with missing or corrupt
-// content files are silently skipped.
-func CollectContentForUpload(baseDir string, sessionIDs []string) []api.SessionContentUpload {
-	if len(sessionIDs) == 0 {
-		return nil
-	}
-	var out []api.SessionContentUpload
-	for _, id := range sessionIDs {
-		sp := PathsFor(baseDir, id)
+// MergeContent loads content files from disk and attaches per-run content
+// to existing session uploads. Content is matched by original run index,
+// accounting for runs removed by filterRewound. Sessions with missing or
+// corrupt content/metadata files are silently skipped.
+func MergeContent(sessions []api.SessionUpload, baseDir string) {
+	for i, s := range sessions {
+		sp := PathsFor(baseDir, s.ID)
 		content, err := LoadContent(sp.ContentPath)
 		if err != nil || content == nil {
 			continue
 		}
-		if len(content.Runs) == 0 {
+
+		meta, err := LoadMetadata(sp.MetadataPath)
+		if err != nil || meta == nil {
 			continue
 		}
-		sc := api.SessionContentUpload{
-			SessionID: id,
-			Runs:      convertRuns(content.Runs),
-			Histories: content.Histories,
-		}
-		out = append(out, sc)
-	}
-	return out
-}
 
-func convertRuns(runs []RunContent) []api.RunContentUpload {
-	out := make([]api.RunContentUpload, len(runs))
-	for i, r := range runs {
-		ms := make([]api.ModelRunContentUpload, len(r.Models))
-		for j, m := range r.Models {
-			ms[j] = api.ModelRunContentUpload{
-				ModelID:         m.ModelID,
-				Text:            m.Text,
-				ProposedWrites:  m.ProposedWrites,
-				Events:          m.Events,
-				StopReason:      m.StopReason,
-				Steps:           m.Steps,
-				ReasoningTokens: m.ReasoningTokens,
+		indices := survivingIndices(meta.Runs)
+		for j, idx := range indices {
+			if j >= len(sessions[i].Runs) || idx >= len(content.Runs) {
+				break
+			}
+			rc := content.Runs[idx]
+			sessions[i].Runs[j].Content = &api.RunContentUpload{
+				Prompt: rc.Prompt,
+				Models: convertModels(rc.Models),
 			}
 		}
-		out[i] = api.RunContentUpload{
-			Prompt: r.Prompt,
-			Models: ms,
+	}
+}
+
+// survivingIndices returns the original indices of runs that survive
+// filterRewound (same rewind-cancellation logic, but tracking indices).
+func survivingIndices(runs []RunSummary) []int {
+	skipCount := map[string]int{}
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].Type == "rewind" {
+			skipCount[runs[i].PromptHash]++
+		}
+	}
+
+	var result []int
+	for i := len(runs) - 1; i >= 0; i-- {
+		r := runs[i]
+		if r.Type == "rewind" {
+			continue
+		}
+		if skipCount[r.PromptHash] > 0 {
+			skipCount[r.PromptHash]--
+			continue
+		}
+		result = append(result, i)
+	}
+
+	// Reverse to restore chronological order.
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	return result
+}
+
+func convertModels(models []ModelRunContent) []api.ModelRunContentUpload {
+	out := make([]api.ModelRunContentUpload, len(models))
+	for i, m := range models {
+		out[i] = api.ModelRunContentUpload{
+			ModelID:         m.ModelID,
+			Text:            m.Text,
+			ProposedWrites:  m.ProposedWrites,
+			Events:          m.Events,
+			StopReason:      m.StopReason,
+			Steps:           m.Steps,
+			ReasoningTokens: m.ReasoningTokens,
 		}
 	}
 	return out
@@ -120,19 +147,21 @@ func redactRuns(runs []RunSummary) []api.RunUpload {
 	out := make([]api.RunUpload, len(runs))
 	for i, r := range runs {
 		out[i] = api.RunUpload{
-			Timestamp:           r.Timestamp,
-			PromptHash:          r.PromptHash,
-			Models:              r.Models,
-			Selected:            r.Selected,
-			Rating:              r.Rating,
-			Type:                r.Type,
-			LatenciesMS:         r.LatenciesMS,
-			CostsUSD:            r.CostsUSD,
-			InputTokens:         r.InputTokens,
-			OutputTokens:        r.OutputTokens,
-			ToolCalls:           r.ToolCalls,
-			ProposedWritesCount: r.ProposedWritesCount,
-			ConfigHash:          r.ConfigHash,
+			Timestamp:  r.Timestamp,
+			Type:       r.Type,
+			ConfigHash: r.ConfigHash,
+			Metrics: api.RunMetrics{
+				PromptHash:          r.PromptHash,
+				Models:              r.Models,
+				Selected:            r.Selected,
+				Rating:              r.Rating,
+				LatenciesMS:         r.LatenciesMS,
+				CostsUSD:            r.CostsUSD,
+				InputTokens:         r.InputTokens,
+				OutputTokens:        r.OutputTokens,
+				ToolCalls:           r.ToolCalls,
+				ProposedWritesCount: r.ProposedWritesCount,
+			},
 		}
 	}
 	return out

@@ -766,11 +766,7 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 			}
 		}
 		if privacy.Mode == api.PrivacyFull {
-			sessionIDs := make([]string, len(sessions))
-			for i, s := range sessions {
-				sessionIDs[i] = s.ID
-			}
-			payload.Content = session.CollectContentForUpload(sessionsDir, sessionIDs)
+			session.MergeContent(sessions, sessionsDir)
 		}
 		accepted, err := client.UploadPreferences(payload)
 		if err != nil {
