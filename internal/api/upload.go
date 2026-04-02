@@ -7,23 +7,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/errata-app/errata-cli/internal/models"
 	"github.com/errata-app/errata-cli/internal/output"
 )
 
 // PreferenceUpload is the bulk upload request body for POST /preferences.
 type PreferenceUpload struct {
-	Recipe   string                 `json:"recipe,omitempty"`
-	Recipes  map[string]string      `json:"recipes,omitempty"`
-	Sessions []SessionUpload        `json:"sessions"`
-	Content  []SessionContentUpload `json:"content,omitempty"`
-}
-
-// SessionContentUpload holds full session content for upload (privacy=full).
-type SessionContentUpload struct {
-	SessionID string                                `json:"session_id"`
-	Runs      []RunContentUpload                    `json:"runs"`
-	Histories map[string][]models.ConversationTurn  `json:"histories,omitempty"`
+	Recipe   string            `json:"recipe,omitempty"`
+	Recipes  map[string]string `json:"recipes,omitempty"`
+	Sessions []SessionUpload   `json:"sessions"`
 }
 
 // RunContentUpload holds the full prompt and per-model response data for one run.
@@ -59,19 +50,25 @@ type SessionUpload struct {
 // RunUpload is a redacted run summary for upload.
 // Sensitive fields (PromptPreview, AppliedFiles, Note) are excluded.
 type RunUpload struct {
-	Timestamp           time.Time                 `json:"timestamp"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Type       string            `json:"type,omitempty"`
+	ConfigHash string            `json:"config_hash,omitempty"`
+	Metrics    RunMetrics        `json:"metrics"`
+	Content    *RunContentUpload `json:"content,omitempty"`
+}
+
+// RunMetrics holds per-run metric data nested under RunUpload.
+type RunMetrics struct {
 	PromptHash          string                    `json:"prompt_hash"`
 	Models              []string                  `json:"models"`
 	Selected            string                    `json:"selected,omitempty"`
 	Rating              string                    `json:"rating,omitempty"`
-	Type                string                    `json:"type,omitempty"`
 	LatenciesMS         map[string]int64          `json:"latencies_ms,omitempty"`
 	CostsUSD            map[string]float64        `json:"costs_usd,omitempty"`
 	InputTokens         map[string]int64          `json:"input_tokens,omitempty"`
 	OutputTokens        map[string]int64          `json:"output_tokens,omitempty"`
 	ToolCalls           map[string]map[string]int `json:"tool_calls,omitempty"`
 	ProposedWritesCount map[string]int            `json:"proposed_writes_count,omitempty"`
-	ConfigHash          string                    `json:"config_hash,omitempty"`
 }
 
 // ReportUploadResult is the response body from POST /reports.

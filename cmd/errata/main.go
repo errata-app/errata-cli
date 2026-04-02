@@ -683,14 +683,8 @@ func runSync(cmd *cobra.Command, args []string) error {
 	fullFlag, _ := cmd.Flags().GetBool("full")
 	privacy := api.LoadPrivacy()
 	if fullFlag || privacy.Mode == api.PrivacyFull {
-		sessionIDs := make([]string, len(sessions))
-		for i, s := range sessions {
-			sessionIDs[i] = s.ID
-		}
-		payload.Content = session.CollectContentForUpload(layout.Sessions, sessionIDs)
-		if payload.Content != nil {
-			fmt.Printf("Including full content for %d sessions (privacy=full).\n", len(payload.Content))
-		}
+		session.MergeContent(sessions, layout.Sessions)
+		fmt.Println("Including full content per-run (privacy=full).")
 	}
 
 	accepted, err := client.UploadPreferences(payload)
