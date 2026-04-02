@@ -3,6 +3,7 @@ package recipe_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -924,5 +925,57 @@ func TestParseContent_RoundTrip(t *testing.T) {
 	assert.Equal(t, r.Name, r2.Name)
 	assert.Equal(t, r.Version, r2.Version)
 	assert.Equal(t, r.Models, r2.Models)
+}
+
+// ─── ConfigHash tests ────────────────────────────────────────────────────────
+
+func TestConfigHash_Deterministic(t *testing.T) {
+	r := &recipe.Recipe{
+		Version:      1,
+		Name:         "Test",
+		Models:       []string{"model-a"},
+		SystemPrompt: "Be helpful.",
+	}
+	h1 := r.ConfigHash()
+	h2 := r.ConfigHash()
+	assert.Equal(t, h1, h2)
+}
+
+func TestConfigHash_IgnoresModels(t *testing.T) {
+	base := &recipe.Recipe{
+		Version:      1,
+		Name:         "Same Config",
+		Models:       []string{"model-a"},
+		SystemPrompt: "Be helpful.",
+	}
+	different := &recipe.Recipe{
+		Version:      1,
+		Name:         "Same Config",
+		Models:       []string{"model-x", "model-y", "model-z"},
+		SystemPrompt: "Be helpful.",
+	}
+	assert.Equal(t, base.ConfigHash(), different.ConfigHash(),
+		"same config with different models should produce the same hash")
+}
+
+func TestConfigHash_DifferentConfig(t *testing.T) {
+	r1 := &recipe.Recipe{
+		Version:      1,
+		Name:         "Recipe",
+		SystemPrompt: "Be helpful.",
+	}
+	r2 := &recipe.Recipe{
+		Version:      1,
+		Name:         "Recipe",
+		SystemPrompt: "Be concise.",
+	}
+	assert.NotEqual(t, r1.ConfigHash(), r2.ConfigHash(),
+		"different system prompt should produce different hash")
+}
+
+func TestConfigHash_Prefix(t *testing.T) {
+	r := &recipe.Recipe{Version: 1, Name: "Test"}
+	assert.True(t, strings.HasPrefix(r.ConfigHash(), "rcp_"),
+		"config hash should start with rcp_ prefix")
 }
 

@@ -72,8 +72,6 @@ type Store struct {
 	// Recipe store for content-addressed config snapshots.
 	recipeStore *recipestore.Store
 
-	// Active tool names from last run (for recipe snapshot).
-	lastActiveTools []string
 }
 
 // Options configures a new Store.
@@ -226,8 +224,6 @@ func (s *Store) PersistRunState(
 ) {
 	rec := s.ActiveRecipe()
 	now := time.Now()
-
-	s.lastActiveTools = toolNames
 
 	// Update metadata header fields.
 	s.metadata.LastActiveAt = now
@@ -494,21 +490,23 @@ func (s *Store) RecipeNameLookup() func(string) string {
 		if s.recipeStore == nil {
 			return ""
 		}
-		if snap := s.recipeStore.Get(hash); snap != nil {
-			return snap.Name
+		md := s.recipeStore.Get(hash)
+		if md == "" {
+			return ""
 		}
-		return ""
+		rec, err := recipe.ParseContent([]byte(md))
+		if err != nil {
+			return ""
+		}
+		if rec.Name == "" {
+			return "default"
+		}
+		return rec.Name
 	}
 }
 
 // RecipeStore returns the recipe store (for /stats filter).
 func (s *Store) RecipeStore() *recipestore.Store { return s.recipeStore }
-
-// LastActiveTools returns the tool names from the last run.
-func (s *Store) LastActiveTools() []string { return s.lastActiveTools }
-
-// SetLastActiveTools sets the last active tool names (used after run complete).
-func (s *Store) SetLastActiveTools(names []string) { s.lastActiveTools = names }
 
 // ── Recipe State ────────────────────────────────────────────────────────────
 
@@ -529,26 +527,19 @@ func (s *Store) ActiveRecipe() *recipe.Recipe {
 	return s.baseRecipe
 }
 
-// ── Recipe Snapshot ─────────────────────────────────────────────────────────
+// ── Recipe Hash ─────────────────────────────────────────────────────────────
 
-// BuildRecipeSnapshot creates a RecipeSnapshot from the active recipe and
-// the last active tools.
-func (s *Store) BuildRecipeSnapshot() *recipestore.RecipeSnapshot {
-	rec := s.ActiveRecipe()
-	if rec == nil {
-		return &recipestore.RecipeSnapshot{Name: "default"}
-	}
-	return recipestore.SnapshotFromRecipe(rec, s.lastActiveTools)
-}
-
-// RecipeHash computes a content-addressed hash for the active recipe snapshot.
-// Returns "" if no recipe store is configured.
+// RecipeHash computes a content-addressed hash for the active recipe markdown.
+// Returns "" if no recipe store is configured or no recipe is active.
 func (s *Store) RecipeHash() string {
 	if s.recipeStore == nil {
 		return ""
 	}
-	snap := s.BuildRecipeSnapshot()
-	return s.recipeStore.Put(snap)
+	rec := s.ActiveRecipe()
+	if rec == nil {
+		return ""
+	}
+	return s.recipeStore.Put(rec.MarshalMarkdown())
 }
 
 // ── Selection / Rating Recording ────────────────────────────────────────────

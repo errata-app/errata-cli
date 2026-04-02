@@ -30,7 +30,6 @@ import (
 	"github.com/errata-app/errata-cli/internal/runner"
 	"github.com/errata-app/errata-cli/internal/sandbox"
 	"github.com/errata-app/errata-cli/internal/tools"
-	"github.com/errata-app/errata-cli/pkg/recipestore"
 )
 
 // Options controls headless execution behaviour.
@@ -223,7 +222,7 @@ func Run(ctx context.Context, opts *Options) (*RunReport, error) {
 
 	summary := buildSummary(taskResults, parsedCriteria, totalCost)
 
-	configHash := recipestore.Hash(recipestore.SnapshotFromRecipe(rec, toolNameList(activeDefs)))
+	configHash := rec.ConfigHash()
 
 	headlessReport := &RunReport{
 		ID:         reportID,

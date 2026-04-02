@@ -739,6 +739,8 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 	store := a.store
 	privacy := api.LoadPrivacy()
 
+	recipeStore := a.store.RecipeStore()
+
 	app, printCmd := a.withMessage("Syncing…")
 	return app, tea.Batch(printCmd, func() tea.Msg {
 		since := api.LoadLastSync()
@@ -749,6 +751,19 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 		payload := api.PreferenceUpload{Sessions: sessions}
 		if rec := store.ActiveRecipe(); rec != nil {
 			payload.Recipe = rec.MarshalMarkdown()
+		}
+		// Populate Recipes map with all referenced config hashes.
+		if recipeStore != nil {
+			hashes := session.CollectConfigHashes(sessions)
+			recipes := make(map[string]string, len(hashes))
+			for _, h := range hashes {
+				if md := recipeStore.Get(h); md != "" {
+					recipes[h] = md
+				}
+			}
+			if len(recipes) > 0 {
+				payload.Recipes = recipes
+			}
 		}
 		if privacy.Mode == api.PrivacyFull {
 			sessionIDs := make([]string, len(sessions))

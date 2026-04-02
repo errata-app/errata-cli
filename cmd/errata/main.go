@@ -635,10 +635,18 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	rs := recipestore.New(layout.RecipeStorePath)
 	nameLookup := func(hash string) string {
-		if snap := rs.Get(hash); snap != nil {
-			return snap.Name
+		md := rs.Get(hash)
+		if md == "" {
+			return ""
 		}
-		return ""
+		rec, err := recipe.ParseContent([]byte(md))
+		if err != nil {
+			return ""
+		}
+		if rec.Name == "" {
+			return "default"
+		}
+		return rec.Name
 	}
 
 	sessions := session.CollectForUpload(layout.Sessions, since, nameLookup)
@@ -658,6 +666,18 @@ func runSync(cmd *cobra.Command, args []string) error {
 	// Add recipe markdown from the active recipe if available.
 	rec := loadRecipe()
 	payload.Recipe = rec.MarshalMarkdown()
+
+	// Populate Recipes map with all referenced config hashes.
+	hashes := session.CollectConfigHashes(sessions)
+	recipes := make(map[string]string, len(hashes))
+	for _, h := range hashes {
+		if md := rs.Get(h); md != "" {
+			recipes[h] = md
+		}
+	}
+	if len(recipes) > 0 {
+		payload.Recipes = recipes
+	}
 
 	// Determine whether to include full content.
 	fullFlag, _ := cmd.Flags().GetBool("full")
