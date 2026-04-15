@@ -158,7 +158,9 @@ func TestPreferenceUpload_RoundTrip(t *testing.T) {
 func TestPreferenceUpload_RoundTripWithRecipe(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	payload := PreferenceUpload{
-		Recipe: "# Test Recipe\n\n## Models\n- m1\n",
+		Recipes: map[string]string{
+			"rcp_v1_abc": "# Test Recipe\n\n## Models\n- m1\n",
+		},
 		Sessions: []SessionUpload{
 			{
 				ID:         "ses_cfg",
@@ -172,16 +174,17 @@ func TestPreferenceUpload_RoundTripWithRecipe(t *testing.T) {
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	// Verify JSON shape has "recipe" key.
+	// Verify JSON shape has "recipes" key.
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &raw))
-	assert.Contains(t, raw, "recipe")
+	assert.Contains(t, raw, "recipes")
 	assert.Contains(t, raw, "sessions")
 
 	var got PreferenceUpload
 	require.NoError(t, json.Unmarshal(data, &got))
 
-	assert.Equal(t, "# Test Recipe\n\n## Models\n- m1\n", got.Recipe)
+	require.Len(t, got.Recipes, 1)
+	assert.Equal(t, "# Test Recipe\n\n## Models\n- m1\n", got.Recipes["rcp_v1_abc"])
 	require.Len(t, got.Sessions, 1)
 	assert.Equal(t, "rcp_v1_abc", got.Sessions[0].ConfigHash)
 }
@@ -307,24 +310,9 @@ func TestRunUpload_OmitsContentWhenNil(t *testing.T) {
 	assert.False(t, hasContent, "content should be omitted when nil")
 }
 
-func TestPreferenceUpload_OmitsRecipeWhenEmpty(t *testing.T) {
-	payload := PreferenceUpload{
-		Sessions: []SessionUpload{{ID: "ses_1"}},
-	}
-
-	data, err := json.Marshal(payload)
-	require.NoError(t, err)
-
-	var raw map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(data, &raw))
-	_, hasRecipe := raw["recipe"]
-	assert.False(t, hasRecipe, "recipe should be omitted when empty")
-}
-
 func TestPreferenceUpload_RoundTripWithRecipes(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	payload := PreferenceUpload{
-		Recipe: "# Active Recipe\nversion: 1\n",
 		Recipes: map[string]string{
 			"rcp_abc123": "# Recipe A\nversion: 1\n\n## Models\n- m1\n",
 			"rcp_def456": "# Recipe B\nversion: 1\n\n## Models\n- m2\n",
@@ -349,7 +337,6 @@ func TestPreferenceUpload_RoundTripWithRecipes(t *testing.T) {
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &raw))
 	assert.Contains(t, raw, "recipes")
-	assert.Contains(t, raw, "recipe")
 
 	var got PreferenceUpload
 	require.NoError(t, json.Unmarshal(data, &got))
