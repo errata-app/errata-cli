@@ -751,7 +751,7 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 		payload := api.PreferenceUpload{Sessions: sessions}
 		// Populate Recipes map with all referenced config hashes plus the active recipe.
 		hashes := session.CollectConfigHashes(sessions)
-		recipes := make(map[string]string, len(hashes)+1)
+		recipes := make(map[string]string, len(hashes))
 		if recipeStore != nil {
 			for _, h := range hashes {
 				if md := recipeStore.Get(h); md != "" {

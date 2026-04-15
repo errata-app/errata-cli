@@ -666,7 +666,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	// Populate Recipes map with all referenced config hashes plus the active recipe.
 	rec := loadRecipe()
 	hashes := session.CollectConfigHashes(sessions)
-	recipes := make(map[string]string, len(hashes)+1)
+	recipes := make(map[string]string, len(hashes))
 	for _, h := range hashes {
 		if md := rs.Get(h); md != "" {
 			recipes[h] = md
