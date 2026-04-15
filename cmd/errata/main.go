@@ -663,16 +663,18 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	payload := api.PreferenceUpload{Sessions: sessions}
 
-	// Add recipe markdown from the active recipe if available.
+	// Populate Recipes map with all referenced config hashes plus the active recipe.
 	rec := loadRecipe()
-	payload.Recipe = rec.MarshalMarkdown()
-
-	// Populate Recipes map with all referenced config hashes.
 	hashes := session.CollectConfigHashes(sessions)
-	recipes := make(map[string]string, len(hashes))
+	recipes := make(map[string]string, len(hashes)+1)
 	for _, h := range hashes {
 		if md := rs.Get(h); md != "" {
 			recipes[h] = md
+		}
+	}
+	if md := rec.MarshalMarkdown(); md != "" {
+		if hash := rec.ConfigHash(); hash != "" {
+			recipes[hash] = md
 		}
 	}
 	if len(recipes) > 0 {

@@ -12,7 +12,6 @@ import (
 
 // PreferenceUpload is the bulk upload request body for POST /preferences.
 type PreferenceUpload struct {
-	Recipe   string            `json:"recipe,omitempty"`
 	Recipes  map[string]string `json:"recipes,omitempty"`
 	Sessions []SessionUpload   `json:"sessions"`
 }

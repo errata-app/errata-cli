@@ -749,21 +749,25 @@ func (a App) handleSyncCommand() (tea.Model, tea.Cmd) { //nolint:gocritic // bub
 			return syncCompleteMsg{accepted: 0}
 		}
 		payload := api.PreferenceUpload{Sessions: sessions}
-		if rec := store.ActiveRecipe(); rec != nil {
-			payload.Recipe = rec.MarshalMarkdown()
-		}
-		// Populate Recipes map with all referenced config hashes.
+		// Populate Recipes map with all referenced config hashes plus the active recipe.
+		hashes := session.CollectConfigHashes(sessions)
+		recipes := make(map[string]string, len(hashes)+1)
 		if recipeStore != nil {
-			hashes := session.CollectConfigHashes(sessions)
-			recipes := make(map[string]string, len(hashes))
 			for _, h := range hashes {
 				if md := recipeStore.Get(h); md != "" {
 					recipes[h] = md
 				}
 			}
-			if len(recipes) > 0 {
-				payload.Recipes = recipes
+		}
+		if rec := store.ActiveRecipe(); rec != nil {
+			if md := rec.MarshalMarkdown(); md != "" {
+				if hash := rec.ConfigHash(); hash != "" {
+					recipes[hash] = md
+				}
 			}
+		}
+		if len(recipes) > 0 {
+			payload.Recipes = recipes
 		}
 		if privacy.Mode == api.PrivacyFull {
 			session.MergeContent(sessions, sessionsDir)

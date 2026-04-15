@@ -72,6 +72,7 @@ type RecipeEntry struct {
 	ParserVersion  int            `json:"parser_version"`
 	CreatedAt      string         `json:"created_at"`
 	UpdatedAt      string         `json:"updated_at"`
+	Public         bool           `json:"public"`
 	AuthorUsername string         `json:"author_username"`
 }
 
