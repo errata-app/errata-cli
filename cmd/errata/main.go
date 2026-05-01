@@ -65,7 +65,6 @@ func main() {
 	runCmd.Flags().Bool("json", false, "Print report to stdout as JSON")
 	runCmd.Flags().String("output-dir", "", "Output directory (default: data/outputs/)")
 	runCmd.Flags().Bool("verbose", false, "Show model text events in progress")
-	runCmd.Flags().Bool("full", false, "Upload full report (one-shot override)")
 
 	sessionsCmd := &cobra.Command{
 		Use:   "sessions",
@@ -395,7 +394,6 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 		outputDir = layout.Outputs
 	}
 	verbose, _ := cmd.Flags().GetBool("verbose")
-	fullUpload, _ := cmd.Flags().GetBool("full")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -415,7 +413,6 @@ func runHeadless(cmd *cobra.Command, args []string) error {
 		CheckpointPath: layout.Checkpoint,
 		Verbose:        verbose,
 		JSON:           jsonFlag,
-		FullUpload:     fullUpload,
 		DebugLog:       debugLogPath != "",
 		MCPDefs:        mcpDefs,
 		MCPDispatchers: mcpDispatchers,
